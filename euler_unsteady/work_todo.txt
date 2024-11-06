@@ -1,0 +1,9 @@
+To do
+
+- Implement the non-uniform grid and also the source terms
+- Add a new boundary conditions to simulate flow in nozzle
+- Fix grid for the constant reconstruction case (1st order)
+- Fix grid for linear reconstruction case (2nd order)
+- Improve improve the minmod limiter function
+- Add functions for source term
+- Add source term for area change

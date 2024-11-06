@@ -1,0 +1,26 @@
+boundary_conditions: 
+  p_stagnation: 5e5
+  T_stagnation: 500
+  p_out: 0.5e5
+
+# Numerical settings
+numerical_settings:
+# Define the grid
+  Nx: 1000 # Number of cells
+  x1: 0.00  # Left boundary
+  x2: 14  # Right boundary
+  t1: 0.00  # Initial time
+  t2: 1  # Final time
+  CFL: 0.3 # Maximum allowed local Courant number
+
+nozzle_geometry:
+# Define nozzle area
+  r0: 3
+  rt: 0.5
+
+
+# p_out = 4.55e5 if shock at 25% of diverging section
+# p_out = 3.25e5 if shock at 50% of diverging section
+# p_out = 1.9e5 if shock at 75% of diverging section
+# p_out: 1.1765e5
+# T stagn 500K
