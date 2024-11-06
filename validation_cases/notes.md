@@ -3,7 +3,7 @@
 # Validation cases
 
 ## Perfect gas
-- Hypothetical nozzle at different exit pressures
+- Spinelli nozzle with air at different exit pressures
 - Adequate for modeling of perfect gas conditions. Simple case but verifies the model implementation is correct
 - It is verification, not validation
 
@@ -22,7 +22,7 @@
   - Nozzle might be too small? high friction losses?
   - We should include a friction factor with the Lockhard Martinelli parameter as Carlotta did.
   - Carlotta included several correlations in her study. Identify 1 or 2 that work well?
-- CO2 from Nakagawa data and also Petrucelli simulations
+- CO2 from Berana
   - Experimental data with shock waves at the exit of the nozzle
-  - It is condensation flows, so we cannot claim that it is similar to the conditions in PEORC
+  - It is condensation flows, so we cannot claim that it is similar to the conditions in PEORC? (some are condensation, some are flashing)
   - We could include it to claim that it is validation for the both cases of flashing and condensation?
