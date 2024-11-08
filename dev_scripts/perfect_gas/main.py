@@ -7,7 +7,7 @@ import nozzle_hyperbolic as hyp
 hyp.set_plot_options(grid=False)
 
 # Read YAML file
-with open("euler_adapted_expansion.yaml", 'r') as file:
+with open("flux_solvers_comparison.yaml", 'r') as file:
     case_data = yaml.safe_load(file)
 
 
@@ -42,7 +42,6 @@ gamma = 1.4  # Heat capacity ratio of air
 # rt = case_data["nozzle_geometry"]["rt"]
 L = x2
 # rx = lambda x: (4 * (r0 - rt) / L**2) * (x - L / 2)**2 + rt
-# Path to the Excel file in the common folder
 
 file_path = "nozzles points.xlsx"  # Relative path to the common folder
 sheet_name = "nozzle Ma1.5"  # Adjust as necessary
@@ -72,7 +71,7 @@ parameters['p_out'] = p_out
 
 # Define the initial conditions
 p_o = p_stagnation  # bar
-T_o = 500  # K
+T_o = T_stagnation  # K
 rho_o = p_o / (R * T_o)
 u_o = 0
 rho_stagnation = p_stagnation /(R*T_stagnation)
@@ -95,7 +94,7 @@ parameters['eigenvalues_function'] = lambda q: hyp.perfect_gas.euler_eigenvalues
 parameters['roe_function'] = lambda q_L, q_R: hyp.perfect_gas.euler_roe_matrix(q_L, q_R, gamma)  # Roe matrix
 
 # Compute the numerical solution of the problem
-parameters['space_method'] = 'rusanov'  
+parameters['space_method'] = 'HLL'  
 Q, t = hyp.perfect_gas.fvm_euler_1d(x, t, parameters)
 d_roe = Q[0, :, :]
 u_roe = Q[1, :, :] / Q[0, :, :]
@@ -185,7 +184,7 @@ plt.legend(
     frameon=True
 )
 plt.grid(True)
-
+print(x[i_shock])
 ax1 = plt.gca()
 ax2 = ax1.twinx()
 ax2.plot(x, r, 'k--', linewidth=1.1, label='Nozzle')
@@ -198,10 +197,10 @@ plt.show()
 # A_critical = np.pi * r[len(x) // 2]**2
 # mass_flow= d_roe[len(x)//2, -1]*u_roe[len(x)//2, -1]*A_critical
 
-# np.savez("hll_supersonicd3.npz", x=x, p1=p_roe, rho1=d_roe, u1=u_roe, i_shock=i_shock)
-# np.savez("exact_supersonicd3.npz", r=r, L=L, x=x, p=p, rho=rho, u=u)
+# np.savez("roe75.npz", x=x, p1=p_roe, rho1=d_roe, u1=u_roe, i_shock=i_shock)
+# np.savez("exact75.npz", r=r, L=L, x=x, p=p, rho=rho, u=u)
 
-cv = R / (gamma - 1)
+# cv = R / (gamma - 1)
 # entropy_generation = cv * (np.log(p_roe[-1, -1] / d_roe[-1, -1]**gamma) - np.log(p_roe[1, -1] / d_roe[1, -1]**gamma))
 # entropy_generation_exact = cv * (np.log(p[-1, -1] / rho[-1, -1]**gamma) - np.log(p[1, -1] / rho[1, -1]**gamma))
 
