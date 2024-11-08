@@ -9,8 +9,8 @@ data = pd.read_excel(main_file)
 colours = ['k', 'g', 'y', 'r', 'b']
 plot_variable = 'pressure'
 
-plt.figure(num=1, figsize=(8, 6))
-plt.figure(num=2, figsize=(8, 6))
+plt.figure(num=1, figsize=(6, 5))
+plt.figure(num=2, figsize=(6, 5))
 
 for i, row in data.iterrows():
     file_pressure = row["file_pressure"]

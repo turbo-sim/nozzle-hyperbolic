@@ -78,7 +78,7 @@ def fvm_euler_1d(x, t, parameters):
     h0 = stagnation_state.hmass
 
     # Define threshold for steady state
-    steady_state_threshold = 1e-6
+    steady_state_threshold = 1e-5
     max_iterations = 100000
     n = 0
     warmup_iterations = 50
@@ -144,8 +144,6 @@ def fvm_euler_1d(x, t, parameters):
             # For supersonic flow, simply extrapolate values from the interior
             Q[2, -1, n] = 2 * Q[2, -2, n] * A_nodes[-2] / A_nodes[-1] - Q[2, -3, n] * A_nodes[-3] / A_nodes[-1]  
             p[-1] = p[-2]
-
-        print(Ma_out)
         
         parameters['p'] = p
 
@@ -176,6 +174,7 @@ def fvm_euler_1d(x, t, parameters):
             delta_Q = np.max(np.abs(Q[1, 1:-1, n+1] - Q[1, 1:-1, n]) / np.abs(Q[1, 1:-1, n+1]))
             if n % 25 == 0:
                 print(f"Iteration {n}: delta_Q = {delta_Q:0.4e}")
+                print(Ma_out)
             # Check for steady state after warm-up
             if delta_Q < steady_state_threshold:
                 print(f"Steady-state reached after {t[n]} s")
