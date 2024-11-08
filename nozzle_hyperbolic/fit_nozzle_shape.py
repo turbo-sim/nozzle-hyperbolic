@@ -60,8 +60,8 @@ def fit_nozzle_shape(file_path, sheet_name, degree):
         raise ValueError(f"Error reading the sheet: {sheet_name}. {e}")
 
     # Extract data points
-    x = data['x0'].values  # Ensure the column names match your Excel file
-    y = data['y0'].values  # Ensure the column names match your Excel file
+    x = data['x'].values  # Ensure the column names match your Excel file
+    y = data['y'].values  # Ensure the column names match your Excel file
 
     # Fit the data to a high-degree polynomial
     coefficients = np.polyfit(x, y, degree)
@@ -114,8 +114,8 @@ if __name__ == "__main__":
 
     # Extract data for plotting
     data = pd.read_excel(file_path, sheet_name=sheet_name)
-    x = data['x0'].values
-    y = data['y0'].values
+    x = data['x'].values
+    y = data['y'].values
 
     # Plot the nozzle shape
     plot_nozzle_shape(x, y, polynomial, degree)
