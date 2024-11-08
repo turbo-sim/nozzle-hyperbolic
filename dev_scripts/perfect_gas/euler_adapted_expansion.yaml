@@ -1,8 +1,8 @@
 boundary_conditions: 
-  p_stagnation: 5e5
-  T_stagnation: 500
+  p_stagnation: 4.59e5
+  T_stagnation: 530
   # p_out: 2.8e5
-  p_out: 3.5e5
+  p_out: 0.5e5
 
   # p_out: 0.53538e5
 
@@ -11,8 +11,9 @@ numerical_settings:
 # Define the grid
   Nx: 300 # Number of cells
   x1: 0.00  # Left boundary
-  x2: 1  # Right boundary
-  t1: 0.00  # Initial time
+  x2: 14.57  # Ma1.5
+  # x2: 20.50  # Ma2  t1: 0.00  # Initial time
+  t1: 0
   t2: 10  # Final time
   CFL: 0.5 # Maximum allowed local Courant number
 
