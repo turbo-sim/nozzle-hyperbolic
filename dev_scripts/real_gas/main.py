@@ -57,15 +57,16 @@ L = x2
 # A_nodes = rx(x)**2 * np.pi
 
 file_path = "nozzles points.xlsx"  # Relative path to the common folder
-sheet_name = "nozzle Ma1.5"  # Adjust as necessary
+sheet_name = "nozzle Ma2"  # Adjust as necessary
 degree = 12  # Degree of the polynomial
 
 # Fit the nozzle shape using the shared function
 coefficients, polynomial = hyp.fit_nozzle_shape(file_path, sheet_name, degree)  # Fit nozzle shape
 
-rx = polynomial
-r = polynomial(x)
-A_nodes = r**2 * np.pi
+hx = polynomial
+h = polynomial(x)
+depth = 0.5
+A_nodes = 2*h*depth
 parameters = {'A_nodes': A_nodes}
 parameters['dx'] = dx
 # plt.plot(x, A_nodes)
@@ -97,13 +98,13 @@ parameters = {}
 parameters['pT_stagnation'] = pT_stagnation
 parameters['p_out'] = p_out
 parameters['dx'] = dx
-# parameters['gamma'] = gamma
+parameters['depth'] = depth
 parameters['A_nodes'] = A_nodes
 # parameters['R_const'] = R_const
 parameters['fluid_name'] = fluid_name
 parameters['N_eq'] = 3  # Number of equations of the hyperbolic system
 parameters['CFL'] = CFL  # Maximum allowed Courant number
-parameters['r_function'] = rx  # Function describing the radius along nozzle axis
+parameters['r_function'] = hx  # Function describing the radius along nozzle axis
 parameters['Q_o'] = Q_o  # Initial condition function
 parameters['time_method'] = 'euler'  # Choose: 'euler', 'RK3', or 'RK4'
 parameters['reconstruction'] = 'constant'  # Choose: 'constant' or 'linear'
@@ -112,7 +113,7 @@ parameters['eigenvalues_function'] = lambda q: hyp.real_gas.euler_eigenvalues(q,
 parameters['roe_function'] = lambda q_L, q_R, p_L, p_R: hyp.real_gas.euler_roe_matrix(q_L, q_R, p_L, p_R, fluid)  # Roe matrix
 
 # Compute the numerical solution of the problem
-parameters['space_method'] = 'HLLC'  
+parameters['space_method'] = 'rusanov'  
 Q, t = hyp.real_gas.fvm_euler_1d(x, t, parameters)
 d_rusanov = Q[0, :, -1]  # Density at the last time step
 u_rusanov = Q[1, :, -1] / Q[0, :, -1]  # Velocity at the last time step
@@ -128,7 +129,7 @@ for j in range(len(d_rusanov)):
 print("Rusanov computed")
 
 # Re-initialize A_nodes length for the next flux function
-A_nodes = r**2 * np.pi
+A_nodes = 2*h*depth
 parameters['A_nodes'] = A_nodes
 
 # Compute exact solution 
@@ -139,14 +140,14 @@ plt.figure(figsize=(6, 5))
 plt.title('Density Profile')
 plt.xlabel('Position (x)')
 plt.ylabel('Density')
-plt.plot(x, r, 'go-', linewidth=0.75, markersize=4, markerfacecolor='w', label='Numerical Solution - Roe')
+plt.plot(x, h, 'go-', linewidth=0.75, markersize=4, markerfacecolor='w', label='Numerical Solution - Roe')
 plt.legend(loc='upper left', bbox_to_anchor=(1, 1)) 
 plt.grid(True)
 
 # Add the second y-axis for the nozzle area
 ax1 = plt.gca()
 ax2 = ax1.twinx()
-ax2.plot(x, r, 'k--', linewidth=1.1, label='Nozzle')
+ax2.plot(x, h, 'k--', linewidth=1.1, label='Nozzle')
 ax2.set_ylabel('Nozzle Radius [m]')
 ax2.set_ylim([0, L])
 
@@ -162,23 +163,26 @@ plt.grid(True)
 # Add the second y-axis for the nozzle area
 ax1 = plt.gca()
 ax2 = ax1.twinx()
-ax2.plot(x, r, 'k--', linewidth=1.1, label='Nozzle cross section')
+ax2.plot(x, h, 'k--', linewidth=1.1, label='Nozzle cross section')
 ax2.set_ylabel('Nozzle Radius [m]')
 ax2.set_ylim([0, L])
 
+x_exp = [8.24, 10.27, 12.30, 14.33]
+p_exp = [0.84, 0.62, 0.37, 0.28]
 # Plot the Pressure Profile
 plt.figure(figsize=(8, 6))
 plt.title('Pressure Profile')
 plt.xlabel('Position (x)')
 plt.ylabel('Pressure')
-plt.plot(x, p_rusanov, 'go-', linewidth=0.75, markersize=4, markerfacecolor='w', label='Numerical Solution - Roe')
+plt.plot(x, p_rusanov/p_stagnation, 'go-', linewidth=0.75, markersize=4, markerfacecolor='w', label='Numerical Solution - Roe')
+plt.plot(x_exp, p_exp, 'ro')
 plt.legend(loc='upper left', bbox_to_anchor=(1, 1)) 
 plt.grid(True)
 
 # Add the second y-axis for the nozzle area
 ax1 = plt.gca()
 ax2 = ax1.twinx()
-ax2.plot(x, r, 'k--', linewidth=1.1, label='Nozzle cross section')
+ax2.plot(x, h, 'k--', linewidth=1.1, label='Nozzle cross section')
 ax2.set_ylabel('Nozzle Area [m²]')
 ax2.set_ylim([0, L])
 
