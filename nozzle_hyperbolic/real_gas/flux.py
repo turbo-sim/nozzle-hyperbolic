@@ -1,5 +1,5 @@
 import numpy as np
-from .. import fluid_properties
+from nozzle_hyperbolic.fluid_model_barotropy.properties import fluid_properties
 
 def F_Rusanov(Q_L, Q_R, parameters):
     p = parameters['p']  # Pressure, pre-computed before calling this function
