@@ -60,8 +60,8 @@ def fit_nozzle_shape(file_path, sheet_name, degree):
         raise ValueError(f"Error reading the sheet: {sheet_name}. {e}")
 
     # Extract data points
-    x = data['x'].values  # Ensure the column names match your Excel file
-    y = data['y'].values  # Ensure the column names match your Excel file
+    x = data['x1'].values  # Ensure the column names match your Excel file
+    y = data['y1'].values  # Ensure the column names match your Excel file
 
     # Fit the data to a high-degree polynomial
     coefficients = np.polyfit(x, y, degree)
@@ -132,19 +132,26 @@ def define_radius_function(lengths, radii):
     
     return radius_function
 
+# To test the new interpolation functions
 if __name__ == "__main__":
     # This block will only run when this script is executed directly
-    file_path = 'nozzles points.xlsx'
-    sheet_name = 'nozzle Ma1.5'  # Adjust as necessary
-    degree = 12
+    # file_path = 'nozzles points.xlsx'
+    # sheet_name = 'nozzle Ma1.5'  # Adjust as necessary
+    # degree = 12
 
     # Fit the nozzle shape
-    coefficients, polynomial = fit_nozzle_shape(file_path, sheet_name, degree)
+    # coefficients, polynomial = fit_nozzle_shape(file_path, sheet_name, degree)
 
     # Extract data for plotting
-    data = pd.read_excel(file_path, sheet_name=sheet_name)
-    x = data['x'].values
-    y = data['y'].values
+    # data = pd.read_excel(file_path, sheet_name=sheet_name)
+    lenghts = [0, 1, 2, 3]
+    radius = [0.5, 0.2, 0.2, 0.3]
+    radius_function = define_radius_function(lenghts, radius)
+    x = np.linspace(0, 3,100)
+    y = np.zeros_like(x)
 
-    # Plot the nozzle shape
-    plot_nozzle_shape(x, y, polynomial, degree)
+    for j in range(len(y)):
+        y[j] = radius_function(x[j])
+
+    plt.plot(x,y)
+    plt.show()

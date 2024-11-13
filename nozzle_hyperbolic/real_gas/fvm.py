@@ -1,5 +1,5 @@
 import numpy as np
-from nozzle_hyperbolic.fluid_model_barotropy.properties import fluid_properties
+from .. import fluid_properties
 from .flux import *
 
 def euler_eigenvalues(Q, fluid, parameters):
@@ -73,12 +73,11 @@ def fvm_euler_1d(x, t, parameters):
     fluid_name = parameters['fluid_name']
     fluid = fluid_properties.Fluid(fluid_name)
     stagnation_state = fluid.set_state(fluid_properties.PT_INPUTS, p_stagnation, T_stagnation)
-    cp_stagnation = stagnation_state.cpmass
-    s0 = stagnation_state.smass
-    h0 = stagnation_state.hmass
+    s0 = stagnation_state.s
+    h0 = stagnation_state.h
 
     # Define threshold for steady state
-    steady_state_threshold = 1e-5
+    steady_state_threshold = 1e-6
     max_iterations = 100000
     n = 0
     warmup_iterations = 50
@@ -93,10 +92,10 @@ def fvm_euler_1d(x, t, parameters):
 
         #Compute the inlet Mach number and static inlet conditions
         h = h0 - 0.5*u_in**2
-        static_state = fluid.set_state(fluid_properties.HmassSmass_INPUTS,h, s0)
+        static_state = fluid.set_state(fluid_properties.HmassSmass_INPUTS, h, s0)
         rho_static = static_state.rhomass
-        a_static = static_state.speed_sound
-        M_in = u_in / a_static
+        # a_static = static_state.speed_sound
+        # M_in = u_in / a_static
 
         # Inlet boundary condition
         Q[0, 0, n] = rho_static
@@ -118,7 +117,7 @@ def fvm_euler_1d(x, t, parameters):
 
         p = np.zeros(Q.shape[1])  # Initialize pressure array
         c = np.zeros(Q.shape[1])  # Initialize pressure array 
-        for j in range(Q.shape[1]-1):
+        for j in range(Q.shape[1]):
             rho = Q[0, j, n]  # Density at cell j
             u = Q[1, j, n] / rho  # Velocity at cell j
             try:
@@ -132,6 +131,8 @@ def fvm_euler_1d(x, t, parameters):
 
             p[j] = internal_state.p
             c[j] = internal_state.speed_sound
+            
+        # Q[2, -1, n] = 2 * Q[2, -2, n] * A_nodes[-2] / A_nodes[-1] - Q[2, -3, n] * A_nodes[-3] / A_nodes[-1]  
 
         # Subsonic Outlet Boundary Condition
         if Ma_out < 1:
@@ -143,8 +144,8 @@ def fvm_euler_1d(x, t, parameters):
         else:
             # For supersonic flow, simply extrapolate values from the interior
             Q[2, -1, n] = 2 * Q[2, -2, n] * A_nodes[-2] / A_nodes[-1] - Q[2, -3, n] * A_nodes[-3] / A_nodes[-1]  
-            p[-1] = p[-2]
-        
+
+
         parameters['p'] = p
 
         # Compute source term
