@@ -103,6 +103,35 @@ def nozzle_shape(x, polynomial):
     """
     return polynomial(x)
 
+def define_radius_function(lengths, radii):
+    """
+    Creates a function that returns the radius at a given length x
+    based on three straight-line segments defined by lengths and radii.
+
+    Parameters:
+    - lengths: List of length values (e.g., [L1, L2, L3, L4])
+    - radii: List of corresponding radius values (e.g., [R1, R2, R3, R4])
+
+    Returns:
+    - radius_function: A function that takes x and returns the radius at x
+    """
+    # Calculate slopes and intercepts for each segment
+    slopes = [(radii[i+1] - radii[i]) / (lengths[i+1] - lengths[i]) for i in range(3)]
+    intercepts = [radii[i] - slopes[i] * lengths[i] for i in range(3)]
+
+    # Define the piecewise radius function
+    def radius_function(x):
+        if lengths[0] <= x < lengths[1]:
+            return slopes[0] * x + intercepts[0]
+        elif lengths[1] <= x < lengths[2]:
+            return slopes[1] * x + intercepts[1]
+        elif lengths[2] <= x <= lengths[3]:
+            return slopes[2] * x + intercepts[2]
+        else:
+            raise ValueError("x is outside the defined length range.")
+    
+    return radius_function
+
 if __name__ == "__main__":
     # This block will only run when this script is executed directly
     file_path = 'nozzles points.xlsx'
