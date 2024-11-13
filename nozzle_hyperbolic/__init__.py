@@ -12,7 +12,7 @@ else:
 
 
 
-from .fluid_properties import *
+from nozzle_hyperbolic.fluid_model_barotropy.properties import fluid_properties
 from .functions import *
 from .fit_nozzle_shape import *
 

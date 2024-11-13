@@ -1,5 +1,5 @@
 import numpy as np
-from .. import fluid_properties
+from nozzle_hyperbolic.fluid_model_barotropy.properties import fluid_properties
 from .flux import *
 
 def euler_eigenvalues(Q, fluid, parameters):
