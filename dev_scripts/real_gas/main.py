@@ -23,7 +23,6 @@ hyp.print_dict(case_data)
 
 # Define the computational problem
 # Define fluid
-# fluid_name = "nitrogen"
 fluid_name = "MDM"
 fluid = hyp.fluid_properties.Fluid(fluid_name)
 
@@ -45,19 +44,12 @@ t = np.array([t1, t2])  # Time vector
 # Define the CFL condition
 CFL = case_data["numerical_settings"]["CFL"]  # Maximum allowed local Courant number
 
-# # Define the properties of the gas
-# R_const = 287.00  # Gas constant of air
-# gamma = 1.4  # Heat capacity ratio of air
-
 # Define nozzle area
-r0 = case_data["nozzle_geometry"]["r0"]
-rt = case_data["nozzle_geometry"]["rt"]
 L = x2
-# r = lambda x: (r0 - rt) * (x - L / 2)**2 + rt
-# A_nodes = rx(x)**2 * np.pi
 
+## Spinelli
 file_path = "nozzles points.xlsx"  # Relative path to the common folder
-sheet_name = "nozzle Ma2"  # Adjust as necessary
+sheet_name = "nozzle Ma1.5"  # Adjust as necessary
 degree = 12  # Degree of the polynomial
 
 # Fit the nozzle shape using the shared function
@@ -65,8 +57,23 @@ coefficients, polynomial = hyp.fit_nozzle_shape(file_path, sheet_name, degree)  
 
 hx = polynomial
 h = polynomial(x)
-depth = 0.5
-A_nodes = 2*h*depth
+depth = 1
+A_nodes = h*depth
+
+## Simoneau
+# R = [0.011261088563105, 0.0017775, 0.0017775, 0.016312752388279]
+# L = [0, 0.07965, (0.07965+0.01135), (0.07965+0.01135+0.22)]
+# radius_function = hyp.define_radius_function(L, R)
+# r = np.zeros_like(x)
+
+# for j in range(len(r)):
+#     r[j] = radius_function(x[j])
+
+
+# A_nodes = r**2*np.pi
+# plt.plot(x, r)
+# plt.show()
+
 parameters = {'A_nodes': A_nodes}
 parameters['dx'] = dx
 # plt.plot(x, A_nodes)
@@ -98,13 +105,13 @@ parameters = {}
 parameters['pT_stagnation'] = pT_stagnation
 parameters['p_out'] = p_out
 parameters['dx'] = dx
-parameters['depth'] = depth
+# parameters['depth'] = depth
 parameters['A_nodes'] = A_nodes
 # parameters['R_const'] = R_const
 parameters['fluid_name'] = fluid_name
 parameters['N_eq'] = 3  # Number of equations of the hyperbolic system
 parameters['CFL'] = CFL  # Maximum allowed Courant number
-parameters['r_function'] = hx  # Function describing the radius along nozzle axis
+parameters['r_function'] = h  # Function describing the radius along nozzle axis
 parameters['Q_o'] = Q_o  # Initial condition function
 parameters['time_method'] = 'euler'  # Choose: 'euler', 'RK3', or 'RK4'
 parameters['reconstruction'] = 'constant'  # Choose: 'constant' or 'linear'
@@ -119,28 +126,47 @@ d_rusanov = Q[0, :, -1]  # Density at the last time step
 u_rusanov = Q[1, :, -1] / Q[0, :, -1]  # Velocity at the last time step
 e_rusanov = (Q[2, :, -1] / Q[0, :, -1]) - 0.5 * (Q[1, :, -1] / Q[0, :, -1])**2  # Specific internal energy at last time step
 p_rusanov = np.zeros_like(d_rusanov)  # Initialize pressure array for the last time step
+a_sound = np.zeros_like(d_rusanov)
+s = np.zeros_like(d_rusanov)
 
 # Loop through each cell to set the state and retrieve pressure at the last time step
 for j in range(len(d_rusanov)):
     # Set the fluid state using density and specific internal energy at the last time step
     state = fluid.set_state(hyp.DmassUmass_INPUTS, d_rusanov[j], e_rusanov[j])
     p_rusanov[j] = state.p  # Access 'p' from the FluidState dictionary-like object
+    a_sound[j] = state.speed_sound
+    s[j] = state.s
+
+
+fluid = hyp.Fluid(fluid_name)
+stagnation_state = fluid.set_state(hyp.PT_INPUTS, p_stagnation, T_stagnation)
+s0 = stagnation_state.s
+h0 = stagnation_state.h
+
+rho2 = np.zeros_like(d_rusanov)
+for j in range(len(d_rusanov)):
+    # Set the fluid state using density and specific internal energy at the last time step
+    state = fluid.set_state(hyp.PSmass_INPUTS, p_rusanov[j], s0)
+    rho2[j] = state.rho
 
 print("Rusanov computed")
 
-# Re-initialize A_nodes length for the next flux function
-A_nodes = 2*h*depth
-parameters['A_nodes'] = A_nodes
-
-# Compute exact solution 
-total_bc = np.array([T_stagnation, p_stagnation])
+# Plot the Density Profile
+plt.figure(figsize=(6, 5))
+plt.title('Entropy Profile')
+plt.xlabel('Position (x)')
+plt.ylabel('entropy')
+plt.plot(x, s, 'go-', linewidth=0.75, markersize=4, markerfacecolor='w', label='Numerical Solution - Roe')
+plt.legend(loc='upper left', bbox_to_anchor=(1, 1)) 
+plt.grid(True)
 
 # Plot the Density Profile
 plt.figure(figsize=(6, 5))
 plt.title('Density Profile')
 plt.xlabel('Position (x)')
 plt.ylabel('Density')
-plt.plot(x, h, 'go-', linewidth=0.75, markersize=4, markerfacecolor='w', label='Numerical Solution - Roe')
+plt.plot(x, d_rusanov, 'go-', linewidth=0.75, markersize=4, markerfacecolor='w', label='Numerical Solution - Roe')
+plt.plot(x, rho2, 'go-', linewidth=0.75, markersize=4, markerfacecolor='w', label='Numerical Solution - Roe')
 plt.legend(loc='upper left', bbox_to_anchor=(1, 1)) 
 plt.grid(True)
 
@@ -174,7 +200,7 @@ plt.figure(figsize=(8, 6))
 plt.title('Pressure Profile')
 plt.xlabel('Position (x)')
 plt.ylabel('Pressure')
-plt.plot(x, p_rusanov/p_stagnation, 'go-', linewidth=0.75, markersize=4, markerfacecolor='w', label='Numerical Solution - Roe')
+plt.plot(x, p_rusanov, 'go-', linewidth=0.75, markersize=4, markerfacecolor='w', label='Numerical Solution - Roe')
 plt.plot(x_exp, p_exp, 'ro')
 plt.legend(loc='upper left', bbox_to_anchor=(1, 1)) 
 plt.grid(True)
@@ -189,3 +215,4 @@ ax2.set_ylim([0, L])
 plt.tight_layout()
 plt.show()
 
+np.savez("rusanov_Ma2_Z098.npz", h=h, x=x, a=a_sound, p=p_rusanov, rho=d_rusanov, u=u_rusanov)
