@@ -132,18 +132,18 @@ def fvm_euler_1d(x, t, parameters):
             p[j] = internal_state.p
             c[j] = internal_state.speed_sound
             
-        # Q[2, -1, n] = 2 * Q[2, -2, n] * A_nodes[-2] / A_nodes[-1] - Q[2, -3, n] * A_nodes[-3] / A_nodes[-1]  
+        Q[2, -1, n] = 2 * Q[2, -2, n] * A_nodes[-2] / A_nodes[-1] - Q[2, -3, n] * A_nodes[-3] / A_nodes[-1]  
 
-        # Subsonic Outlet Boundary Condition
-        if Ma_out < 1:
-            # Set outlet pressure (subsonic flow assumes we control the pressure at the outlet)
-            outlet_state = fluid.set_state(fluid_properties.DmassP_INPUTS, rho_outlet, p_out)
-            e_outlet = outlet_state.umass  # Internal energy per unit mass
-            Q[2, -1, n] = e_outlet * rho_outlet + 0.5 * rho_outlet * u_outlet**2  # Total energy
-            p[-1] = p_out
-        else:
-            # For supersonic flow, simply extrapolate values from the interior
-            Q[2, -1, n] = 2 * Q[2, -2, n] * A_nodes[-2] / A_nodes[-1] - Q[2, -3, n] * A_nodes[-3] / A_nodes[-1]  
+        # # Subsonic Outlet Boundary Condition
+        # if Ma_out < 1:
+        #     # Set outlet pressure (subsonic flow assumes we control the pressure at the outlet)
+        #     outlet_state = fluid.set_state(fluid_properties.DmassP_INPUTS, rho_outlet, p_out)
+        #     e_outlet = outlet_state.umass  # Internal energy per unit mass
+        #     Q[2, -1, n] = e_outlet * rho_outlet + 0.5 * rho_outlet * u_outlet**2  # Total energy
+        #     p[-1] = p_out
+        # else:
+        #     # For supersonic flow, simply extrapolate values from the interior
+        #     Q[2, -1, n] = 2 * Q[2, -2, n] * A_nodes[-2] / A_nodes[-1] - Q[2, -3, n] * A_nodes[-3] / A_nodes[-1]  
 
 
         parameters['p'] = p

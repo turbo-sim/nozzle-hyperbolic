@@ -120,7 +120,7 @@ parameters['eigenvalues_function'] = lambda q: hyp.real_gas.euler_eigenvalues(q,
 parameters['roe_function'] = lambda q_L, q_R, p_L, p_R: hyp.real_gas.euler_roe_matrix(q_L, q_R, p_L, p_R, fluid)  # Roe matrix
 
 # Compute the numerical solution of the problem
-parameters['space_method'] = 'rusanov'  
+parameters['space_method'] = 'HLL'  
 Q, t = hyp.real_gas.fvm_euler_1d(x, t, parameters)
 d_rusanov = Q[0, :, -1]  # Density at the last time step
 u_rusanov = Q[1, :, -1] / Q[0, :, -1]  # Velocity at the last time step
@@ -128,6 +128,7 @@ e_rusanov = (Q[2, :, -1] / Q[0, :, -1]) - 0.5 * (Q[1, :, -1] / Q[0, :, -1])**2  
 p_rusanov = np.zeros_like(d_rusanov)  # Initialize pressure array for the last time step
 a_sound = np.zeros_like(d_rusanov)
 s = np.zeros_like(d_rusanov)
+compressibility_Z = np.zeros_like(d_rusanov)
 
 # Loop through each cell to set the state and retrieve pressure at the last time step
 for j in range(len(d_rusanov)):
@@ -136,18 +137,7 @@ for j in range(len(d_rusanov)):
     p_rusanov[j] = state.p  # Access 'p' from the FluidState dictionary-like object
     a_sound[j] = state.speed_sound
     s[j] = state.s
-
-
-fluid = hyp.Fluid(fluid_name)
-stagnation_state = fluid.set_state(hyp.PT_INPUTS, p_stagnation, T_stagnation)
-s0 = stagnation_state.s
-h0 = stagnation_state.h
-
-rho2 = np.zeros_like(d_rusanov)
-for j in range(len(d_rusanov)):
-    # Set the fluid state using density and specific internal energy at the last time step
-    state = fluid.set_state(hyp.PSmass_INPUTS, p_rusanov[j], s0)
-    rho2[j] = state.rho
+    compressibility_Z[j] = state.compressibility_factor
 
 print("Rusanov computed")
 
@@ -156,7 +146,7 @@ plt.figure(figsize=(6, 5))
 plt.title('Entropy Profile')
 plt.xlabel('Position (x)')
 plt.ylabel('entropy')
-plt.plot(x, s, 'go-', linewidth=0.75, markersize=4, markerfacecolor='w', label='Numerical Solution - Roe')
+plt.plot(x, compressibility_Z, 'go-', linewidth=0.75, markersize=4, markerfacecolor='w', label='Numerical Solution - Roe')
 plt.legend(loc='upper left', bbox_to_anchor=(1, 1)) 
 plt.grid(True)
 
@@ -166,7 +156,6 @@ plt.title('Density Profile')
 plt.xlabel('Position (x)')
 plt.ylabel('Density')
 plt.plot(x, d_rusanov, 'go-', linewidth=0.75, markersize=4, markerfacecolor='w', label='Numerical Solution - Roe')
-plt.plot(x, rho2, 'go-', linewidth=0.75, markersize=4, markerfacecolor='w', label='Numerical Solution - Roe')
 plt.legend(loc='upper left', bbox_to_anchor=(1, 1)) 
 plt.grid(True)
 
