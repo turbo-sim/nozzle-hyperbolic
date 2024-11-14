@@ -11,7 +11,7 @@ else:
 
 
 
-from .fluid_properties import *
+from barotropy import *
 from .functions import *
 from .fit_nozzle_shape import *
 
