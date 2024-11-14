@@ -1,13 +1,8 @@
 import yaml
 import numpy as np
 import matplotlib.pyplot as plt
-# from fvm import *
-# import CoolProp.CoolProp as CP
-# import fluid_properties
-# from fit_nozzle_shape import fit_nozzle_shape
-# from functions import print_dict
-
 import nozzle_hyperbolic as hyp
+import barotropy as bpy
 
 hyp.set_plot_options(grid=False)
 
@@ -23,8 +18,8 @@ hyp.print_dict(case_data)
 
 # Define the computational problem
 # Define fluid
-fluid_name = "MDM"
-fluid = hyp.fluid_properties.Fluid(fluid_name)
+fluid_name = "nitrogen"
+fluid = bpy.Fluid(name=fluid_name, backend="HEOS")
 
 # Define the computational problem
 # Define the grid
@@ -48,33 +43,31 @@ CFL = case_data["numerical_settings"]["CFL"]  # Maximum allowed local Courant nu
 L = x2
 
 ## Spinelli
-file_path = "nozzles points.xlsx"  # Relative path to the common folder
-sheet_name = "nozzle Ma1.5"  # Adjust as necessary
-degree = 12  # Degree of the polynomial
+# file_path = "nozzles points.xlsx"  # Relative path to the common folder
+# sheet_name = "nozzle Ma1.5"  # Adjust as necessary
+# degree = 12  # Degree of the polynomial
 
-# Fit the nozzle shape using the shared function
-coefficients, polynomial = hyp.fit_nozzle_shape(file_path, sheet_name, degree)  # Fit nozzle shape
+# # Fit the nozzle shape using the shared function
+# coefficients, polynomial = hyp.fit_nozzle_shape(file_path, sheet_name, degree)  # Fit nozzle shape
 
-hx = polynomial
-h = polynomial(x)
-depth = 1
-A_nodes = h*depth
+# hx = polynomial
+# h = polynomial(x)
+# depth = 1
+# A_nodes = h*depth
 
 ## Simoneau
-# R = [0.011261088563105, 0.0017775, 0.0017775, 0.016312752388279]
-# L = [0, 0.07965, (0.07965+0.01135), (0.07965+0.01135+0.22)]
-# radius_function = hyp.define_radius_function(L, R)
-# r = np.zeros_like(x)
+R = [0.011261088563105, 0.0017775, 0.0017775, 0.016312752388279]
+L = [0, 0.07965, (0.07965+0.01135), (0.07965+0.01135+0.22)]
+radius_function = hyp.define_radius_function(L, R)
+r = np.zeros_like(x)
 
-# for j in range(len(r)):
-#     r[j] = radius_function(x[j])
+for j in range(len(r)):
+    r[j] = radius_function(x[j])
 
 
-# A_nodes = r**2*np.pi
-# plt.plot(x, r)
-# plt.show()
+A_nodes = r**2*np.pi
 
-parameters = {'A_nodes': A_nodes}
+parameters = {'A_nodes': A_nodes}  
 parameters['dx'] = dx
 # plt.plot(x, A_nodes)
 # plt.show()
@@ -91,7 +84,7 @@ p_out = float(case_data["boundary_conditions"]["p_out"])
 # Define the initial conditions
 p_o = p_stagnation  # bar
 T_o = T_stagnation  # K
-initial_state = fluid.set_state(hyp.fluid_properties.PT_INPUTS, p_o, T_o)
+initial_state = fluid.get_state(bpy.PT_INPUTS, p_o, T_o)
 rho_initial = initial_state.rho
 u_internal_initial = initial_state.umass 
 u_o = 0
@@ -111,7 +104,7 @@ parameters['A_nodes'] = A_nodes
 parameters['fluid_name'] = fluid_name
 parameters['N_eq'] = 3  # Number of equations of the hyperbolic system
 parameters['CFL'] = CFL  # Maximum allowed Courant number
-parameters['r_function'] = h  # Function describing the radius along nozzle axis
+parameters['r_function'] = r  # Function describing the radius along nozzle axis
 parameters['Q_o'] = Q_o  # Initial condition function
 parameters['time_method'] = 'euler'  # Choose: 'euler', 'RK3', or 'RK4'
 parameters['reconstruction'] = 'constant'  # Choose: 'constant' or 'linear'
@@ -133,7 +126,7 @@ compressibility_Z = np.zeros_like(d_rusanov)
 # Loop through each cell to set the state and retrieve pressure at the last time step
 for j in range(len(d_rusanov)):
     # Set the fluid state using density and specific internal energy at the last time step
-    state = fluid.set_state(hyp.DmassUmass_INPUTS, d_rusanov[j], e_rusanov[j])
+    state = fluid.get_state(hyp.DmassUmass_INPUTS, d_rusanov[j], e_rusanov[j])
     p_rusanov[j] = state.p  # Access 'p' from the FluidState dictionary-like object
     a_sound[j] = state.speed_sound
     s[j] = state.s
@@ -162,7 +155,7 @@ plt.grid(True)
 # Add the second y-axis for the nozzle area
 ax1 = plt.gca()
 ax2 = ax1.twinx()
-ax2.plot(x, h, 'k--', linewidth=1.1, label='Nozzle')
+ax2.plot(x, r, 'k--', linewidth=1.1, label='Nozzle')
 ax2.set_ylabel('Nozzle Radius [m]')
 ax2.set_ylim([0, L])
 
@@ -178,7 +171,7 @@ plt.grid(True)
 # Add the second y-axis for the nozzle area
 ax1 = plt.gca()
 ax2 = ax1.twinx()
-ax2.plot(x, h, 'k--', linewidth=1.1, label='Nozzle cross section')
+ax2.plot(x, r, 'k--', linewidth=1.1, label='Nozzle cross section')
 ax2.set_ylabel('Nozzle Radius [m]')
 ax2.set_ylim([0, L])
 
@@ -197,7 +190,7 @@ plt.grid(True)
 # Add the second y-axis for the nozzle area
 ax1 = plt.gca()
 ax2 = ax1.twinx()
-ax2.plot(x, h, 'k--', linewidth=1.1, label='Nozzle cross section')
+ax2.plot(x, r, 'k--', linewidth=1.1, label='Nozzle cross section')
 ax2.set_ylabel('Nozzle Area [m²]')
 ax2.set_ylim([0, L])
 
