@@ -1,5 +1,5 @@
 import numpy as np
-from .. import fluid_properties
+import barotropy as bpy
 
 def F_Rusanov(Q_L, Q_R, parameters):
     p = parameters['p']  # Pressure, pre-computed before calling this function
@@ -56,11 +56,11 @@ def euler_roe_matrix(Q_L, Q_R, p_L, p_R, fluid):
     H_R = (rhoE_R + p_R) / rho_R
 
     # Compute the left state
-    state_L = fluid.set_state(fluid_properties.DmassP_INPUTS, rho_L, p_L)
+    state_L = fluid.get_state(bpy.DmassP_INPUTS, rho_L, p_L)
     c_L = state_L.speed_sound
 
     # Compute the right state
-    state_R = fluid.set_state(fluid_properties.DmassP_INPUTS, rho_R, p_R)
+    state_R = fluid.get_state(bpy.DmassP_INPUTS, rho_R, p_R)
     c_R = state_R.speed_sound
 
 
@@ -73,7 +73,7 @@ def euler_roe_matrix(Q_L, Q_R, p_L, p_R, fluid):
     # Compute averaged state for speed of sound
     avg_rho = (rho_L + rho_R) / 2  # Simple average for density
     avg_p = (p_L + p_R) / 2        # Simple average for pressure
-    state = fluid.set_state(fluid_properties.DmassP_INPUTS, avg_rho, avg_p)
+    state = fluid.get_state(bpy.DmassP_INPUTS, avg_rho, avg_p)
     c = state.speed_sound     # Real-gas speed of sound at averaged state
 
     # Compute the eigenvector matrix
@@ -143,16 +143,16 @@ def F_HLLC(Q_L, Q_R, parameters):
     p_R_star = p_R + rho_R * (S_R - u_R) * (S_M - u_R)
 
     fluid_name = parameters['fluid_name'] 
-    fluid = fluid_properties.Fluid(fluid_name)
-    
+    fluid = bpy.Fluid(name=fluid_name, backend="HEOS")
+
     energy_L_star = np.zeros(Q_L.shape[1])
     energy_R_star = np.zeros(Q_R.shape[1])
 
     for j in range(Q_L.shape[1]):
 
-        state_L = fluid.set_state(fluid_properties.DmassP_INPUTS, rho_L_star[j], p_L_star[j])
+        state_L = fluid.get_state(bpy.DmassP_INPUTS, rho_L_star[j], p_L_star[j])
         energy_L_star[j] = state_L.umass 
-        state_R = fluid.set_state(fluid_properties.DmassP_INPUTS, rho_R_star[j], p_R_star[j])
+        state_R = fluid.get_state(bpy.DmassP_INPUTS, rho_R_star[j], p_R_star[j])
         energy_R_star[j] = state_R.umass 
 
     Q_L_star = np.array([rho_L_star, rho_L_star * u_L_star, energy_L_star * rho_L_star])
