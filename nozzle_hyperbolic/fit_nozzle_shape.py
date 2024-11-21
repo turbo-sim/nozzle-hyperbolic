@@ -37,6 +37,8 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+from scipy.interpolate import CubicSpline
+
 
 def fit_nozzle_shape(file_path, sheet_name, degree):
     """
@@ -60,8 +62,8 @@ def fit_nozzle_shape(file_path, sheet_name, degree):
         raise ValueError(f"Error reading the sheet: {sheet_name}. {e}")
 
     # Extract data points
-    x = data['x1'].values  # Ensure the column names match your Excel file
-    y = data['y1'].values  # Ensure the column names match your Excel file
+    x = data['x'].values  # Ensure the column names match your Excel file
+    y = data['y'].values  # Ensure the column names match your Excel file
 
     # Fit the data to a high-degree polynomial
     coefficients = np.polyfit(x, y, degree)
@@ -69,7 +71,10 @@ def fit_nozzle_shape(file_path, sheet_name, degree):
     # Create the polynomial function
     polynomial = np.poly1d(coefficients)
 
-    return coefficients, polynomial
+    spline = CubicSpline(x, y)
+
+
+    return coefficients, polynomial, spline
 
 def plot_nozzle_shape(x, y, polynomial, degree):
     """
@@ -134,24 +139,47 @@ def define_radius_function(lengths, radii):
 
 # To test the new interpolation functions
 if __name__ == "__main__":
-    # This block will only run when this script is executed directly
-    # file_path = 'nozzles points.xlsx'
-    # sheet_name = 'nozzle Ma1.5'  # Adjust as necessary
-    # degree = 12
+
+    file_path = 'Barana_Conference.xlsx'
+    sheet_name = 'Sheet1'  # Adjust as necessary
+    degree = 8
 
     # Fit the nozzle shape
-    # coefficients, polynomial = fit_nozzle_shape(file_path, sheet_name, degree)
+    coefficients, polynomial, spline = fit_nozzle_shape(file_path, sheet_name, degree)
 
     # Extract data for plotting
-    # data = pd.read_excel(file_path, sheet_name=sheet_name)
-    lenghts = [0, 1, 2, 3]
-    radius = [0.5, 0.2, 0.2, 0.3]
-    radius_function = define_radius_function(lenghts, radius)
-    x = np.linspace(0, 3,100)
-    y = np.zeros_like(x)
+    data = pd.read_excel(file_path, sheet_name=sheet_name)
+    x = np.linspace(0, 23.4, 100)
+    x_spline = np.linspace(25, 35, 800)
+    h_spline = lambda x: spline(x)
+    h = h_spline(x)
 
-    for j in range(len(y)):
-        y[j] = radius_function(x[j])
+    m1 = -(5-0.12)/27.35
+    m2 = (0.195-0.12)/56.15
 
-    plt.plot(x,y)
+    # # Piecewise nozzle shape
+    # def nozzle_shape(x):
+    #     if x <= 25:
+    #         return 5 + m1*x
+    #     elif x > 35:
+    #         return 0.12+m2*(x-27.35)
+    #     else:
+    #         return h_spline(x)
+        
+    # h = np.array([nozzle_shape(x_elem) for x_elem in x])
+
+
+    # lenghts = [0, 1, 2, 3]
+    # radius = [0.5, 0.2, 0.2, 0.3]
+    # radius_function = define_radius_function(lenghts, radius)
+    # y = np.zeros_like(x)
+
+    # for j in range(len(y)):
+    #     y[j] = radius_function(x[j])
+    
+    # ax1 = plt.gca()
+    # ax1.set_ylim([0, 0.75])
+
+    plt.plot(x,h)
+    plt.plot(data.x, data.y, "o", markersize=2)
     plt.show()

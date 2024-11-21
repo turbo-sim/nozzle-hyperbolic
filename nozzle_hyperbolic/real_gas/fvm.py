@@ -1,13 +1,17 @@
 import numpy as np
 from .flux import *
+
+import nozzle_hyperbolic as hyp
 import barotropy as bpy
 
 def euler_eigenvalues(Q, fluid, parameters):
     # Extract variables from the state vector Q
     rho = Q[0, :]        # Density
     rhou = Q[1, :]       # Momentum (rho * u)
+    p = parameters['p']  # Pressure, pre-computed before calling this function
+
+    # Compute velocity
     u = rhou / rho       # Velocity
-    p = parameters["p"]
 
     # Initialize array for speed of sound
     c = np.zeros_like(rho)  # Speed of sound array
@@ -15,8 +19,8 @@ def euler_eigenvalues(Q, fluid, parameters):
     # Loop through each cell to calculate speed of sound using CoolProp
     for i in range(len(rho)):        
         # Set the fluid state using density and internal energy
-        state = fluid.get_state(bpy.DmassP_INPUTS, rho[i], p[i])
-        
+        state = fluid.get_state(bpy.fluid_properties.DmassP_INPUTS, rho[i], p[i])
+
         # Retrieve speed of sound for this state
         c[i] = state.speed_sound
 
@@ -61,7 +65,7 @@ def fvm_euler_1d(x, t, parameters):
     N = parameters['N_eq']  # Number of equations of the system
     Q = np.zeros((N, Nj, 1000))  # Preallocate space for the solution
     Q_o = parameters['Q_o']  # Load the initial condition
-    Q[:, :, 0] = Q_o(x)  # Set the initial condition
+    Q[:, :, 0] = Q_o(x) # Set the initial condition
 
     # Initialize boundary conditions
     p_stagnation = parameters['pT_stagnation'][0]
@@ -69,28 +73,23 @@ def fvm_euler_1d(x, t, parameters):
     p_out = parameters['p_out']
 
     fluid_name = parameters['fluid_name']
-    fluid = bpy.Fluid(name=fluid_name, backend="HEOS")
-    stagnation_state = fluid.get_state(bpy.PT_INPUTS, p_stagnation, T_stagnation)
+    fluid = bpy.fluid_properties.Fluid(fluid_name)
+    stagnation_state = fluid.get_state(bpy.fluid_properties.PT_INPUTS, p_stagnation, T_stagnation)
     s0 = stagnation_state.s
     h0 = stagnation_state.h
+    parameters["s0"] = s0
 
-    # Define phase change process
-    if s0 > fluid.critical_point.s:
-        phase_change = "condensation"
-        Q_onset = 0.99
-        Q_width = 0.01
-    else:
-        phase_change = "evaporation"
-        Q_onset = 0.01
-        Q_width = 0.01
-
-    # Define initial guess
-    rhoT_guess_metastable = [stagnation_state["rho"], stagnation_state["T"]]
-    rhoT_guess_equilibrium = [stagnation_state["rho"], stagnation_state["T"]]
+    # rhoT_guess_metastable = [stagnation_state["rho"], stagnation_state["T"]]
+    # rhoT_guess_equilibrium = [stagnation_state["rho"], stagnation_state["T"]]
+    # phase_change = parameters["phase_change"]
+    # Q_onset = parameters["Q_onset"] 
+    # Q_width = parameters["Q_width"] 
+    # parameters["rhoT_guess_metastable"] = rhoT_guess_metastable
+    # parameters["rhoT_guess_equilibrium"] = rhoT_guess_equilibrium
 
     # Define threshold for steady state
     steady_state_threshold = 1e-6
-    max_iterations = 100000
+    max_iterations = 1000000
     n = 0
     warmup_iterations = 50
 
@@ -104,8 +103,9 @@ def fvm_euler_1d(x, t, parameters):
 
         #Compute the inlet Mach number and static inlet conditions
         h = h0 - 0.5*u_in**2
-        static_state = fluid.get_state(bpy.HmassSmass_INPUTS, h, s0)
+        static_state = fluid.get_state(bpy.fluid_properties.HmassSmass_INPUTS, h, s0)
         rho_static = static_state.rhomass
+        e_inlet = static_state.umass
         # a_static = static_state.speed_sound
         # M_in = u_in / a_static
 
@@ -123,73 +123,74 @@ def fvm_euler_1d(x, t, parameters):
         rho_outlet = Q[0, -1, n]              # Density at the outlet
         e_outlet = (Q[2, -1, n] - 0.5 * rho_outlet * u_outlet**2)/rho_outlet
 
-        outlet_state = fluid.get_state(bpy.DmassUmass_INPUTS, rho_outlet, e_outlet)
+        outlet_state = fluid.get_state(bpy.fluid_properties.DmassUmass_INPUTS, rho_outlet, e_outlet)
         a_outlet = outlet_state.speed_sound       # Speed of sound at the outlet
         Ma_out = u_outlet / a_outlet              # Mach number at the outlet
 
         p = np.zeros(Q.shape[1])  # Initialize pressure array
-
+        c = np.zeros(Q.shape[1])  # Initialize pressure array 
         for j in range(Q.shape[1]):
             rho = Q[0, j, n]  # Density at cell j
             u = Q[1, j, n] / rho  # Velocity at cell j
+
             try:
-                # Calculate specific internal energy (from total energy minus kinetic energy)
+                # # Calculate specific internal energy (from total energy minus kinetic energy)
                 e_internal = Q[2, j, n]/ rho - 0.5 * u**2
-                # Set the fluid state using density and internal energy
-                internal_state_blend, props_eq, props_meta = fluid.get_state_blending(
-                    prop_1="rho",
-                    prop_1_value=rho,
-                    prop_2="u",
-                    prop_2_value=e_internal,
-                    rhoT_guess_equilibrium=rhoT_guess_equilibrium,
-                    rhoT_guess_metastable=rhoT_guess_metastable,
-                    phase_change=phase_change,
-                    blending_variable="Q",
-                    blending_onset=Q_onset,
-                    blending_width=Q_width,
-                    generalize_quality=True,
-                    supersaturation=True,
-                    print_convergence=False,
-                    solver_algorithm="lm",
-                )
+                # # Set the fluid state using density and internal energy
+                internal_state = fluid.get_state(bpy.fluid_properties.DmassUmass_INPUTS, rho, e_internal)
+                # props_blend, props_eq, props_meta = fluid.get_state_blending(
+                #     prop_1="rho",
+                #     prop_1_value=rho,
+                #     prop_2="u",
+                #     prop_2_value=e_internal,
+                #     rhoT_guess_equilibrium=rhoT_guess_equilibrium,
+                #     rhoT_guess_metastable=rhoT_guess_metastable,
+                #     phase_change=phase_change,
+                #     blending_variable="Q",
+                #     blending_onset=Q_onset,
+                #     blending_width=Q_width,
+                #     generalize_quality=True,
+                #     supersaturation=True,
+                #     solver_tolerance=1e-9,
+                #     print_convergence=False,
+                #     solver_algorithm="lm",
+                # )
 
-                # Update initial guess
-                rhoT_guess_metastable = [props_meta["rho"], props_meta["T"]]
-                rhoT_guess_equilibrium = [props_eq["rho"], props_eq["T"]]
-
+                # # Update initial guess
+                # rhoT_guess_metastable = [props_meta["rho"], props_meta["T"]]
+                # rhoT_guess_equilibrium = [props_eq["rho"], props_eq["T"]]
+    
             except Exception as e:
-                 print(f"Warning: {e}, density is ", rho)
+                 print(f"Warning: {e} at node {x[j]}, density is ", rho)
+                #  e_internal = e_back_up
+                #  rho = rho_back_up
+                #  internal_state = fluid.get_state(bpy.fluid_properties.DmassUmass_INPUTS, rho, e_internal)
 
-            p[j] = internal_state_blend.p
-            
+            # Retrieve the pressure and speed of sound from the state
+            p[j] = internal_state.p
+            c[j] = internal_state.speed_sound
+            # p[j] = props_blend.p
+            # c[j] = props_blend.speed_sound
+            e_back_up = e_internal
+            rho_back_up = rho
+
         # Q[2, -1, n] = 2 * Q[2, -2, n] * A_nodes[-2] / A_nodes[-1] - Q[2, -3, n] * A_nodes[-3] / A_nodes[-1]  
+        # outlet_state = fluid.get_state(bpy.fluid_properties.DmassP_INPUTS, rho_outlet, p_out)
+        # e_outlet = outlet_state.umass  # Internal energy per unit mass
+        # Q[2, -1, n] = e_outlet * rho_outlet + 0.5 * rho_outlet * u_outlet**2  # Total energy
+        # p[-1] = p_out
 
         # Subsonic Outlet Boundary Condition
         if Ma_out < 1:
             # Set outlet pressure (subsonic flow assumes we control the pressure at the outlet)
-            outlet_state_blend, props_eq, props_meta = fluid.get_state_blending(
-                prop_1="rho",
-                prop_1_value=rho_outlet,
-                prop_2="p",
-                prop_2_value=p_out,
-                rhoT_guess_equilibrium=rhoT_guess_equilibrium,
-                rhoT_guess_metastable=rhoT_guess_metastable,
-                phase_change=phase_change,
-                blending_variable="Q",
-                blending_onset=Q_onset,
-                blending_width=Q_width,
-                generalize_quality=True,
-                supersaturation=True,
-                print_convergence=False,
-                solver_algorithm="lm",
-            )
-            e_outlet = outlet_state_blend.umass  # Internal energy per unit mass
+            outlet_state = fluid.get_state(bpy.fluid_properties.DmassP_INPUTS, rho_outlet, p_out)
+            e_outlet = outlet_state.umass  # Internal energy per unit mass
             Q[2, -1, n] = e_outlet * rho_outlet + 0.5 * rho_outlet * u_outlet**2  # Total energy
             p[-1] = p_out
-
         else:
             # For supersonic flow, simply extrapolate values from the interior
             Q[2, -1, n] = 2 * Q[2, -2, n] * A_nodes[-2] / A_nodes[-1] - Q[2, -3, n] * A_nodes[-3] / A_nodes[-1]  
+
 
         parameters['p'] = p
 
@@ -221,6 +222,9 @@ def fvm_euler_1d(x, t, parameters):
             if n % 25 == 0:
                 print(f"Iteration {n}: delta_Q = {delta_Q:0.4e}")
                 print(Ma_out)
+                print(p[-1])
+                print(rho_outlet*A_nodes[-1]*u_outlet*1e-6)
+
             # Check for steady state after warm-up
             if delta_Q < steady_state_threshold:
                 print(f"Steady-state reached after {t[n]} s")
@@ -236,6 +240,7 @@ def fvm_euler_1d(x, t, parameters):
         # Update the time
         t[n+1] = t[n] + dt
         n += 1
+
 
     # Discard the solution in the ghost cells
     Q = Q[:, :, :n]
