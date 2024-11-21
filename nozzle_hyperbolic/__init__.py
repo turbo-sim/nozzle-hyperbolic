@@ -11,7 +11,7 @@ else:
 
 
 
-from barotropy import *
+import barotropy as bpy
 from .functions import *
 from .fit_nozzle_shape import *
 
