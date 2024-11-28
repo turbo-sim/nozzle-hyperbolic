@@ -1,6 +1,7 @@
 import numpy as np
+import math
 from .flux import *
-
+import time
 import nozzle_hyperbolic as hyp
 import barotropy as bpy
 
@@ -9,13 +10,10 @@ def euler_eigenvalues(Q, fluid, parameters):
     rho = Q[0, :]        # Density
     rhou = Q[1, :]       # Momentum (rho * u)
     p = parameters['p']  # Pressure, pre-computed before calling this function
-
     # Compute velocity
     u = rhou / rho       # Velocity
 
-    # Initialize array for speed of sound
     c = np.zeros_like(rho)  # Speed of sound array
-
     # Loop through each cell to calculate speed of sound using CoolProp
     for i in range(len(rho)):        
         # Set the fluid state using density and internal energy
@@ -53,6 +51,9 @@ def fvm_euler_1d(x, t, parameters):
     # Extend the grid to ghost cells
     dx_const = parameters['dx']
     A_nodes = parameters['A_nodes'] 
+    r = parameters['r']
+    roughness = parameters['roughness']
+    D_hydraulic = parameters['D_hydraulic']
     Nj = len(x)
 
     # Initialize the time vector
@@ -129,6 +130,9 @@ def fvm_euler_1d(x, t, parameters):
 
         p = np.zeros(Q.shape[1])  # Initialize pressure array
         c = np.zeros(Q.shape[1])  # Initialize pressure array 
+        tau_w = np.zeros(Q.shape[1])
+        v_quality = np.zeros(Q.shape[1])
+
         for j in range(Q.shape[1]):
             rho = Q[0, j, n]  # Density at cell j
             u = Q[1, j, n] / rho  # Velocity at cell j
@@ -137,6 +141,8 @@ def fvm_euler_1d(x, t, parameters):
                 # # Calculate specific internal energy (from total energy minus kinetic energy)
                 e_internal = Q[2, j, n]/ rho - 0.5 * u**2
                 # # Set the fluid state using density and internal energy
+                # internal_state = fluid.get_state(bpy.fluid_properties.DmassSmass_INPUTS, rho, s0)
+
                 internal_state = fluid.get_state(bpy.fluid_properties.DmassUmass_INPUTS, rho, e_internal)
                 # props_blend, props_eq, props_meta = fluid.get_state_blending(
                 #     prop_1="rho",
@@ -171,8 +177,38 @@ def fvm_euler_1d(x, t, parameters):
             c[j] = internal_state.speed_sound
             # p[j] = props_blend.p
             # c[j] = props_blend.speed_sound
-            e_back_up = e_internal
-            rho_back_up = rho
+            # e_back_up = e_internal
+            # rho_back_up = rho
+            viscosity = internal_state.mu
+            Re = rho*u*D_hydraulic[j]/viscosity
+            v_quality[j] = internal_state.Q
+            Cf = Haaland(Re, roughness, D_hydraulic[j])
+            tau_w[j] = 0.5*Cf*rho*u**2
+            # print(viscosity, Re, v_quality[j], Cf)
+            # print(u, rho)
+            # time.sleep(2)
+
+            # tau_w[j] = 0
+
+            # if (1-v_quality[j]) > 0:
+            #     m_tot = u*A_nodes[j]*rho
+            #     m_liq = m_tot*(1-v_quality[j])
+            #     temporary_state = fluid.get_state(bpy.fluid_properties.PQ_INPUTS, p[j], 0)   
+            #     mu_L = temporary_state.mu
+            #     rho_L = temporary_state.rho
+            #     temporary_state = fluid.get_state(bpy.fluid_properties.PQ_INPUTS, p[j], 1)   
+            #     mu_v = temporary_state.mu
+            #     rho_v = temporary_state.rho
+
+            #     Re_L = m_liq*D_hydraulic[j]/(A_nodes[j]*mu_L)
+            #     Cf_L = Haaland(Re_L, roughness, D_hydraulic[j])
+            #     tau_L = 0.5*Cf_L*rho_L*u**2
+            #     LM = LM_gronnerud(rho_L, rho_v, mu_L, mu_v, v_quality[j], m_liq/A_nodes[j], D_hydraulic[j])
+            #     tau_w[j] = LM * tau_L
+            #     # print(tau_w[j])
+            # else:
+            #     Cf = Haaland(Re, roughness, D_hydraulic[j])
+            #     tau_w[j] = 0.5*Cf*rho*u**2
 
         # Q[2, -1, n] = 2 * Q[2, -2, n] * A_nodes[-2] / A_nodes[-1] - Q[2, -3, n] * A_nodes[-3] / A_nodes[-1]  
         # outlet_state = fluid.get_state(bpy.fluid_properties.DmassP_INPUTS, rho_outlet, p_out)
@@ -193,12 +229,16 @@ def fvm_euler_1d(x, t, parameters):
 
 
         parameters['p'] = p
+        parameters['c'] = c
 
         # Compute source term
         S = np.zeros((3, Nj))
-        S[1, 1:Nj-1] = p[1:Nj-1] * (A_nodes[2:] - A_nodes[:-2]) / (2 * dx_const)
-        S[1, 0] = p[0] * (A_nodes[1] - A_nodes[0]) / dx_const
-        S[1, -1] = p[-1] * (A_nodes[-1] - A_nodes[-2]) / dx_const
+        S[1, 1:Nj-1] = p[1:Nj-1] * (A_nodes[2:] - A_nodes[:-2]) / (2 * dx_const) - tau_w[1:Nj-1]*4*A_nodes[1:Nj-1]/D_hydraulic[1:Nj-1]
+        S[1, 0] = p[0] * (A_nodes[1] - A_nodes[0]) / dx_const - tau_w[0]*4*A_nodes[0]/D_hydraulic[0]
+        S[1, -1] = p[-1] * (A_nodes[-1] - A_nodes[-2]) / dx_const - tau_w[-1]*4*A_nodes[-1]/D_hydraulic[-1]
+        # S[1, 1:Nj-1] = p[1:Nj-1] * (A_nodes[2:] - A_nodes[:-2]) / (2 * dx_const)
+        # S[1, 0] = p[0] * (A_nodes[1] - A_nodes[0]) / dx_const
+        # S[1, -1] = p[-1] * (A_nodes[-1] - A_nodes[-2]) / dx_const
 
         # Use the desired time integration method
         if parameters['time_method'] == 'euler':
@@ -221,9 +261,10 @@ def fvm_euler_1d(x, t, parameters):
             delta_Q = np.max(np.abs(Q[1, 1:-1, n+1] - Q[1, 1:-1, n]) / np.abs(Q[1, 1:-1, n+1]))
             if n % 25 == 0:
                 print(f"Iteration {n}: delta_Q = {delta_Q:0.4e}")
-                print(Ma_out)
+                # print(Ma_out)
                 print(p[-1])
-                print(rho_outlet*A_nodes[-1]*u_outlet*1e-6)
+                # print(min(p))
+                print(rho_outlet*A_nodes[-1]*u_outlet)
 
             # Check for steady state after warm-up
             if delta_Q < steady_state_threshold:
@@ -314,3 +355,64 @@ def R(Q, _, x, parameters):
 #         RHS[:, 1:Nj-1] = -(F[:, 1:] - F[:, :-1]) / dx
 
 #     return RHS
+
+
+def Haaland(Re, epsilon, D):
+    """
+    Calculate the Darcy friction factor using the Haaland equation.
+
+    Parameters:
+        Re (float): Reynolds number (dimensionless).
+        epsilon (float): Pipe roughness height (m).
+        D (float): Pipe diameter (m).
+
+    Returns:
+        float: Darcy friction factor (dimensionless).
+    """
+
+    # Calculate terms
+    term1 = epsilon / (3.7 * D)
+    term2 = 6.9 / Re
+    log_argument = term1 + term2
+
+    # Handle invalid logarithm argument
+    if log_argument <= 0:
+        return 0  # Friction factor is set to 0 if the argument is invalid
+    
+    # Compute friction factor
+    f = (-1.81 * math.log10(log_argument))**-2
+    return f
+
+def LM_gronnerud(rho_l, rho_v, mu_l, mu_v, x, G_l, d, g=9.81):
+    """
+    Calculate the Lockhart-Martinelli parameter (Phi_LM) based on the given parameters.
+   
+    Parameters:
+    rho_l (float): Liquid density (kg/m^3)
+    rho_v (float): Vapor density (kg/m^3)
+    mu_l (float): Liquid viscosity (Pa·s or kg/m·s)
+    mu_v (float): Vapor viscosity (Pa·s or kg/m·s)
+    x (float): Void fraction (dimensionless)
+    g_l (float): Liquid mass flux (kg/m^2/s)
+    g (float): Gravitational acceleration (m/s^2)
+    d (float): Pipe diameter (m)
+   
+    Returns:
+    float: Phi_LM (dimensionless)
+    """
+    # Step 1: Calculate Fr_L
+    Fr_l = G_l**2 / (g * d * rho_l)
+   
+    # Step 2: Determine f_FR based on Fr_L
+    if Fr_l >= 1:
+        f_fr = 1
+    else:
+        f_fr = Fr_l**0.3 + 0.0055 * (math.log(1 / Fr_l))**2
+   
+    # Step 3: Calculate (dp/dz)_Fr
+    dp_dz_fr = f_fr * (x + 4 * (x**1.8 - x**10 * f_fr**0.5))
+   
+    # Step 4: Calculate Phi_LM^2
+    phi_lm_squared = 1 + dp_dz_fr * (((rho_l / rho_v) / (mu_l / mu_v)**0.25) - 1)
+   
+    return phi_lm_squared  # Return Phi_LM^2

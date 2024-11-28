@@ -96,10 +96,10 @@ def fvm_euler_1d(x, t, parameters):
         Q[2, 0, n] = p_static / (gamma - 1) + 0.5 * rho_static * u_in**2
 
         # Update density (Q[0, :, :]) and momentum (Q[1, :, :]) at the outlet
-        # Q[0, -1, n] = 2 * Q[0, -2, n] * A_nodes[-2] / A_nodes[-1] - Q[0, -3, n] * A_nodes[-3] / A_nodes[-1]
-        # Q[1, -1, n] = 2 * Q[1, -2, n] * A_nodes[-2] / A_nodes[-1] - Q[1, -3, n] * A_nodes[-3] / A_nodes[-1]
-        Q[0, -1, n] = Q[0, -2, n]
-        Q[1, -1, n] = Q[1, -2, n] 
+        Q[0, -1, n] = 2 * Q[0, -2, n] * A_nodes[-2] / A_nodes[-1] - Q[0, -3, n] * A_nodes[-3] / A_nodes[-1]
+        Q[1, -1, n] = 2 * Q[1, -2, n] * A_nodes[-2] / A_nodes[-1] - Q[1, -3, n] * A_nodes[-3] / A_nodes[-1]
+        # Q[0, -1, n] = Q[0, -2, n]
+        # Q[1, -1, n] = Q[1, -2, n] 
         u_outlet = Q[1, -1, n]/Q[0, -1, n]
         rho_outlet = Q[0, -1, n]
         p_outlet = (gamma - 1) * (Q[2, -1, n] - 0.5 * Q[1, -1, n]**2 / Q[0, -1, n])
@@ -108,18 +108,15 @@ def fvm_euler_1d(x, t, parameters):
 
         # Calculate internal pressure in the last cell before the boundary
         p_internal = (gamma - 1) * (Q[2, -2, n] - 0.5 * Q[1, -2, n]**2 / Q[0, -2, n])
-        Q[2, -1, n] = p_out / (gamma - 1) + 0.5 * Q[1, -1, n]**2 / Q[0, -1, n]
+        # Q[2, -1, n] = p_out / (gamma - 1) + 0.5 * Q[1, -1, n]**2 / Q[0, -1, n]
 
-        # # Check if the flow is subsonic or supersonic at the outlet
-        # if (p_out - p_internal) > 0:
-        #     try:
-        #         # Subsonic flow: impose outlet pressure condition
-        #         Q[2, -1, n] = p_out / (gamma - 1) + 0.5 * Q[1, -1, n]**2 / Q[0, -1, n]
-        #     except ValueError as e:
-        #         Q[2, -1, n] = 2 * Q[2, -2, n] * A_nodes[-2] / A_nodes[-1] - Q[2, -3, n] * A_nodes[-3] / A_nodes[-1]
-        # else:
-        #     # Supersonic flow: outflow boundary condition
-        #     Q[2, -1, n] = 2 * Q[2, -2, n] * A_nodes[-2] / A_nodes[-1] - Q[2, -3, n] * A_nodes[-3] / A_nodes[-1]
+        # Check if the flow is subsonic or supersonic at the outlet
+        if (p_out - p_internal) > 0:
+                # Subsonic flow: impose outlet pressure condition
+                Q[2, -1, n] = p_out / (gamma - 1) + 0.5 * Q[1, -1, n]**2 / Q[0, -1, n]
+        else:
+            # Supersonic flow: outflow boundary condition
+            Q[2, -1, n] = 2 * Q[2, -2, n] * A_nodes[-2] / A_nodes[-1] - Q[2, -3, n] * A_nodes[-3] / A_nodes[-1]
 
         # Compute source term
         p = (gamma - 1) * (Q[2, :, n] - 0.5 * Q[1, :, n]**2 / Q[0, :, n])

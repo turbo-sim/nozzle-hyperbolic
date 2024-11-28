@@ -1,21 +1,23 @@
 boundary_conditions: 
-  p_stagnation:  90e5
-  T_stagnation: 318.15
+  p_stagnation:  58.96e5
+  T_stagnation: 314.76
   # p_out: 2.8e5
-  p_out: 59.6e5
+  p_out: 17e5
   # p_out: 0.53538e5
 
 # Numerical settings
 numerical_settings:
 # Define the grid
-  Nx: 80 # Number of cells
-  x1: 0  # Left boundary
-  x2: 23.38
+  Nx: 150 # Number of cells
+  x1: -0.03201  # Left boundary
+  # x2: 0.02338
+  # x2: 0.5
+  x2: 0.06636
   # x2: 14.57  
   # x2: 0.311  
   t1: 0.00  # Initial time
   t2: 120  # Final time
-  CFL: 0.4 # Maximum allowed local Courant number
+  CFL: 0.5 # Maximum allowed local Courant number
 
 nozzle_geometry:
 # Define nozzle area
