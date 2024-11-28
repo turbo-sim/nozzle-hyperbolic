@@ -1,13 +1,13 @@
 boundary_conditions: 
-  p_stagnation: 7e5
-  T_stagnation: 500
-  p_out: 1.1e5
+  p_stagnation: 9e5
+  T_stagnation: 541.15
+  p_out: 1e5
 
 # Numerical settings
 numerical_settings:
-  Nx: 250 # Number of cells
+  Nx: 800 # Number of cells
   x1: 0  # Left boundary
-  x2: 1.0  # Right boundary
+  x2: 14.57  # Right boundary
   t1: 0.00  # Initial time
   t2: 10  # Final time
   CFL: 0.5 # Maximum allowed local Courant number

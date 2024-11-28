@@ -51,7 +51,7 @@ def nozzle_exact2(x, parameters, total_bc):
         # Solve for Mach number with both subsonic and supersonic initial guesses
         M[i, 0] = fsolve(f, 0.1, xtol=tol, maxfev=max_iter1)[0]  # Subsonic guess
         M[i, 1] = fsolve(f, 8, xtol=tol, maxfev=max_iter1)[0]
-        
+  
         # Subsonic solution
         T[i, 0] = T0 / (1 + (gamma - 1) / 2 * M[i, 0]**2)
         p[i, 0] = p0 / (1 + (gamma - 1) / 2 * M[i, 0]**2)**(gamma / (gamma - 1))

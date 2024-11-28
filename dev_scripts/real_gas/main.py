@@ -36,18 +36,47 @@ t = np.array([t1, t2])  # Time vector
 # Define the CFL condition
 CFL = case_data["numerical_settings"]["CFL"]  # Maximum allowed local Courant number
 
-# Define nozzle area
+# Define nozzle area and roughness
 L = x2
+roughness = 0.1e-6
 
 # # Polynomial interpolation for nozzle shape 
-# file_path = "Lettieri_nozzle.xlsx"  # Relative path to the common folder
-# sheet_name = "Sheet1"  # Adjust as necessary
-# degree = 10  # Degree of the polynomial
+# file_path = "Spinelli_nozzles.xlsx"  # Relative path to the common folder
+# sheet_name = "nozzle Ma1.5"  # Adjust as necessary
+# degree = 12  # Degree of the polynomial
 # coefficients, polynomial, spline = hyp.fit_nozzle_shape(file_path, sheet_name, degree)  # Fit nozzle shape
-# hx = spline
-# h = spline(x)
+
+# def nozzle_shape(x):
+#     if x < -0.03201:
+#         return 0.006365
+#     else:
+#         return spline(x)
+
+# h = np.array([polynomial(x_elem) for x_elem in x]) 
 # depth = 1
 # A_nodes = 2*h*depth
+
+file_path = "Lettieri_nozzle.xlsx"  # Relative path to the common folder
+sheet_name = "Sheet1"  # Adjust as necessary
+degree = 10  # Degree of the polynomial
+coefficients, polynomial, spline = hyp.fit_nozzle_shape(file_path, sheet_name, degree)  # Fit nozzle shape
+
+def nozzle_shape(x):
+    if x < -0.03201:
+        return 0.006365
+    else:
+        return spline(x)
+
+h = np.array([spline(x_elem) for x_elem in x]) 
+width = 6.48e-3
+A_nodes = 2*h*width
+
+## Calculate hydraulic diameter for planar nozzles
+D_hydraulic = np.zeros_like(x)
+D_hydraulic[:] = 4*A_nodes[:]/(2*(width+2*h[:]))
+print(roughness/D_hydraulic)
+# plt.plot(x, roughness/D_hydraulic)
+# plt.show()
 
 # # Linear interpolation for nozzle shape
 # R = [0.011261088563105, 0.0017775, 0.0017775, 0.016312752388279] # Simoneau paper
@@ -61,32 +90,35 @@ L = x2
 # A_nodes = r**2*np.pi
 
 # Double linear interpolation for Barana's nozzle
-file_path = "Barana_Conference.xlsx"  # Relative path to the common folder
-sheet_name = "Sheet1"  # Adjust as necessary
-coefficients, polynomial, spline = hyp.fit_nozzle_shape(file_path, sheet_name, 8)
-
-# # Extract data for plotting
+# file_path = "Barana_Conference.xlsx"  # Relative path to the common folder
+# sheet_name = "Sheet1"  # Adjust as necessary
+# coefficients, polynomial, spline = hyp.fit_nozzle_shape(file_path, sheet_name, 8)
 # data = pd.read_excel(file_path, sheet_name=sheet_name)
 
-# m1 = -(5-0.12)/27.35
-# m2 = (0.195-0.12)/56.15
+# m1 = -(0.005-0.0002)/0.015
+# m2 = (0.0002702-0.0002)/0.00838
 
 # # Piecewise nozzle shape
 # def nozzle_shape(x):
-#     if x <= 25:
-#         return 5 + m1*x
-#     elif x > 35:
-#         return 0.12+m2*(x-27.35)
+#     if x <= 0.015:
+#         return 0.005 + m1*x
 #     else:
-#         return spline(x)
+#         return 0.0002+m2*(x-0.015)
+
+# h = np.array([nozzle_shape(x_elem) for x_elem in x])
+# width = 1e-3
+# A_nodes = 2*h*width
+
+# ## Calculate hydraulic diameter for planar nozzles
+# D_hydraulic = np.zeros_like(x)
+# perimeter = 2*(width+2*h)
+# D_hydraulic = 4 * A_nodes / perimeter
+
         
-h = np.array([spline(x_elem) for x_elem in x]) 
-A_nodes = 2*h
-        
-# # Linea+Polynomial interpolation for Lettieri´s nozzle
-# file_path = "Lettieri_nozzle.xlsx"  # Relative path to the common folder
-# sheet_name = "Sheet1"  # Adjust as necessary
-# degree = 7  # Degree of the polynomial
+# Linea+Polynomial interpolation for Lettieri´s nozzle
+# file_path = "lettieri.xlsx"  # Relative path to the common folder
+# sheet_name = ""  # Adjust as necessary
+# degree = 12  # Degree of the polynomial
 # coefficients, polynomial, spline = hyp.fit_nozzle_shape(file_path, sheet_name, degree)
 # h_in = 0.00635
 # h_spline = lambda x: spline(x)
@@ -98,11 +130,11 @@ A_nodes = 2*h
 #     else:
 #         return h_spline(x)
 
-# h = np.array([nozzle_shape(x_elem) for x_elem in x])
+# h = np.array([polynomial(x_elem) for x_elem in x])
 # A_nodes = h
 
-plt.plot(x, h, "-")
-plt.show()
+# plt.plot(x, h, "-")
+# plt.show()
 
 # ##
 # parameters = {'A_nodes': A_nodes}
@@ -168,20 +200,20 @@ parameters = {}
 #     rho_initials[i] = rho_initial
 #     total_energies[i] = total_energy
 
-# plt.figure(figsize=(6, 5))
-# plt.plot(x, u_o)
-# plt.figure(figsize=(6, 5))
-# plt.plot(x, p_o)
-# plt.figure(figsize=(6, 5))
-# plt.plot(x, rho_initials)
-# plt.show()
+# # plt.figure(figsize=(6, 5))
+# # plt.plot(x, u_o)
+# # plt.figure(figsize=(6, 5))
+# # plt.plot(x, p_o)
+# # plt.figure(figsize=(6, 5))
+# # plt.plot(x, rho_initials)
+# # plt.show()
 
 # Q_o = [rho_initials, rho_initials*u_o, rho_initials*total_energies]
 # Q_o = np.array(Q_o)
 
-##
-
 # Group up the problem parameters
+parameters['D_hydraulic'] = D_hydraulic
+parameters['roughness'] = roughness
 parameters['pT_stagnation'] = pT_stagnation
 parameters['p_out'] = p_out
 parameters['dx'] = dx
@@ -191,7 +223,7 @@ parameters['A_nodes'] = A_nodes
 parameters['fluid_name'] = fluid_name
 parameters['N_eq'] = 3  # Number of equations of the hyperbolic system
 parameters['CFL'] = CFL  # Maximum allowed Courant number
-parameters['r_function'] = h  # Function describing the radius along nozzle axis
+parameters['r'] = h  # Function describing the radius along nozzle axis
 parameters['Q_o'] = Q_o  # Initial condition function
 parameters['time_method'] = 'euler'  # Choose: 'euler', 'RK3', or 'RK4'
 parameters['reconstruction'] = 'constant'  # Choose: 'constant' or 'linear'
@@ -209,7 +241,7 @@ p_rusanov = np.zeros_like(d_rusanov)  # Initialize pressure array for the last t
 a_sound = np.zeros_like(d_rusanov)
 s = np.zeros_like(d_rusanov)
 Q = np.zeros_like(d_rusanov)
-T = np.zeros_like(d_rusanov)
+Z = np.zeros_like(d_rusanov)
 
 # rhoT_guess_metastable = [initial_state["rho"], initial_state["T"]]
 # rhoT_guess_equilibrium = [initial_state["rho"], initial_state["T"]]
@@ -225,7 +257,7 @@ for j in range(len(d_rusanov)):
     a_sound[j] = state.speed_sound
     s[j] = state.s
     Q[j] = state.Q
-    T[j] = state.T
+    Z[j] = state.Z
 
     # props_blend, props_eq, props_meta = fluid.get_state_blending(
     #     prop_1="rho",
@@ -270,7 +302,7 @@ fluid.plot_phase_diagram(
     # plot_spinodal_line=True,
 )
 
-ax0.plot(s, T, marker="o", color="purple")
+# ax0.plot(s, T, marker="o", color="purple")
 
 # Plot the entropy Profile
 # plt.figure(figsize=(6, 5))
@@ -360,6 +392,6 @@ ax2.set_ylabel('Nozzle Area [m²]')
 plt.tight_layout()
 plt.show()
 
-# np.savez("Case5_rusanov_N180.npz", h=h, x=x, e=e_rusanov, a=a_sound, p=p_rusanov, rho=d_rusanov, u=u_rusanov, Q=Q)
+# np.savez("rusanov_N300_pin90_tin37_pout51_rough05.npz", h=h, x=x, e=e_rusanov, a=a_sound, p=p_rusanov, rho=d_rusanov, u=u_rusanov, Z=Z)
 mass_flow = d_rusanov[-1]*u_rusanov[-1]*A_nodes[-1]
 print(mass_flow)

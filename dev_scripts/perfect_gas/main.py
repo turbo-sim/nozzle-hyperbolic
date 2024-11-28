@@ -43,14 +43,14 @@ gamma = 1.4  # Heat capacity ratio of air
 L = x2
 # rx = lambda x: (4 * (r0 - rt) / L**2) * (x - L / 2)**2 + rt
 
-file_path = "nozzles points.xlsx"  # Relative path to the common folder
+file_path = "nozzles points2.xlsx"  # Relative path to the common folder
 sheet_name = "nozzle Ma1.5"  # Adjust as necessary
 degree = 12  # Degree of the polynomial
 
 # Fit the nozzle shape using the shared function
-coefficients, polynomial = hyp.fit_nozzle_shape(file_path, sheet_name, degree)  # Fit nozzle shape
+coefficients, polynomial, spline = hyp.fit_nozzle_shape(file_path, sheet_name, 8)
 
-r = polynomial(x)
+r = spline(x)
 
 # r = rx(x)
 A_nodes = r**2 * np.pi
@@ -94,7 +94,7 @@ parameters['eigenvalues_function'] = lambda q: hyp.perfect_gas.euler_eigenvalues
 parameters['roe_function'] = lambda q_L, q_R: hyp.perfect_gas.euler_roe_matrix(q_L, q_R, gamma)  # Roe matrix
 
 # Compute the numerical solution of the problem
-parameters['space_method'] = 'HLL'  
+parameters['space_method'] = 'rusanov'  
 Q, t = hyp.perfect_gas.fvm_euler_1d(x, t, parameters)
 d_roe = Q[0, :, :]
 u_roe = Q[1, :, :] / Q[0, :, :]
@@ -113,7 +113,7 @@ A_cr_index = np.argmin(A_nodes)
 plt.figure(figsize=(6, 5))
 plt.xlabel('x/L')
 plt.ylabel(r'$\rho / \rho_0$')
-plt.plot(x[::2,], d_roe[::2, -1]/rho_stagnation, 'go-', linewidth=0.75, markersize=4, markerfacecolor='w', label=f'Numerical Solution - {parameters['space_method']}')
+# plt.plot(x[::2,], d_roe[::2, -1]/rho_stagnation, 'go-', linewidth=0.75, markersize=4, markerfacecolor='w', label=f'Numerical Solution - {parameters['space_method']}')
 plt.plot(x, rho[:, 0]/rho_stagnation, 'r--', linewidth=0.75, markersize=4, markerfacecolor='w', label='Exact solution - Subsonic')
 plt.plot(x[A_cr_index:], rho[A_cr_index:, 1]/rho_stagnation, 'b--', linewidth=0.75, markersize=4, markerfacecolor='w', label='Exact solution - Supersonic')
 if i_shock is not None:
@@ -197,8 +197,8 @@ plt.show()
 # A_critical = np.pi * r[len(x) // 2]**2
 # mass_flow= d_roe[len(x)//2, -1]*u_roe[len(x)//2, -1]*A_critical
 
-# np.savez("roe75.npz", x=x, p1=p_roe, rho1=d_roe, u1=u_roe, i_shock=i_shock)
-# np.savez("exact75.npz", r=r, L=L, x=x, p=p, rho=rho, u=u)
+# np.savez("roe_subsonic.npz", x=x, p1=p_roe, rho1=d_roe, u1=u_roe, i_shock=i_shock)
+np.savez("isentropic.npz", r=r, L=L, x=x, p=p, rho=rho, u=u)
 
 # cv = R / (gamma - 1)
 # entropy_generation = cv * (np.log(p_roe[-1, -1] / d_roe[-1, -1]**gamma) - np.log(p_roe[1, -1] / d_roe[1, -1]**gamma))
