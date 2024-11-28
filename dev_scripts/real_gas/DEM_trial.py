@@ -3,13 +3,13 @@ import matplotlib.pyplot as plt
 import nozzle_hyperbolic as hyp
 import barotropy as bpy
 
-data01 = np.load("Case5_rusanov_N180.npz")
+data01 = np.load("rusanov_N200_pin90_tin37_pout51_rough0.npz")
 
-e, h, x, u, p, rho, Q, a = data01["e"], data01["h"], data01["x"], data01["u"], data01["p"], data01["rho"], data01["Q"], data01["a"]
+e, h, x, u, p, rho, a = data01["e"], data01["h"], data01["x"], data01["u"], data01["p"], data01["rho"], data01["a"]
 
 phase_change = "condensation"
-Q_onset = 0.995
-Q_width = 0.001
+Q_onset = 0.5
+Q_width = 0.01
 p = np.zeros_like(rho)  # Initialize pressure array for the last time step
 a_sound = np.zeros_like(rho)
 s = np.zeros_like(rho)
@@ -66,8 +66,12 @@ plt.grid(True)
 ax1 = plt.gca()
 plt.xlabel(r'$x$ (mm)')
 plt.ylabel(r'$P$ (bar)')
-plt.plot(x, p/1e5, '-', color='darkorange', linewidth=1.8, markerfacecolor='white', label="rusanov")
+plt.figure(figsize=(6, 5))
+plt.plot(x, p, '-', color='darkorange', linewidth=1.8, markerfacecolor='white', label="rusanov")
+
+# plt.figure(figsize=(6, 5))
+# plt.plot(x, Q, '-', color='darkorange', linewidth=1.8, markerfacecolor='white', label="rusanov")
 
 plt.show()
 
-np.savez("trial90.npz", x=x, p=p)
+np.savez("trial.npz", x=x, a=a_sound, p=p, Q=Q)

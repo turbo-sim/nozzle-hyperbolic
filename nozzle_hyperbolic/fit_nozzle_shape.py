@@ -140,8 +140,8 @@ def define_radius_function(lengths, radii):
 # To test the new interpolation functions
 if __name__ == "__main__":
 
-    file_path = 'Barana_Conference.xlsx'
-    sheet_name = 'Sheet1'  # Adjust as necessary
+    file_path = 'Spinelli_nozzles.xlsx'
+    sheet_name = 'nozzle Ma1.5'  # Adjust as necessary
     degree = 8
 
     # Fit the nozzle shape
@@ -149,10 +149,10 @@ if __name__ == "__main__":
 
     # Extract data for plotting
     data = pd.read_excel(file_path, sheet_name=sheet_name)
-    x = np.linspace(0, 23.4, 100)
+    x = np.linspace(0, 15, 100)
     x_spline = np.linspace(25, 35, 800)
     h_spline = lambda x: spline(x)
-    h = h_spline(x)
+    h = polynomial(x)
 
     m1 = -(5-0.12)/27.35
     m2 = (0.195-0.12)/56.15
@@ -183,3 +183,4 @@ if __name__ == "__main__":
     plt.plot(x,h)
     plt.plot(data.x, data.y, "o", markersize=2)
     plt.show()
+
