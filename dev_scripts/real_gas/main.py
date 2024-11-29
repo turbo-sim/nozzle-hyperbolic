@@ -56,25 +56,25 @@ roughness = 0.1e-6
 # depth = 1
 # A_nodes = 2*h*depth
 
-file_path = "Lettieri_nozzle.xlsx"  # Relative path to the common folder
-sheet_name = "Sheet1"  # Adjust as necessary
-degree = 10  # Degree of the polynomial
-coefficients, polynomial, spline = hyp.fit_nozzle_shape(file_path, sheet_name, degree)  # Fit nozzle shape
+# file_path = "Lettieri_nozzle.xlsx"  # Relative path to the common folder
+# sheet_name = "Sheet1"  # Adjust as necessary
+# degree = 10  # Degree of the polynomial
+# coefficients, polynomial, spline = hyp.fit_nozzle_shape(file_path, sheet_name, degree)  # Fit nozzle shape
 
-def nozzle_shape(x):
-    if x < -0.03201:
-        return 0.006365
-    else:
-        return spline(x)
+# def nozzle_shape(x):
+#     if x < -0.03201:
+#         return 0.006365
+#     else:
+#         return spline(x)
 
-h = np.array([spline(x_elem) for x_elem in x]) 
-width = 6.48e-3
-A_nodes = 2*h*width
+# h = np.array([spline(x_elem) for x_elem in x]) 
+# width = 6.48e-3
+# A_nodes = 2*h*width
 
-## Calculate hydraulic diameter for planar nozzles
-D_hydraulic = np.zeros_like(x)
-D_hydraulic[:] = 4*A_nodes[:]/(2*(width+2*h[:]))
-print(roughness/D_hydraulic)
+# ## Calculate hydraulic diameter for planar nozzles
+# D_hydraulic = np.zeros_like(x)
+# D_hydraulic[:] = 4*A_nodes[:]/(2*(width+2*h[:]))
+# print(roughness/D_hydraulic)
 # plt.plot(x, roughness/D_hydraulic)
 # plt.show()
 
@@ -90,29 +90,29 @@ print(roughness/D_hydraulic)
 # A_nodes = r**2*np.pi
 
 # Double linear interpolation for Barana's nozzle
-# file_path = "Barana_Conference.xlsx"  # Relative path to the common folder
-# sheet_name = "Sheet1"  # Adjust as necessary
-# coefficients, polynomial, spline = hyp.fit_nozzle_shape(file_path, sheet_name, 8)
-# data = pd.read_excel(file_path, sheet_name=sheet_name)
+file_path = "Barana_Conference.xlsx"  # Relative path to the common folder
+sheet_name = "Sheet1"  # Adjust as necessary
+coefficients, polynomial, spline = hyp.fit_nozzle_shape(file_path, sheet_name, 8)
+data = pd.read_excel(file_path, sheet_name=sheet_name)
 
-# m1 = -(0.005-0.0002)/0.015
-# m2 = (0.0002702-0.0002)/0.00838
+m1 = -(0.005-0.0002)/0.015
+m2 = (0.0002702-0.0002)/0.00838
 
-# # Piecewise nozzle shape
-# def nozzle_shape(x):
-#     if x <= 0.015:
-#         return 0.005 + m1*x
-#     else:
-#         return 0.0002+m2*(x-0.015)
+# Piecewise nozzle shape
+def nozzle_shape(x):
+    if x <= 0.015:
+        return 0.005 + m1*x
+    else:
+        return 0.0002+m2*(x-0.015)
 
-# h = np.array([nozzle_shape(x_elem) for x_elem in x])
-# width = 1e-3
-# A_nodes = 2*h*width
+h = np.array([nozzle_shape(x_elem) for x_elem in x])
+width = 1e-3
+A_nodes = 2*h*width
 
-# ## Calculate hydraulic diameter for planar nozzles
-# D_hydraulic = np.zeros_like(x)
-# perimeter = 2*(width+2*h)
-# D_hydraulic = 4 * A_nodes / perimeter
+## Calculate hydraulic diameter for planar nozzles
+D_hydraulic = np.zeros_like(x)
+perimeter = 2*(width+2*h)
+D_hydraulic = 4 * A_nodes / perimeter
 
         
 # Linea+Polynomial interpolation for Lettieri´s nozzle
@@ -392,6 +392,6 @@ ax2.set_ylabel('Nozzle Area [m²]')
 plt.tight_layout()
 plt.show()
 
-# np.savez("rusanov_N300_pin90_tin37_pout51_rough05.npz", h=h, x=x, e=e_rusanov, a=a_sound, p=p_rusanov, rho=d_rusanov, u=u_rusanov, Z=Z)
+np.savez("rusanov_N200_pin90_tin37_pout51_rough01.npz", h=h, x=x, e=e_rusanov, a=a_sound, p=p_rusanov, rho=d_rusanov, u=u_rusanov, Z=Z)
 mass_flow = d_rusanov[-1]*u_rusanov[-1]*A_nodes[-1]
 print(mass_flow)
