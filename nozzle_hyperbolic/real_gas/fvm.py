@@ -124,9 +124,9 @@ def fvm_euler_1d(x, t, parameters):
         rho_outlet = Q[0, -1, n]              # Density at the outlet
         e_outlet = (Q[2, -1, n] - 0.5 * rho_outlet * u_outlet**2)/rho_outlet
 
-        outlet_state = fluid.get_state(bpy.fluid_properties.DmassUmass_INPUTS, rho_outlet, e_outlet)
-        a_outlet = outlet_state.speed_sound       # Speed of sound at the outlet
-        Ma_out = u_outlet / a_outlet              # Mach number at the outlet
+        # outlet_state = fluid.get_state(bpy.fluid_properties.DmassUmass_INPUTS, rho_outlet, e_outlet)
+        # a_outlet = outlet_state.speed_sound       # Speed of sound at the outlet
+        # Ma_out = u_outlet / a_outlet              # Mach number at the outlet
 
         p = np.zeros(Q.shape[1])  # Initialize pressure array
         c = np.zeros(Q.shape[1])  # Initialize pressure array 
@@ -177,55 +177,54 @@ def fvm_euler_1d(x, t, parameters):
             c[j] = internal_state.speed_sound
             # p[j] = props_blend.p
             # c[j] = props_blend.speed_sound
-            # e_back_up = e_internal
-            # rho_back_up = rho
+
             viscosity = internal_state.mu
             Re = rho*u*D_hydraulic[j]/viscosity
             v_quality[j] = internal_state.Q
-            Cf = Haaland(Re, roughness, D_hydraulic[j])
-            tau_w[j] = 0.5*Cf*rho*u**2
+            # Cf = Haaland(Re, roughness, D_hydraulic[j])
+            # tau_w[j] = 0.5*Cf*rho*u**2
             # print(viscosity, Re, v_quality[j], Cf)
             # print(u, rho)
             # time.sleep(2)
 
             # tau_w[j] = 0
 
-            # if (1-v_quality[j]) > 0:
-            #     m_tot = u*A_nodes[j]*rho
-            #     m_liq = m_tot*(1-v_quality[j])
-            #     temporary_state = fluid.get_state(bpy.fluid_properties.PQ_INPUTS, p[j], 0)   
-            #     mu_L = temporary_state.mu
-            #     rho_L = temporary_state.rho
-            #     temporary_state = fluid.get_state(bpy.fluid_properties.PQ_INPUTS, p[j], 1)   
-            #     mu_v = temporary_state.mu
-            #     rho_v = temporary_state.rho
+            if (1-v_quality[j]) <1:
+                G_tot = u*rho
+                G_L = G_tot*(1-v_quality[j])
+                temporary_state = fluid.get_state(bpy.fluid_properties.PQ_INPUTS, p[j], 0)   
+                mu_L = temporary_state.mu
+                rho_L = temporary_state.rho
+                temporary_state = fluid.get_state(bpy.fluid_properties.PQ_INPUTS, p[j], 1)   
+                mu_v = temporary_state.mu
+                rho_v = temporary_state.rho
 
-            #     Re_L = m_liq*D_hydraulic[j]/(A_nodes[j]*mu_L)
-            #     Cf_L = Haaland(Re_L, roughness, D_hydraulic[j])
-            #     tau_L = 0.5*Cf_L*rho_L*u**2
-            #     LM = LM_gronnerud(rho_L, rho_v, mu_L, mu_v, v_quality[j], m_liq/A_nodes[j], D_hydraulic[j])
-            #     tau_w[j] = LM * tau_L
-            #     # print(tau_w[j])
-            # else:
-            #     Cf = Haaland(Re, roughness, D_hydraulic[j])
-            #     tau_w[j] = 0.5*Cf*rho*u**2
+                Re_L = G_tot*D_hydraulic[j]/mu_L
+                Cf_L = Haaland(Re_L, roughness, D_hydraulic[j])
+                tau_L = 0.5*Cf_L*G_L**2/rho_L
+                LM = LM_gronnerud(rho_L, rho_v, mu_L, mu_v, v_quality[j], G_tot, D_hydraulic[j])
+                tau_w[j] = LM * tau_L
+                # print(tau_w[j])
+            else:
+                Cf = Haaland(Re, roughness, D_hydraulic[j])
+                tau_w[j] = 0.5*Cf*rho*u**2
 
         # Q[2, -1, n] = 2 * Q[2, -2, n] * A_nodes[-2] / A_nodes[-1] - Q[2, -3, n] * A_nodes[-3] / A_nodes[-1]  
-        # outlet_state = fluid.get_state(bpy.fluid_properties.DmassP_INPUTS, rho_outlet, p_out)
-        # e_outlet = outlet_state.umass  # Internal energy per unit mass
-        # Q[2, -1, n] = e_outlet * rho_outlet + 0.5 * rho_outlet * u_outlet**2  # Total energy
-        # p[-1] = p_out
+        outlet_state = fluid.get_state(bpy.fluid_properties.DmassP_INPUTS, rho_outlet, p_out)
+        e_outlet = outlet_state.umass  # Internal energy per unit mass
+        Q[2, -1, n] = e_outlet * rho_outlet + 0.5 * rho_outlet * u_outlet**2  # Total energy
+        p[-1] = p_out
 
-        # Subsonic Outlet Boundary Condition
-        if Ma_out < 1:
-            # Set outlet pressure (subsonic flow assumes we control the pressure at the outlet)
-            outlet_state = fluid.get_state(bpy.fluid_properties.DmassP_INPUTS, rho_outlet, p_out)
-            e_outlet = outlet_state.umass  # Internal energy per unit mass
-            Q[2, -1, n] = e_outlet * rho_outlet + 0.5 * rho_outlet * u_outlet**2  # Total energy
-            p[-1] = p_out
-        else:
-            # For supersonic flow, simply extrapolate values from the interior
-            Q[2, -1, n] = 2 * Q[2, -2, n] * A_nodes[-2] / A_nodes[-1] - Q[2, -3, n] * A_nodes[-3] / A_nodes[-1]  
+        # # Subsonic Outlet Boundary Condition
+        # if Ma_out < 1:
+        #     # Set outlet pressure (subsonic flow assumes we control the pressure at the outlet)
+        #     outlet_state = fluid.get_state(bpy.fluid_properties.DmassP_INPUTS, rho_outlet, p_out)
+        #     e_outlet = outlet_state.umass  # Internal energy per unit mass
+        #     Q[2, -1, n] = e_outlet * rho_outlet + 0.5 * rho_outlet * u_outlet**2  # Total energy
+        #     p[-1] = p_out
+        # else:
+        #     # For supersonic flow, simply extrapolate values from the interior
+        #     Q[2, -1, n] = 2 * Q[2, -2, n] * A_nodes[-2] / A_nodes[-1] - Q[2, -3, n] * A_nodes[-3] / A_nodes[-1]  
 
 
         parameters['p'] = p
@@ -263,7 +262,7 @@ def fvm_euler_1d(x, t, parameters):
                 print(f"Iteration {n}: delta_Q = {delta_Q:0.4e}")
                 # print(Ma_out)
                 print(p[-1])
-                # print(min(p))
+                print(min(p))
                 print(rho_outlet*A_nodes[-1]*u_outlet)
 
             # Check for steady state after warm-up
@@ -401,7 +400,7 @@ def LM_gronnerud(rho_l, rho_v, mu_l, mu_v, x, G_l, d, g=9.81):
     float: Phi_LM (dimensionless)
     """
     # Step 1: Calculate Fr_L
-    Fr_l = G_l**2 / (g * d * rho_l)
+    Fr_l = G_l**2 / (g * d * rho_l**2)
    
     # Step 2: Determine f_FR based on Fr_L
     if Fr_l >= 1:
