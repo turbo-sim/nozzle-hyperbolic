@@ -124,15 +124,18 @@ def fvm_euler_1d(x, t, parameters):
         rho_outlet = Q[0, -1, n]              # Density at the outlet
         e_outlet = (Q[2, -1, n] - 0.5 * rho_outlet * u_outlet**2)/rho_outlet
 
-        # outlet_state = fluid.get_state(bpy.fluid_properties.DmassUmass_INPUTS, rho_outlet, e_outlet)
-        # a_outlet = outlet_state.speed_sound       # Speed of sound at the outlet
-        # Ma_out = u_outlet / a_outlet              # Mach number at the outlet
+        outlet_state = fluid.get_state(bpy.fluid_properties.DmassUmass_INPUTS, rho_outlet, e_outlet)
+        a_outlet = outlet_state.speed_sound       # Speed of sound at the outlet
+        Ma_out = u_outlet / a_outlet              # Mach number at the outlet
 
         p = np.zeros(Q.shape[1])  # Initialize pressure array
         c = np.zeros(Q.shape[1])  # Initialize pressure array 
         tau_w = np.zeros(Q.shape[1])
+        LM_vec = np.zeros(Q.shape[1])
         v_quality = np.zeros(Q.shape[1])
 
+        LM_count =0
+        count = 0
         for j in range(Q.shape[1]):
             rho = Q[0, j, n]  # Density at cell j
             u = Q[1, j, n] / rho  # Velocity at cell j
@@ -188,8 +191,7 @@ def fvm_euler_1d(x, t, parameters):
             # time.sleep(2)
 
             # tau_w[j] = 0
-
-            if (1-v_quality[j]) <1:
+            if 0 < v_quality[j] < 1:
                 G_tot = u*rho
                 G_L = G_tot*(1-v_quality[j])
                 temporary_state = fluid.get_state(bpy.fluid_properties.PQ_INPUTS, p[j], 0)   
@@ -203,19 +205,43 @@ def fvm_euler_1d(x, t, parameters):
                 Cf_L = Haaland(Re_L, roughness, D_hydraulic[j])
                 tau_L = 0.5*Cf_L*G_L**2/rho_L
                 LM = LM_gronnerud(rho_L, rho_v, mu_L, mu_v, v_quality[j], G_tot, D_hydraulic[j])
-                tau_w[j] = LM * tau_L
+                tau_w[j] = LM * tau_L 
+                LM_vec[j] = LM
+                LM_count +=LM
+                count +=1
                 # print(tau_w[j])
+            # if 0 < v_quality[j] < 1:
+            #     G_tot = u*rho
+            #     G_L = G_tot*(1-v_quality[j])
+            #     temporary_state = fluid.get_state(bpy.fluid_properties.PQ_INPUTS, p[j], 0)   
+            #     mu_L = temporary_state.mu
+            #     rho_L = temporary_state.rho
+            #     temporary_state = fluid.get_state(bpy.fluid_properties.PQ_INPUTS, p[j], 1)   
+            #     rho_v = temporary_state.rho
+            #     Re_L = G_L*D_hydraulic[j]/mu_L
+            #     Cf_L = Haaland(Re_L, roughness, D_hydraulic[j])
+            #     tau_L = 0.5*Cf_L*G_L**2/rho_L
+            #     LM = richardson(v_quality[j], rho_L, rho_v)
+            #     tau_w[j] = LM * tau_L
+            #     # print(tau_w[j])
             else:
                 Cf = Haaland(Re, roughness, D_hydraulic[j])
                 tau_w[j] = 0.5*Cf*rho*u**2
 
+        # Compute the average tau_w
+        if count > 0:
+            tau_w_avg = LM_count/ count
+            print("Average tau_w:", tau_w_avg)
+            print("max", np.max(LM_vec))
+        else:
+            print("No valid tau_w values found for averaging.")
         # Q[2, -1, n] = 2 * Q[2, -2, n] * A_nodes[-2] / A_nodes[-1] - Q[2, -3, n] * A_nodes[-3] / A_nodes[-1]  
         outlet_state = fluid.get_state(bpy.fluid_properties.DmassP_INPUTS, rho_outlet, p_out)
         e_outlet = outlet_state.umass  # Internal energy per unit mass
         Q[2, -1, n] = e_outlet * rho_outlet + 0.5 * rho_outlet * u_outlet**2  # Total energy
         p[-1] = p_out
 
-        # # Subsonic Outlet Boundary Condition
+        # Subsonic Outlet Boundary Condition
         # if Ma_out < 1:
         #     # Set outlet pressure (subsonic flow assumes we control the pressure at the outlet)
         #     outlet_state = fluid.get_state(bpy.fluid_properties.DmassP_INPUTS, rho_outlet, p_out)
@@ -261,9 +287,9 @@ def fvm_euler_1d(x, t, parameters):
             if n % 25 == 0:
                 print(f"Iteration {n}: delta_Q = {delta_Q:0.4e}")
                 # print(Ma_out)
-                print(p[-1])
+                # print(p[-1])
                 print(min(p))
-                print(rho_outlet*A_nodes[-1]*u_outlet)
+                # print(rho_outlet*A_nodes[-1]*u_outlet)
 
             # Check for steady state after warm-up
             if delta_Q < steady_state_threshold:
@@ -370,7 +396,7 @@ def Haaland(Re, epsilon, D):
     """
 
     # Calculate terms
-    term1 = epsilon / (3.7 * D)
+    term1 = (epsilon / (3.7 * D))**1.11
     term2 = 6.9 / Re
     log_argument = term1 + term2
 
@@ -415,3 +441,10 @@ def LM_gronnerud(rho_l, rho_v, mu_l, mu_v, x, G_l, d, g=9.81):
     phi_lm_squared = 1 + dp_dz_fr * (((rho_l / rho_v) / (mu_l / mu_v)**0.25) - 1)
    
     return phi_lm_squared  # Return Phi_LM^2
+
+def richardson(x, rho_L, rho_v):
+
+    gamma = 1/(1+((1-x)/x)*(rho_v/rho_L))
+    phi_lm_squared = (1-gamma)**(-1.75)
+    
+    return phi_lm_squared 
