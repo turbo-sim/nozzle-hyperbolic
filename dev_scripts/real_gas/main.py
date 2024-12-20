@@ -38,7 +38,7 @@ CFL = case_data["numerical_settings"]["CFL"]  # Maximum allowed local Courant nu
 
 # Define nozzle area and roughness
 L = x2
-roughness = 0.1e-6
+roughness = 3e-6
 
 # # Polynomial interpolation for nozzle shape 
 # file_path = "Spinelli_nozzles.xlsx"  # Relative path to the common folder
@@ -133,8 +133,8 @@ D_hydraulic = 4 * A_nodes / perimeter
 # h = np.array([polynomial(x_elem) for x_elem in x])
 # A_nodes = h
 
-# plt.plot(x, h, "-")
-# plt.show()
+plt.plot(x, h, "-")
+plt.show()
 
 # ##
 # parameters = {'A_nodes': A_nodes}
@@ -392,6 +392,7 @@ ax2.set_ylabel('Nozzle Area [m²]')
 plt.tight_layout()
 plt.show()
 
-np.savez("rusanov_N200_pin90_tin37_pout51_rough01.npz", h=h, x=x, e=e_rusanov, a=a_sound, p=p_rusanov, rho=d_rusanov, u=u_rusanov, Z=Z)
+np.savez("rusanov_N200_pin90_tin37_pout42.6_rough3.npz", h=h, x=x, e=e_rusanov, a=a_sound, p=p_rusanov, rho=d_rusanov, u=u_rusanov, Z=Z)
+# np.savez("rusanov_N260_pin90_tin37_po.ut48.2_rough3.npz", h=h, x=x, e=e_rusanov, a=a_sound, p=p_rusanov, rho=d_rusanov, u=u_rusanov, Z=Z)
 mass_flow = d_rusanov[-1]*u_rusanov[-1]*A_nodes[-1]
 print(mass_flow)
