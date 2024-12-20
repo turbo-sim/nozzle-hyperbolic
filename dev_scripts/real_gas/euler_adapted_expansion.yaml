@@ -1,14 +1,14 @@
 boundary_conditions: 
   p_stagnation:  90e5
-  T_stagnation: 310
+  T_stagnation: 318
   # p_out: 2.8e5
-  p_out: 51.4e5
+  p_out: 56.9e5
   # p_out: 0.53538e5
 
 # Numerical settings
 numerical_settings:
 # Define the grid
-  Nx: 200 # Number of cells
+  Nx: 230 # Number of cells
   x1: 0
   # x1: -0.03201  # Left boundary
   x2: 0.02338
