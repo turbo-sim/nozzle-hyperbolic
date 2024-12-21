@@ -12,8 +12,7 @@ else:
 
 
 import barotropy as bpy
-from .functions import *
+from .plot_settings import *
 from .fit_nozzle_shape import *
 
-from . import perfect_gas
-from . import real_gas
+from . import fvm_solver

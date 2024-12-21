@@ -1,0 +1,3 @@
+1) euler_matlab is the old code developed in the MATLAB environment.
+2) euler_space_marching is developed in Python but does not capture shock waves.
+3) perfect_gas is the time-marching approach for perfect gas, which is now is included in the other code.

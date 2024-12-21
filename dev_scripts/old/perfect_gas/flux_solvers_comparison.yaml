@@ -1,0 +1,21 @@
+boundary_conditions: 
+  p_stagnation: 9e5
+  T_stagnation: 541.15
+  p_out: 5e5
+
+# Numerical settings
+numerical_settings:
+  Nx: 500 # Number of cells
+  x1: 0  # Left boundary
+  x2: 1  # Right boundary
+  t1: 0.00  # Initial time
+  t2: 10  # Final time
+  CFL: 0.5 # Maximum allowed local Courant number
+
+nozzle_geometry:
+# Define nozzle area
+  r0: 0.3
+  rt: 0.10
+
+# bar 3 and 5.5 (2 cases)
+# 500 K

@@ -1,0 +1,1 @@
+To plot the results you need the .npz files that are on Andrea's local memory.
