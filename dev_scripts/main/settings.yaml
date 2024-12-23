@@ -19,7 +19,7 @@ numerical_settings:
   t2: 120  # Final time
   CFL: 0.98 # Maximum allowed local Courant number
   max_iterations: 1000000
-  residuals: 0.0001
+  residuals: 0.000001
   flux_method: HLL
 
 nozzle_parameters:
