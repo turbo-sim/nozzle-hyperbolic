@@ -361,7 +361,14 @@ def fvm_euler_1d(x, t, parameters):
 
         # Calculate the maximum change between iterations
         if n > warmup_iterations:
-            delta_Q = np.max(np.abs(Q[1, 1:-1, n+1] - Q[1, 1:-1, n]) / np.abs(Q[1, 1:-1, n+1]))
+            # infinite norm
+            # delta_Q = np.max(np.abs(Q[:, 1:-1, n+1] - Q[:, 1:-1, n]) / np.abs(Q[:, 1:-1, n]))
+            
+            # L2 norm
+            delta_Q = np.abs(Q[:, 1:-1, n+1] - Q[:, 1:-1, n]) / (np.abs(Q[:, 1:-1, n]))
+            L2_norm = np.sqrt(np.sum(delta_Q**2, axis=1) / delta_Q.shape[1])
+            delta_Q = np.max(L2_norm)
+
             if n % 25 == 0:
                 print(f"Iteration {n}: delta_Q = {delta_Q:0.4e}")
                 # print(Ma_out)

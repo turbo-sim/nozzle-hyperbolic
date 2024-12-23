@@ -17,10 +17,10 @@ numerical_settings:
   # x2: 0.311  
   t1: 0.00  # Initial time
   t2: 120  # Final time
-  CFL: 0.5 # Maximum allowed local Courant number
+  CFL: 0.98 # Maximum allowed local Courant number
   max_iterations: 1000000
-  residuals: 0.000001
-  flux_method: rusanov
+  residuals: 0.0001
+  flux_method: HLL
 
 nozzle_parameters:
   type: planar # Planar or ciircular (still to be implemented)
