@@ -345,7 +345,12 @@ def fvm_euler_1d(x, t, parameters):
 
         # Use the desired time integration method
         if parameters['time_method'] == 'euler':
-            Q[:, :, n+1] = Q[:, :, n] + (dt / A_nodes) * R(Q[:, :, n], t[n], x, parameters) + (dt / A_nodes) * S
+            flux = R(Q[:, :, n], t[n], x, parameters)
+            Q[:, :, n+1] = Q[:, :, n] + (dt / A_nodes) * flux + (dt / A_nodes) * S
+            residuals = (Q[:, :, n+1]-Q[:, :, n])/dt - flux/A_nodes - S/A_nodes
+            L2_norm_residuals = np.sqrt(np.sum(residuals**2, axis=1) / residuals.shape[1])
+
+            print(np.max(L2_norm_residuals))
 
         elif parameters['time_method'] == 'RK3':
             Q1 = Q[:, :, n] + (dt / A_nodes) * R(Q[:, :, n], t[n], x, parameters)
@@ -363,7 +368,7 @@ def fvm_euler_1d(x, t, parameters):
         if n > warmup_iterations:
             # infinite norm
             # delta_Q = np.max(np.abs(Q[:, 1:-1, n+1] - Q[:, 1:-1, n]) / np.abs(Q[:, 1:-1, n]))
-            
+
             # L2 norm
             delta_Q = np.abs(Q[:, 1:-1, n+1] - Q[:, 1:-1, n]) / (np.abs(Q[:, 1:-1, n]))
             L2_norm = np.sqrt(np.sum(delta_Q**2, axis=1) / delta_Q.shape[1])
