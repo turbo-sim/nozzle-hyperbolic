@@ -1,8 +1,7 @@
 # This script contains perfect gas equations for different input cases 
 # This is used to calculate the thermodynamic properties and is imported in perfect_gas_props script
 
-import jax.numpy as jnp
-from jax import grad
+import numpy as np
 
 
 # Constants
@@ -49,14 +48,14 @@ def calculate_properties_hs(h, s):
     def temperature(h, s):
         """Calculate temperature from enthalpy."""
         cp, cv = specific_heat(R, gamma)
-        return jnp.max(jnp.asarray([1.0, h / cp])) # Temperature in Kelvin
+        return np.max(np.asarray([1.0, h / cp])) # Temperature in Kelvin
         # return h / cp
 
     def pressure(h, s):
         """Calculate pressure using enthalpy and entropy."""
         T = temperature(h, s)
         cp, cv = specific_heat(R, gamma)
-        return P_ref * jnp.exp(((cp * jnp.log(T / T_ref)) - (s - s_ref)) / R)
+        return P_ref * np.exp(((cp * np.log(T / T_ref)) - (s - s_ref)) / R)
 
     def density(h, s):
         """Calculate density using enthalpy and entropy."""
@@ -76,7 +75,7 @@ def calculate_properties_hs(h, s):
 
     def speed_of_sound(h, s):
         T = temperature(h, s)
-        return jnp.sqrt(gamma*R*T) # Speed of sound in m/s
+        return np.sqrt(gamma*R*T) # Speed of sound in m/s
 
     properties = {"T": temperature(h, s),
             "p": pressure(h, s),
@@ -117,7 +116,7 @@ def calculate_properties_PT(P, T):
 
     def entropy(P, T):
         cp, cv = specific_heat(R, gamma)
-        return s_ref + (cp*jnp.log(T/T_ref)) - (R*jnp.log(P/P_ref))
+        return s_ref + (cp*np.log(T/T_ref)) - (R*np.log(P/P_ref))
 
     def viscosity(P, T):
         """Calculate dynamic viscosity using Sutherland's formula."""
@@ -128,7 +127,7 @@ def calculate_properties_PT(P, T):
         return k_ref * ((T / 273) ** (3/2)) * ((273 + S_k) / (T + S_k))
 
     def speed_of_sound(P,T):
-        return jnp.sqrt(gamma*R*T) # Speed of sound in m/s
+        return np.sqrt(gamma*R*T) # Speed of sound in m/s
     
     properties = {"T": T,
             "p": P,
@@ -156,7 +155,7 @@ def calculate_properties_hP(h, P):
     def temperature(h, P):
         """Calculate temperature from enthalpy."""
         cp, cv = specific_heat(R, gamma)
-        return jnp.max(jnp.asarray([1.0, h / cp])) 
+        return np.max(np.asarray([1.0, h / cp])) 
         # return h / cp # Temperature in Kelvin
 
     def density(h, P):
@@ -167,7 +166,7 @@ def calculate_properties_hP(h, P):
     def entropy(h, P):
         cp, cv = specific_heat(R, gamma)
         T = temperature(h, P)
-        return s_ref + (cp*jnp.log(T/T_ref)) - (R*jnp.log(P/P_ref))
+        return s_ref + (cp*np.log(T/T_ref)) - (R*np.log(P/P_ref))
 
     def viscosity(h, P):
         """Calculate dynamic viscosity using Sutherland's formula."""
@@ -181,7 +180,7 @@ def calculate_properties_hP(h, P):
 
     def speed_of_sound(h, P):
         T = temperature(h, P)
-        return jnp.sqrt(gamma*R*T) # Speed of sound in m/s
+        return np.sqrt(gamma*R*T) # Speed of sound in m/s
 
     properties = {"T": temperature(h, P),
             "p": P,
@@ -209,7 +208,7 @@ def calculate_properties_Ps(P, s):
     def temperature(P, s):
         """Calculate temperature from enthalpy."""
         cp, cv = specific_heat(R, gamma)
-        return jnp.max(jnp.asarray([1.0, T_ref * jnp.exp(((s - s_ref) + (R * jnp.log(P / P_ref))) / cp)]))  # Temperature in Kelvin
+        return np.max(np.asarray([1.0, T_ref * np.exp(((s - s_ref) + (R * np.log(P / P_ref))) / cp)]))  # Temperature in Kelvin
         # return T_ref * jnp.exp(((s - s_ref) + (R * jnp.log(P / P_ref))) / cp)
     
     def enthalpy(P, s):
@@ -235,7 +234,7 @@ def calculate_properties_Ps(P, s):
 
     def speed_of_sound(P, s):
         T = temperature(P, s)
-        return jnp.sqrt(gamma*R*T) # Speed of sound in m/s
+        return np.sqrt(gamma*R*T) # Speed of sound in m/s
 
     properties = {"T": temperature(P, s),
             "p": P,
@@ -263,7 +262,7 @@ def calculate_properties_rhoh(rho, h):
     def temperature(rho, h):
         """Calculate temperature from ethalpy."""
         cp, cv = specific_heat(R, gamma)
-        return jnp.max(jnp.asarray([1.0, h / cp]))
+        return np.max(np.asarray([1.0, h / cp]))
         # return h / cp # enthalpy in Joules Kg.m^2/s^2
 
     def pressure(rho, h):
@@ -275,7 +274,7 @@ def calculate_properties_rhoh(rho, h):
         cp, cv = specific_heat(R, gamma)
         T = temperature(rho, h)
         P = pressure(rho, h)
-        return s_ref + (cp*jnp.log(T/T_ref)) - (R*jnp.log(P/P_ref))
+        return s_ref + (cp*np.log(T/T_ref)) - (R*np.log(P/P_ref))
 
     def viscosity(rho, h):
         """Calculate dynamic viscosity using Sutherland's formula."""
@@ -289,7 +288,7 @@ def calculate_properties_rhoh(rho, h):
 
     def speed_of_sound(rho, h):
         T = temperature(rho, h)
-        return jnp.sqrt(gamma*R*T) # Speed of sound in m/s
+        return np.sqrt(gamma*R*T) # Speed of sound in m/s
 
     properties = {"T": temperature(rho, h),
             "p": pressure(rho, h),
@@ -310,4 +309,3 @@ def calculate_properties_rhoh(rho, h):
         properties[alias] = properties[original]
 
     return properties
-
