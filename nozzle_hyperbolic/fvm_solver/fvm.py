@@ -515,6 +515,16 @@ def Haaland(Re, epsilon, D):
     f = (-1.81 * math.log10(log_argument))**-2
     return f
 
+def f_HEM_purdue(Re):
+    if Re < 2000:
+        f = 16 / Re
+    elif 200 <= Re < 20000:
+        f = 0.079 * (Re ** -0.25)
+    else:
+        f = 0.046 * (Re ** -0.2)
+        
+    return f
+
 def LM_gronnerud(rho_l, rho_v, mu_l, mu_v, x, G_l, d, g=9.81):
     """
     Calculate the Lockhart-Martinelli parameter (Phi_LM) based on the given parameters.
