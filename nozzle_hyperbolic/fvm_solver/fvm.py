@@ -102,7 +102,7 @@ def fvm_euler_1d(x, t, parameters):
     Q = np.zeros((N, Nj, 1000))  # Preallocate space for the solution
     Q_o = parameters['Q_o']  # Load the initial condition
     # Q[:, :, 0] = Q_o (x) # Set the initial condition
-    Q[:, :, 0] = Q_o[:,:] # Set the initial condition
+    Q[:, :, 0] = Q_o(x) # Set the initial condition
 
  
     # Initialize boundary conditions
