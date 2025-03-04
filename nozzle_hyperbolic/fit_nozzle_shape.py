@@ -183,4 +183,3 @@ if __name__ == "__main__":
     plt.plot(x,h)
     plt.plot(data.x, data.y, "o", markersize=2)
     plt.show()
-
