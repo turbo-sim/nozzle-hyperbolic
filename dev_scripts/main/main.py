@@ -60,14 +60,14 @@ if perfect_gas:
                           (p_o / ((cp/cv) - 1) + 0.5 * rho_o * u_o**2) * np.ones_like(x)])
  
 else:
-    # # Uniform across the nozzle
-    # initial_state = fluid.get_state(bpy.fluid_properties.PT_INPUTS, p_o, T_o)
-    # rho_initial = initial_state.rho
-    # u_internal_initial = initial_state.umass
-    # s0 = initial_state.s
-    # # parameters['s0'] = s0# Pressure, pre-computed before calling this function
-    # total_energy = u_internal_initial + 0.5 * u_o**2
-    # Q_o = lambda x: np.array([rho_initial * np.ones_like(x), rho_initial * u_o * np.ones_like(x), rho_initial * total_energy * np.ones_like(x)])
+    # Uniform across the nozzle
+    initial_state = fluid.get_state(bpy.fluid_properties.PT_INPUTS, p_o, T_o)
+    rho_initial = initial_state.rho
+    u_internal_initial = initial_state.umass
+    s0 = initial_state.s
+    # parameters['s0'] = s0# Pressure, pre-computed before calling this function
+    total_energy = u_internal_initial + 0.5 * u_o**2
+    Q_o = lambda x: np.array([rho_initial * np.ones_like(x), rho_initial * u_o * np.ones_like(x), rho_initial * total_energy * np.ones_like(x)])
  
     # # Define phase change process
     # if s0 > fluid.critical_point.s:
@@ -122,9 +122,9 @@ else:
     # Linear across the nozzle
     # File names
 
-    files = "Q_N1400_5960000.0_HEM_haal_2roug.npz"
+    # files = "Q_N1400_5960000.0_HEM_haal_2roug.npz"
 
-    f = np.load(files)
+    # f = np.load(files)
     # vector = f['Q'][0,0,:]
     # print(f['Q'])
 
@@ -151,7 +151,7 @@ else:
     # plt.plot(x, rho_e_initial)
     # # plt.show()
  
-    Q_o = f['Q'][:,:,-1] # To use when linear initialization is chosen
+    # Q_o = f['Q'][:,:,-1] # To use when linear initialization is chosen
  
 ## Define the nozzle
 L = x2
