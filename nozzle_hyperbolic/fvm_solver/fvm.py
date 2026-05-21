@@ -122,15 +122,15 @@ def fvm_euler_1d(x, t, parameters):
         s0 = stagnation_state.s
         h0 = stagnation_state.h
         parameters["s0"] = s0
-        s_critical = fluid.critical_point.s
+        # s_critical = fluid.critical_point.s
  
-    rhoT_guess_metastable = [stagnation_state["rho"], stagnation_state["T"]]
-    rhoT_guess_equilibrium = [stagnation_state["rho"], stagnation_state["T"]]
-    phase_change = "condensation"
-    Q_onset = 0.97
-    Q_width = 0.05
-    parameters["rhoT_guess_metastable"] = rhoT_guess_metastable
-    parameters["rhoT_guess_equilibrium"] = rhoT_guess_equilibrium
+    # rhoT_guess_metastable = [stagnation_state["rho"], stagnation_state["T"]]
+    # rhoT_guess_equilibrium = [stagnation_state["rho"], stagnation_state["T"]]
+    # phase_change = "condensation"
+    # Q_onset = 0.97
+    # Q_width = 0.05
+    # parameters["rhoT_guess_metastable"] = rhoT_guess_metastable
+    # parameters["rhoT_guess_equilibrium"] = rhoT_guess_equilibrium
  
     # Define threshold for steady state
     steady_state_threshold = parameters["residuals"]
@@ -490,7 +490,7 @@ def fvm_euler_1d(x, t, parameters):
                     # print(Ma_out)
                     # print(p[-1])
                     print(min(p))
-                    np.savez(f"rusanov_N{Nj}_pout_{p_out}_HEM_haal_3roug.npz", h=h, x=x, u=u, p=p, rho=rho)
+                    # np.savez(f"rusanov_N{Nj}_pout_{p_out}_HEM_haal_3roug.npz", h=h, x=x, u=u, p=p, rho=rho)
                     # print(p[np.argmin(A_nodes)])
                     # print(rho_outlet*A_nodes[-1]*u_outlet)
     

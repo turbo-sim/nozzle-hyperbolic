@@ -1,25 +1,27 @@
 boundary_conditions:
-  p_stagnation:  90e5
-  T_stagnation: 318.0
+  p_stagnation:  130e5
+  T_stagnation: 348
   # p_out: 2.8e5
-  p_out: 50.1e5
+  p_out: 78e5
   # p_out: 0.53538e5
  
 # Numerical settings
 numerical_settings:
-  Nx: 1400 # Number of cells
-  x1: -0.015
-  # x1: -0.03201  # Left boundary
-  x2: 0.00838
+  Nx: 600 # Number of cells
+  # x1: 0
+  # x1: -0.015
+  x1: -0.03201  # Left boundary
+  # x2: 0.00838
   # x2: 0.5
-  # x2: 0.06636
+  x2: 0.06636
   # x2: 14.57  
   # x2: 0.311  
+  # x2: 1
   t1: 0.00  # Initial time
   t2: 120  # Final time
-  CFL: 0.9 # Maximum allowed local Courant number
+  CFL: 0.5 # Maximum allowed local Courant number
   max_iterations: 1000000
-  residuals: 0.000002
+  residuals: 0.000001
   flux_method: rusanov
   time_discretization: euler
  
@@ -27,7 +29,7 @@ nozzle_parameters:
   type: planar # Planar or ciircular (still to be implemented)
   r0: 3
   rt: 0.5
-  roughness: 0.000003
+  roughness: 0.000002
  
 fluid:
   perfect_gas: false

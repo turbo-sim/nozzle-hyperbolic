@@ -60,14 +60,14 @@ if perfect_gas:
                           (p_o / ((cp/cv) - 1) + 0.5 * rho_o * u_o**2) * np.ones_like(x)])
  
 else:
-    # # Uniform across the nozzle
-    # initial_state = fluid.get_state(bpy.fluid_properties.PT_INPUTS, p_o, T_o)
-    # rho_initial = initial_state.rho
-    # u_internal_initial = initial_state.umass
-    # s0 = initial_state.s
-    # # parameters['s0'] = s0# Pressure, pre-computed before calling this function
-    # total_energy = u_internal_initial + 0.5 * u_o**2
-    # Q_o = lambda x: np.array([rho_initial * np.ones_like(x), rho_initial * u_o * np.ones_like(x), rho_initial * total_energy * np.ones_like(x)])
+    # Uniform across the nozzle
+    initial_state = fluid.get_state(bpy.fluid_properties.PT_INPUTS, p_o, T_o)
+    rho_initial = initial_state.rho
+    u_internal_initial = initial_state.umass
+    s0 = initial_state.s
+    # parameters['s0'] = s0# Pressure, pre-computed before calling this function
+    total_energy = u_internal_initial + 0.5 * u_o**2
+    Q_o = lambda x: np.array([rho_initial * np.ones_like(x), rho_initial * u_o * np.ones_like(x), rho_initial * total_energy * np.ones_like(x)])
  
     # # Define phase change process
     # if s0 > fluid.critical_point.s:
@@ -107,6 +107,9 @@ else:
     #     # Store the values in the arrays
     #     rho_initials[i] = rho_initial
     #     total_energies[i] = total_energy
+
+    # Q_o = [rho_initials, rho_initials*u_o, rho_initials*total_energies] # To use when linear initialization is chosen
+    # Q_o = np.array(Q_o)
  
     # # plt.figure(figsize=(6, 5))
     # # plt.plot(x, u_o)
@@ -116,41 +119,39 @@ else:
     # # plt.plot(x, rho_initials)
     # # plt.show()
  
-    # Q_o = [rho_initials, rho_initials*u_o, rho_initials*total_energies] # To use when linear initialization is chosen
-    # Q_o = np.array(Q_o)
- 
     # Linear across the nozzle
     # File names
 
-    files = "Q_initial_1200_flashing.npz"
+    # files = "Q_N1400_5960000.0_HEM_haal_2roug.npz"
 
-    f = np.load(files)
-    vector = f['Q'][0,0,:]
+    # f = np.load(files)
+    # vector = f['Q'][0,0,:]
+    # print(f['Q'])
 
-    i = 0
-    for column in vector:
-        if column == 0:
-            index = i-1
-            break
-        i = i+1
+    # i = 0
+    # for column in vector:
+    #     if column == 0:
+    #         index = i-1
+    #         break
+    #     i = i+1
 
-    print("Last solution:",f['Q'][:,:,index])
+    # print("Last solution:",f['Q'][:,:,index])
 
  
-    rho_initials = f['Q'][0,:,index]
-    rho_u_initial = f['Q'][1,:,index]
-    rho_e_initial = f['Q'][2,:,index]
+    # rho_initials = f['Q'][0,:,:]
+    # rho_u_initial = f['Q'][1,:,:]
+    # rho_e_initial = f['Q'][2,:,:]
  
  
-    plt.figure(figsize=(6, 5))
-    plt.plot(x, rho_initials)
-    plt.figure(figsize=(6, 5))
-    plt.plot(x, rho_u_initial)    
-    plt.figure(figsize=(6, 5))
-    plt.plot(x, rho_e_initial)
-    # plt.show()
+    # plt.figure(figsize=(6, 5))
+    # plt.plot(x, rho_initials)
+    # plt.figure(figsize=(6, 5))
+    # plt.plot(x, rho_u_initial)    
+    # plt.figure(figsize=(6, 5))
+    # plt.plot(x, rho_e_initial)
+    # # plt.show()
  
-    Q_o = f['Q'][:,:,index] # To use when linear initialization is chosen
+    # Q_o = f['Q'][:,:,-1] # To use when linear initialization is chosen
  
 ## Define the nozzle
 L = x2
@@ -169,23 +170,25 @@ roughness = case_data["nozzle_parameters"]["roughness"]
 #         return spline(x)
  
 # h = np.array([polynomial(x_elem) for x_elem in x])
-# depth = 1
-# A_nodes = 2*h*depth
- 
-# file_path = "Lettieri_nozzle.xlsx"  # Relative path to the common folder
-# sheet_name = "Sheet1"  # Adjust as necessary
-# degree = 10  # Degree of the polynomial
-# coefficients, polynomial, spline = hyp.fit_nozzle_shape(file_path, sheet_name, degree)  # Fit nozzle shape
- 
-# def nozzle_shape(x):
-#     if x < -0.03201:
-#         return 0.006365
-#     else:
-#         return spline(x)
- 
-# h = np.array([spline(x_elem) for x_elem in x])
-# width = 6.48e-3
+# r=h
+# width = 1
 # A_nodes = 2*h*width
+ 
+file_path = "Lettieri_nozzle.xlsx"  # Relative path to the common folder
+sheet_name = "Sheet1"  # Adjust as necessary
+degree = 10  # Degree of the polynomial
+coefficients, polynomial, spline = hyp.fit_nozzle_shape(file_path, sheet_name, degree)  # Fit nozzle shape
+ 
+def nozzle_shape(x):
+    if x < -0.03201:
+        return 0.006365
+    else:
+        return spline(x)
+ 
+h = np.array([spline(x_elem) for x_elem in x])
+r=h
+width = 6.48e-3
+A_nodes = 2*h*width
  
 # ## Calculate hydraulic diameter for planar nozzles
 # D_hydraulic = np.zeros_like(x)
@@ -211,20 +214,20 @@ roughness = case_data["nozzle_parameters"]["roughness"]
 # coefficients, polynomial, spline = hyp.fit_nozzle_shape(file_path, sheet_name, 8)
 # data = pd.read_excel(file_path, sheet_name=sheet_name)
  
-m1 = -(0.005-0.0002)/0.015
-m2 = 0.0702/8.38
+# m1 = -(0.005-0.0002)/0.015
+# m2 = 0.0702/8.38
  
-# Piecewise nozzle shape
-def nozzle_shape(x):
-    if x <= 0:
-        return 0.0002 + m1*x
-    else:
-        return 0.0002+m2*(x)
+# # Piecewise nozzle shape
+# def nozzle_shape(x):
+#     if x <= 0:
+#         return 0.0002 + m1*x
+#     else:
+#         return 0.0002+m2*(x)
  
-r = np.array([nozzle_shape(x_elem) for x_elem in x]) # For Berana actually it is h (height)
-h=r
-width = 1e-3
-A_nodes = 2*h*width
+# r = np.array([nozzle_shape(x_elem) for x_elem in x]) # For Berana actually it is h (height)
+# h=r
+# width = 1e-3
+# A_nodes = 2*h*width
  
 ## Calculate hydraulic diameter for planar nozzles
 D_hydraulic = np.zeros_like(x)
@@ -270,8 +273,8 @@ D_hydraulic = 4 * A_nodes / perimeter
 # h = np.array([polynomial(x_elem) for x_elem in x])
 # A_nodes = h
  
-# plt.plot(x, h, "-")
-# plt.show()
+plt.plot(x, h, "-")
+plt.show()
  
 ## Group up the problem parameters
 parameters = {}
@@ -459,7 +462,7 @@ else:
     plt.figure(figsize=(6, 5))
     plt.xlabel('x/L')
     plt.ylabel(r'P / P_T')
-    plt.plot(x, pressure, 'go-', linewidth=0.75, markersize=4, markerfacecolor='w', label=f'Numerical Solution - {parameters['space_method']}')
+    plt.plot(x, pressure/p_stagnation, 'go-', linewidth=0.75, markersize=4, markerfacecolor='w', label=f'Numerical Solution - {parameters['space_method']}')
     ax1 = plt.gca()
     ax2 = ax1.twinx()
     ax2.plot(x, r, 'k--', linewidth=1.1, label='Nozzle cross section')
@@ -482,11 +485,12 @@ plt.tight_layout()
 # print("Exact pressures:", p_exact[np.argmin(r), 1], p_exact[-1, 1])
 # print("Exact flow rate:", A_nodes[-1]*rho_exact[-1, 1]*u_exact[-1, 1])
   
-np.savez(f"rusanov_N{Nx}_pout_{p_out}_flash_0_25.npz",v=velocity, h=h, x=x, M=Ma, p=pressure, rho=density)
+# np.savez(f"rusanov_N{Nx}_pout_{p_out}_HEM_haal_3roug.npz",v=velocity, h=h, x=x, M=Ma, p=pressure, rho=density)
 # np.savez("rusanov_N260_pin90_tin37_po.ut48.2_rough3.npz", h=h, x=x, e=e_rusanov, a=a_sound, p=p_rusanov, rho=d_rusanov, u=u_rusanov, Z=Z)
 mass_flow = density[-1]*velocity[-1]*A_nodes[-1]
 print(mass_flow)
-np.savez(f"rusanov_N{Nx}_pout_{p_out}_massflow_flash_0_25.npz", mass_flow=mass_flow)
-print("Numerical pressures:", min(pressure), pressure[-1])
+# np.savez(f"rusanov_N{Nx}_pout_{p_out}_massflow_HEM_haal_3roug.npz", mass_flow=mass_flow)
+min_index = np.argmin(A_nodes)
+print("Numerical pressures:", pressure[min_index], pressure[-1])
 print("Numerical flow rate:", A_nodes[-1]*density[-1]*velocity[-1])
 plt.show()
