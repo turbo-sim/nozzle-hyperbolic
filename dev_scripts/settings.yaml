@@ -1,35 +1,29 @@
 boundary_conditions:
-  p_stagnation:  130e5
-  T_stagnation: 348
-  # p_out: 2.8e5
-  p_out: 78e5
-  # p_out: 0.53538e5
+  p_stagnation:  58.96e5
+  T_stagnation: 314.7
+  p_out: 16e5
  
 # Numerical settings
 numerical_settings:
-  Nx: 600 # Number of cells
-  # x1: 0
-  # x1: -0.015
+  Nx: 50 # Number of cells
   x1: -0.03201  # Left boundary
-  # x2: 0.00838
-  # x2: 0.5
-  x2: 0.06636
-  # x2: 14.57  
-  # x2: 0.311  
-  # x2: 1
+  x2: 0.06636   # Right boundary
   t1: 0.00  # Initial time
   t2: 120  # Final time
-  CFL: 0.5 # Maximum allowed local Courant number
+  CFL: 100 # Maximum allowed local Courant number
   max_iterations: 1000000
-  residuals: 0.000001
-  flux_method: rusanov
-  time_discretization: euler
+  residuals: 0.00005
+  flux_method: hllc
+  time_discretization: implicit
+  reconstruction: constant  # constant | muscl_minmod | muscl_van_leer | muscl_superbee
+                                 # NOTE: MUSCL + euler requires CFL ≤ 0.5
  
 nozzle_parameters:
-  type: planar # Planar or ciircular (still to be implemented)
+  type: planar  # planar or axisymmetric
+  width: 6.48e-3  # channel depth [m] (planar only)
   r0: 3
   rt: 0.5
-  roughness: 0.000002
+  roughness: 0.00000
  
 fluid:
   perfect_gas: false
