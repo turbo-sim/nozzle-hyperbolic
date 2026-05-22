@@ -1,7 +1,7 @@
 boundary_conditions:
-  p_stagnation:  58.96e5
-  T_stagnation: 314.7
-  p_out: 16e5
+  p_stagnation:  130e5
+  T_stagnation: 348
+  p_out: 78e5
  
 # Numerical settings
 numerical_settings:
@@ -19,11 +19,11 @@ numerical_settings:
                                  # NOTE: MUSCL + euler requires CFL ≤ 0.5
  
 nozzle_parameters:
-  type: planar  # planar or axisymmetric
+  type: axisymmetric  # planar or axisymmetric
   width: 6.48e-3  # channel depth [m] (planar only)
   r0: 3
   rt: 0.5
-  roughness: 0.00000
+  roughness: 0.000002
  
 fluid:
   perfect_gas: false

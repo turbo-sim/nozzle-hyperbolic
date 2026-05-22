@@ -1,5 +1,5 @@
 import numpy as np
-from scipy.optimize import fsolve, brentq, newton
+from scipy.optimize import fsolve
 
 def areaMachRelation(M, area_ratio, gamma):
     return (1/M) * ((2/(gamma + 1)) * (1 + (gamma - 1) / 2 * M**2))**((gamma + 1) / (2 * (gamma - 1))) - area_ratio
@@ -25,13 +25,11 @@ def nozzle_exact2(x, parameters, total_bc):
     p0 = total_bc[1]
     M = np.zeros((len(x), 3))  # First column subsonic, second supersonic
 
-    gamma = parameters['gamma']
-    R = 287
-    p_out = parameters['p_out']
-    rx = parameters['r_function']
-    A = lambda x: rx(x)**2 * np.pi
-    A_nodes = A(x)
-    Ac = np.min(A_nodes)
+    gamma      = parameters['gamma']
+    R          = 287
+    p_out      = parameters['p_out']
+    A_nodes    = parameters['A_nodes']
+    Ac         = np.min(A_nodes)
     area_ratio = A_nodes / Ac
     A_cr_index = np.argmin(A_nodes)
 
@@ -75,8 +73,13 @@ def nozzle_exact2(x, parameters, total_bc):
         max_iter = 1000
         iter = 0
 
+        # Interpolate A at x_tent from the discrete A_nodes array
+        def A_interp(xv):
+            return float(np.interp(xv, x, A_nodes))
+
         while res > tolp and iter < max_iter:
-            f1 = lambda T1: T1/T0 - (Kc * Ac**2 / A(x_tent)**2 * (1 - T1/T0)**(-1))**((gamma - 1) / 2)
+            A_tent = A_interp(x_tent)
+            f1 = lambda T1: T1/T0 - (Kc * Ac**2 / A_tent**2 * (1 - T1/T0)**(-1))**((gamma - 1) / 2)
             T1_sol = fsolve(f1, T[A_cr_index, 1],xtol=tol, maxfev=max_iter1)[0]
 
             v1 = np.sqrt(2 * cp * (T0 - T1_sol))
@@ -102,7 +105,7 @@ def nozzle_exact2(x, parameters, total_bc):
 
         # Find the index of the shock location
         i_shock = np.argmin(abs(x - x_tent))
-        A_shock = A(x[i_shock])
+        A_shock = A_nodes[i_shock]
         Ac_effective = A_shock / ((1 / Ma2) * (2 * (1 + 0.5 * (gamma - 1) * Ma2**2) / (gamma + 1))**((gamma + 1) / (2 * (gamma - 1))))
         area_ratio_effective = A_nodes / Ac_effective
 
@@ -115,7 +118,6 @@ def nozzle_exact2(x, parameters, total_bc):
             f = lambda M: areaMachRelation(M, area_ratio_effective[i], gamma)
             f_prime = lambda M: areaMachDerivative(M, gamma)
             M[i, 2] = fsolve(f, 0.1, xtol=tol, maxfev=max_iter1)[0]
-            # M[i, 2] = newton(f, 0.2, fprime=f_prime, tol=tol, maxiter=max_iter1)  # Subsonic guess
             p[i, 2] = p20 * (1 + 0.5 * (gamma - 1) * M[i, 2]**2)**(-gamma / (gamma - 1))
             T[i, 2] = T0 * (1 + 0.5 * (gamma - 1) * M[i, 2]**2)**(-1)
             rho[i, 2] = p[i, 2] / (R * T[i, 2])
