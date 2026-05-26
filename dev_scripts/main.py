@@ -18,20 +18,25 @@ hyp.print_dict(case_data)
 ## Fluid
 perfect_gas = case_data["fluid"]["perfect_gas"]
 fluid_name  = case_data["fluid"]["fluid_name"]
+use_lut     = case_data["fluid"].get("use_lookup_table", True)
+lut_cfg     = case_data["fluid"].get("lut", {})
+
 if perfect_gas:
     fluid = jxp.Fluid(name=fluid_name)
-else:
+elif use_lut:
     fluid = jxp.FluidBicubic(
         fluid_name = fluid_name,
-        backend    = "HEOS",
-        h_min      = 50e3,
-        h_max      = 850e3,
-        p_min      = 1e4,
-        p_max      = 300e5,
-        N_h        = 200,
-        N_p        = 200,
-        table_dir  = "fluid_tables",
+        backend    = lut_cfg.get("backend",   "HEOS"),
+        h_min      = float(lut_cfg.get("h_min",     50e3)),
+        h_max      = float(lut_cfg.get("h_max",     850e3)),
+        p_min      = float(lut_cfg.get("p_min",     1e4)),
+        p_max      = float(lut_cfg.get("p_max",     300e5)),
+        N_h        = int(lut_cfg.get("N_h",          200)),
+        N_p        = int(lut_cfg.get("N_p",          200)),
+        table_dir  = lut_cfg.get("table_dir",  "fluid_tables"),
     )
+else:
+    fluid = jxp.Fluid(name=fluid_name)   # direct HEOS, no table
 
 ## Grid
 Nx = case_data["numerical_settings"]["Nx"]
@@ -98,6 +103,7 @@ parameters = {
     "space_method":   case_data["numerical_settings"]["flux_method"],
     "time_method":    case_data["numerical_settings"]["time_discretization"],
     "reconstruction": case_data["numerical_settings"].get("reconstruction", "constant"),
+    "warmup_cfg":     case_data["numerical_settings"].get("warmup", None),
 }
 if perfect_gas:
     parameters["gamma"] = cp / cv
@@ -243,7 +249,11 @@ plt.show()
 ## Diagnostics
 min_index  = np.argmin(A_nodes)
 m_dot      = density * velocity * A_nodes          # mass flux [kg/s]
-m_dot_mean = np.mean(m_dot)
+# Exclude BC cells (index 0 and -1): they are set by the boundary conditions,
+# not by flux conservation, so their mass flow is not constrained to match
+# the interior. Using only interior cells gives the true solver conservation error.
+m_dot_int  = m_dot[1:-1]
+m_dot_mean = np.mean(m_dot_int)
 m_dot_dev  = np.abs(m_dot - m_dot_mean) / np.abs(m_dot_mean) * 100  # % deviation
 
 if perfect_gas:
@@ -253,16 +263,17 @@ else:
     h_field = internal_energy + pressure / density
 
 H_field   = h_field + 0.5 * velocity**2            # total enthalpy [J/kg]
-H_mean    = np.mean(H_field)
+H_int     = H_field[1:-1]
+H_mean    = np.mean(H_int)
 H_dev     = np.abs(H_field - H_mean) / np.abs(H_mean) * 100  # % deviation
 
 print("=" * 55)
-print("  Spatial conservation residuals")
+print("  Spatial conservation residuals  (interior cells)")
 print("=" * 55)
 print(f"  Mass flux  — mean: {m_dot_mean:.6g} kg/s")
-print(f"               max deviation: {np.max(m_dot_dev):.3f} %")
+print(f"               max deviation: {np.max(m_dot_dev[1:-1]):.3f} %")
 print(f"  Tot. enth. — mean: {H_mean:.6g} J/kg")
-print(f"               max deviation: {np.max(H_dev):.3f} %")
+print(f"               max deviation: {np.max(H_dev[1:-1]):.3f} %")
 if not perfect_gas:
     ds = s[-1] - s[0]
     print(f"  Entropy    — inlet: {s[0]:.6g}  outlet: {s[-1]:.6g}  Δs = {ds:+.4g} J/(kg·K)")
@@ -272,16 +283,16 @@ print(f"  Pressure at throat: {pressure[min_index]:.6g} Pa,  outlet: {pressure[-
 print("=" * 55)
 
 fig_res, axes_res = plt.subplots(1, 2, figsize=(10, 4))
-fig_res.suptitle("Spatial conservation residuals")
+fig_res.suptitle("Spatial conservation residuals (interior cells only)")
 
 ax = axes_res[0]
-ax.plot(x, m_dot_dev)
+ax.plot(x[1:-1], m_dot_dev[1:-1])
 ax.set_xlabel("x [m]")
 ax.set_ylabel(r"$|\dot{m} - \bar{\dot{m}}| / \bar{\dot{m}}$ [%]")
 ax.set_title("Mass flux deviation")
 
 ax = axes_res[1]
-ax.plot(x, H_dev)
+ax.plot(x[1:-1], H_dev[1:-1])
 ax.set_xlabel("x [m]")
 ax.set_ylabel(r"$|H - \bar{H}| / \bar{H}$ [%]")
 ax.set_title("Total enthalpy deviation")

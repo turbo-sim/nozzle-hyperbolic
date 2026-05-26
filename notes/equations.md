@@ -26,7 +26,8 @@ The momentum source $p\,dA/dx$ arises from the pressure force on the variable-ar
 
 - State $(p, c, s, T, h, e)$ is computed from $(\rho,\, e)$ where $e = E - u^2/2$
 - `jaxprop.Fluid`: CoolProp-backed, supports `DmassUmass_INPUTS` directly
-- `jaxprop.FluidBicubic`: bicubic-interpolated table in $(h, \log p)$; only `HmassP_INPUTS` and `DmassP_INPUTS` are direct lookups. The inversion $(\rho, e) \to (p, c)$ requires a nested bisection (35 iterations, vectorised with JAX vmap).
+- `jaxprop.FluidBicubic`: bicubic-interpolated table in $(h, \log p)$; only `HmassP_INPUTS` and `DmassP_INPUTS` are direct lookups. The inversion $(\rho, e) \to (p, c)$ requires a nested bisection (15 iterations, vectorised with JAX vmap). $2^{-15}\approx 3\times10^{-5}$ relative precision — adequate for solver tolerances $\sim10^{-4}$.
+- Selected via `fluid.use_lookup_table: true/false` in `settings.yaml`. When `false`, `jxp.Fluid` (direct HEOS) is used instead — no table build required but slower.
 
 ### 1.3 Derived quantities
 
@@ -153,13 +154,23 @@ with $k_1 = \mathcal{L}(\mathbf{Q}^n)$, $k_2 = \mathcal{L}(\mathbf{Q}^n + \tfrac
 
 For accelerated convergence to steady state, a point-implicit correction is applied to the explicit Euler update. Defining the local spectral radius $\lambda_i = |u_i| + c_i$ and face-maximum $\lambda_{i+1/2} = \max(\lambda_i, \lambda_{i+1})$, the stiffness denominator is:
 
-$$d_i = 1 + \frac{\Delta t}{\Delta x}\bigl(\lambda_{i-1/2} + \lambda_{i+1/2}\bigr)$$
+$$d_i = 1 + \frac{\Delta t_i}{\Delta x}\bigl(\lambda_{i-1/2} + \lambda_{i+1/2}\bigr)$$
 
 The update becomes:
 
-$$\mathbf{Q}_i^{n+1} = \mathbf{Q}_i^n + \frac{\Delta t}{d_i}\!\left[\mathcal{R}_i + \frac{\mathbf{S}_{A,i}}{A_i}\right]$$
+$$\mathbf{Q}_i^{n+1} = \mathbf{Q}_i^n + \frac{\Delta t_i}{d_i}\!\left[\mathcal{R}_i + \frac{\mathbf{S}_{A,i}}{A_i}\right]$$
 
 This is a first-order-accurate diagonal approximation to the full implicit system (no matrix inversion). It allows CFL $\gg 1$ (typically 10–100) and drastically reduces iteration count to steady state. Set `time_discretization: implicit` and raise `CFL` in `settings.yaml`.
+
+### 3.6 Local Time Stepping (LTS)
+
+Instead of advancing all cells with the global minimum time step $\Delta t = \mathrm{CFL}\cdot\Delta x/\max_i\lambda_i$, each cell is updated with its own local step:
+
+$$\Delta t_i = \mathrm{CFL}\cdot\frac{\Delta x}{\lambda_i}, \qquad \lambda_i = |u_i| + c_i$$
+
+Subsonic cells far from the throat use a much larger $\Delta t_i$, removing the throat bottleneck and accelerating convergence to steady state. The final steady-state solution is unchanged — LTS only affects the transient path.
+
+**Note for diagonal implicit:** For large CFL the denominator $d_i \approx \Delta t_i(\lambda_{i-1/2}+\lambda_{i+1/2})/\Delta x$, so the effective update is $\Delta t_i / d_i \approx \Delta x / (\lambda_{i-1/2}+\lambda_{i+1/2})$, which is independent of $\Delta t_i$. LTS therefore has negligible effect on the implicit scheme but is beneficial for explicit schemes (Euler, RK3, RK4).
 
 ---
 
@@ -198,7 +209,7 @@ $$T_s = T_0 - \frac{u_{in}^2}{2c_p}, \quad p_s = \frac{p_0}{\left(1+\frac{\gamma
 **Real gas:**
 $$h_s = h_0 - \tfrac{1}{2}u_{in}^2, \quad (\rho_s,\,e_s) = \mathrm{EOS}(h_s,\,s_0)$$
 
-The isentropic state at $(h_s, s_0)$ is found by a 40-iteration bisection over $p$ using `HmassP_INPUTS` (vectorised as a 1-element array so the JAX vmap path is exercised). Entropy is monotone decreasing in $p$ at constant $h$, so the bracket always converges.
+The isentropic state at $(h_s, s_0)$ is found by a **12-iteration bisection** over $p$ using `HmassP_INPUTS` (vectorised as a 1-element array so the JAX vmap path is exercised). $2^{-12}\approx 2\times10^{-4}$ relative precision; entropy is monotone decreasing in $p$ at constant $h$, so the bracket always converges.
 
 Ghost cell: $\mathbf{Q}_0 = [\rho_s,\; \rho_s u_{in},\; \rho_s(e_s + u_{in}^2/2)]^T$.
 
@@ -220,13 +231,36 @@ For supersonic outlet ($M\ge 1$), all variables are extrapolated without pressur
 
 ## 6. Real-gas EOS path (JAX)
 
-For `perfect_gas: false` with a non-Roe flux method, the solver uses a fully `@jax.jit`-compiled time step (no Python callbacks between iterations):
+For `perfect_gas: false` with a non-Roe flux method, the solver uses a fully `@jax.jit`-compiled step and a `jax.lax.while_loop` convergence loop — zero Python↔XLA synchronisation between iterations.
 
-1. **BCs** applied at the start of each step inside JIT (inlet: 40-iter bisection; outlet: `DmassP_INPUTS`)
-2. **EOS inversion** $(\rho, e) \to (p, c, \mu)$: 35-iteration JAX bisection over $p$, with the bracket tightened using the table $h$-range. All $N_x$ cells processed in a single vectorised XLA kernel.
-3. **Friction**: Haaland equation evaluated in JAX (`jnp` ops) from $Re, \varepsilon/D_h$.
-4. **Flux**: HLL/HLLC/Rusanov/LF in JAX.
-5. **Convergence check**: done every $k$ steps (1 / 10 / 50 for early / mid / late iterations) to amortise device-to-host synchronisation cost.
+### 6.1 Per-step operations
+
+Each compiled step executes the following in order:
+
+1. **BCs** inside JIT (inlet: 12-iter $p$-bisection at fixed $h_s, s_0$; outlet: `DmassP_INPUTS`)
+2. **EOS inversion** $(\rho, e) \to (p, c, \mu)$: **15-iteration** JAX bisection over $p$, bracket tightened with table $h$-range ($2^{-15}\approx 3\times10^{-5}$ relative error). All $N_x$ cells vectorised in one XLA kernel.
+3. **Geometry source**: $\mathbf{S}_A$ uses $(\mathrm{d}A/\mathrm{d}x)/A$ precomputed once at solver construction — the array is a closure constant inside the compiled step, so no allocation or computation occurs at run time.
+4. **Friction**: Haaland equation in `jnp` ops from $(Re,\,\varepsilon/D_h)$.
+5. **Flux**: Rusanov / HLL / HLLC / LF, all in JAX.
+6. **LTS update**: each cell uses its own $\Delta t_i = \mathrm{CFL}\cdot\Delta x/\lambda_i$ (see §3.6).
+
+### 6.2 Compiled convergence loop
+
+The outer iteration is a `jax.lax.while_loop` — the entire convergence loop stays on-device with no Python round-trips:
+
+- **Convergence metric (SSR):** Steady-State Residual, computed free-of-charge each step as a by-product of the already-evaluated RHS:
+
+$$\mathrm{SSR} = \sqrt{\left\langle\left(\frac{t_{\min}\,[\mathcal{R}(\mathbf{Q}) + \mathbf{S}/A]}{|\mathbf{Q}|}\right)^2\right\rangle_{\text{interior}}}, \qquad t_{\min} = \frac{\Delta x}{\max_i\lambda_i}$$
+
+Multiplying by $t_{\min}$ makes the residual dimensionless and CFL-independent: SSR$\to 0$ exactly at steady state, regardless of how large CFL is. Convergence is declared when SSR $< \varepsilon_{tol}$.
+
+- **Plateau detection:** if the SSR history over the last 5 iterations spans less than $2\times$ and SSR $< 10\,\varepsilon_{tol}$, the loop exits to avoid stalling on a plateau.
+
+- **Progress printing:** `jax.debug.print` + `jax.lax.cond` inside the loop; host sync occurs only at print frequency (every 1 / 10 / 50 iterations for early / mid / late), not every step.
+
+### 6.3 Warmup phase
+
+An optional warmup phase runs $N_{wu}$ iterations with cheaper settings (typically Rusanov + constant reconstruction) before the main loop, using `jax.lax.fori_loop` for zero Python overhead. This establishes a smooth initial field that dramatically reduces the iteration count of the more expensive main flux (HLLC, MUSCL, etc.). Configured in `settings.yaml` under `numerical_settings.warmup`.
 
 `jax.config.update("jax_enable_x64", True)` must be called before any JAX or jaxprop import to ensure 64-bit precision throughout.
 
@@ -235,9 +269,11 @@ For `perfect_gas: false` with a non-Roe flux method, the solver uses a fully `@j
 ## 7. Isentropic initialisation
 
 ### Perfect gas
+
 Analytical subsonic isentropic solution with mass flow set by the critical (throat) state. A `brentq` root-find per cell inverts $\dot{m}(u) = \rho(u)\,u\,A$.
 
 ### Real gas
+
 1. Build an isentropic table: sweep $h$ from $h_{lo}$ to $h_0$ (stagnation enthalpy); for each $h$ find $p$ such that $s(h,p) = s_0$ via 50-iteration vectorised bisection.
 2. Compute $G = \rho\,u = \rho\sqrt{2(h_0-h)}$ along the isentrope; the throat is at $G_{max}$.
 3. For each cell, interpolate $h$ and $p$ from the isentropic table at the target $G = \dot{m}/A_i$, using the subsonic or supersonic branch depending on position relative to the throat.
@@ -287,23 +323,25 @@ For the Lettieri nozzle $w = 6.48\;\mathrm{mm}$; selected via `nozzle_parameters
 
 ## 10. Convergence and spatial residuals
 
-### Temporal residual (stopping criterion)
+### Steady-State Residual (SSR) — stopping criterion
 
-$$\varepsilon = \max_{k=1,2,3}\sqrt{\langle \left|\frac{Q_k^{n+1} - Q_k^n}{Q_k^n}\right|^2 \rangle}$$
+The convergence metric used in the JAX path is the normalised steady-state residual:
 
-Convergence declared when $\varepsilon < \varepsilon_{tol}$ (set by `residuals` in `settings.yaml`).
+$$\mathrm{SSR} = \sqrt{\frac{1}{3(N_x-2)}\sum_{k=1}^{3}\sum_{i=1}^{N_x-2} \left(\frac{t_{\min}\,[\mathcal{R}_i(\mathbf{Q}) + S_{k,i}/A_i]}{|Q_{k,i}|}\right)^2}$$
+
+where $t_{\min} = \Delta x / \max_i(|u_i|+c_i)$ is the physical advection time across one cell at the throat. The factor $t_{\min}$ makes the residual dimensionless and **CFL-independent**: SSR$\to 0$ exactly at steady state for any CFL. Ghost cells (BC cells, indices 0 and $N_x-1$) are excluded — their values are set by BCs, not by flux conservation. Convergence is declared when SSR $<\varepsilon_{tol}$ (`residuals` in `settings.yaml`).
 
 ### Spatial conservation residuals (post-processing diagnostic)
 
 At steady state three quantities should be uniform across the domain:
 
 | Quantity | Expression | Physical meaning |
-|----------|-----------|-----------------|
+| --- | --- | --- |
 | Mass flux | $\dot{m}(x) = \rho u A$ | Continuity |
 | Total enthalpy | $H(x) = h + u^2/2$ | Adiabatic energy conservation |
 | Entropy (real gas) | $s(x)$ | Isentropic flow (rises only across shocks/friction) |
 
-Reported as max percentage deviation from the spatial mean, and plotted as deviation profiles. Large deviations in the convergent typically indicate insufficient grid resolution or unresolved BC transients, not a scheme error (provided the face-area fix is applied).
+Reported as max percentage deviation from the spatial mean over **interior cells only** (indices 1 to $N_x-2$), and plotted as deviation profiles. Ghost cells are excluded because their mass flow is set by BCs, not by flux conservation. Large deviations indicate insufficient grid resolution or unresolved BC transients, not a scheme error (provided the face-area fix is applied).
 
 ---
 
@@ -335,13 +373,39 @@ Reported as max percentage deviation from the spatial mean, and plotted as devia
 
 ## 12. Settings reference (`settings.yaml`)
 
-| Key | Options | Notes |
-|-----|---------|-------|
+### Numerical settings
+
+| Key | Options / type | Notes |
+| --- | --- | --- |
 | `flux_method` | `hll`, `hllc`, `rusanov`, `lf`, `roe` | `roe` bypasses JAX path |
 | `time_discretization` | `euler`, `RK3`, `RK4`, `implicit` | `implicit` allows CFL ≫ 1 |
 | `reconstruction` | `constant`, `muscl_minmod`, `muscl_van_leer`, `muscl_superbee` | MUSCL + Euler: CFL ≤ 0.5 |
 | `CFL` | float | ~0.2 explicit; 10–100 implicit |
-| `perfect_gas` | `true`/`false` | selects EOS and code path |
+| `residuals` | float | SSR convergence threshold (e.g. `1e-4`) |
+| `max_iterations` | int | Hard iteration cap |
+
+### Warmup phase (`numerical_settings.warmup`)
+
+Optional block; omit entirely to skip warmup. When present, a `jax.lax.fori_loop` runs the specified number of iterations with cheap settings before the main while_loop.
+
+| Key | Default | Notes |
+| --- | --- | --- |
+| `n_iterations` | 200 | Number of warmup iterations |
+| `flux_method` | `rusanov` | Cheap flux for warmup |
+| `reconstruction` | `constant` | Reconstruction during warmup |
+| `CFL` | (main CFL) | Can be equal to main CFL |
+
+### Fluid settings (`fluid`)
+
+| Key | Options / type | Notes |
+| --- | --- | --- |
+| `perfect_gas` | `true`/`false` | Selects EOS and code path |
+| `fluid_name` | CoolProp string | e.g. `CO2`, `Water`, `Nitrogen` |
+| `use_lookup_table` | `true`/`false` | `true` → `FluidBicubic` (fast, needs table build); `false` → `jxp.Fluid` (direct HEOS, always available) |
+| `lut.h_min/h_max` | float (J/kg) | Enthalpy range of the bicubic table |
+| `lut.p_min/p_max` | float (Pa) | Pressure range of the bicubic table |
+| `lut.N_h`, `N_p` | int | Table resolution (200×200 recommended) |
+| `lut.table_dir` | path string | Directory where table binaries are cached |
 
 ---
 

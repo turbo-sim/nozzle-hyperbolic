@@ -707,6 +707,14 @@ def make_jax_step(fluid, A, D_h, roughness, dx, CFL, p_out, h0, s0,
     D_h_j = jnp.asarray(D_h, dtype=jnp.float64)
     A_L   = A_j[:-1];  A_R = A_j[1:]
 
+    # Precompute dA_dx / A once — geometry is constant, no need to recompute every step.
+    # Central differences for interior, one-sided at boundaries.
+    _dA_dx_j = jnp.concatenate([
+        (A_j[1:2]   - A_j[:1])    / (A_j[:1]    * dx),
+        (A_j[2:]    - A_j[:-2])   / (A_j[1:-1]  * 2.0 * dx),
+        (A_j[-1:]   - A_j[-2:-1]) / (A_j[-1:]   * dx),
+    ])
+
     h_lo    = float(getattr(fluid, 'h_min', 50e3))  + 1.0
     h_hi    = float(getattr(fluid, 'h_max', 850e3)) - 1.0
     p_lo_r  = float(getattr(fluid, 'p_min', 1e4))   * 1.01
@@ -746,7 +754,7 @@ def make_jax_step(fluid, A, D_h, roughness, dx, CFL, p_out, h0, s0,
         p_lo = jnp.where(bad, p_lo_r, p_lo)
         p_hi = jnp.where(bad, p_hi_r, p_hi)
         p    = 0.5 * (p_lo + p_hi)
-        for _ in range(35):
+        for _ in range(15):
             h        = jnp.clip(e + p / rho, h_lo + 1.0, h_hi - 1.0)
             rho_pred = fluid.get_state(jxp.HmassP_INPUTS, h, p).density
             residual = rho_pred - rho
@@ -784,13 +792,13 @@ def make_jax_step(fluid, A, D_h, roughness, dx, CFL, p_out, h0, s0,
         return RHS
 
     def _bc_inlet(Q_n):
-        # Extrapolate velocity; find isentropic static state via 40-iter bisection.
+        # Extrapolate velocity; find isentropic static state via 12-iter bisection.
         # Uses 1-element arrays so FluidBicubic's vmap path is exercised, not scalar.
         u_in  = 2.0 * Q_n[1, 1] / Q_n[0, 1] - Q_n[1, 2] / Q_n[0, 2]
         h_s   = jnp.expand_dims(h0_j - 0.5 * u_in**2, 0)   # shape (1,)
         plo   = jnp.array([p_lo_r], dtype=jnp.float64)
         phi   = jnp.array([p_hi_r], dtype=jnp.float64)
-        for _ in range(40):
+        for _ in range(12):
             pm    = 0.5 * (plo + phi)
             s_mid = fluid.get_state(jxp.HmassP_INPUTS, h_s, pm).entropy
             plo   = jnp.where(s_mid > s0_j, pm, plo)
@@ -830,43 +838,56 @@ def make_jax_step(fluid, A, D_h, roughness, dx, CFL, p_out, h0, s0,
         Re    = rho * jnp.abs(u) * D_h_j / jnp.maximum(mu, 1e-12)
         tau_w = _haaland_jnp(Re, roughness, D_h_j) * rho * u**2 / 8.0
 
-        dA_dx = jnp.concatenate([
-            (A_j[1:2]   - A_j[:1])    / (A_j[:1]    * dx),
-            (A_j[2:]    - A_j[:-2])   / (A_j[1:-1]  * 2.0 * dx),
-            (A_j[-1:]   - A_j[-2:-1]) / (A_j[-1:]   * dx),
-        ])
-        S = jnp.stack([jnp.zeros_like(p), p * dA_dx - tau_w * 4.0 / D_h_j, jnp.zeros_like(p)])
+        S = jnp.stack([jnp.zeros_like(p), p * _dA_dx_j - tau_w * 4.0 / D_h_j, jnp.zeros_like(p)])
 
-        dt = CFL * dx / jnp.max(jnp.abs(u) + c)
+        # ── Local Time Stepping (LTS) ─────────────────────────────────────────
+        # Each cell advances at dt_i = CFL * dx / (|u_i| + c_i) instead of the
+        # global minimum.  Subsonic cells away from the throat use a much larger
+        # dt_i, removing the throat bottleneck and accelerating convergence to
+        # steady state without affecting the final solution.
+        lam    = jnp.abs(u) + c
+        dt_vec = CFL * dx / jnp.maximum(lam, 1e-10)   # (Nj,) per-cell time step
+        dt_min = jnp.min(dt_vec)                        # scalar: throat-limited dt
+        dt_b   = dt_vec[jnp.newaxis, :]                 # (1, Nj) for broadcasting
+
+        # Evaluate the steady-state residual R(Q)+S once at Q_n.
+        # This is the true convergence metric: zero at steady state regardless of CFL.
+        # Reusing it in the time update also saves one flux call for RK methods.
+        # dt_min passed to _R only for the Lax-Friedrichs flux (ignored by others).
+        RHS_n = _R(Q_n, p, c, dt_min) + S
+
+        # Normalised steady-state residual (SSR): dimensionless, CFL-independent.
+        # t_min = dt_min/CFL = dx/max(lam): physical advection time at the throat.
+        t_min = dt_min / CFL
+        ssr = jnp.sqrt(jnp.mean(
+            (t_min * RHS_n[:, 1:-1] / (jnp.abs(Q_n[:, 1:-1]) + 1e-300))**2))
 
         if time_method == 'euler':
-            Q_new = Q_n + dt * (_R(Q_n, p, c, dt) + S)
+            Q_new = Q_n + dt_b * RHS_n
         elif time_method == 'RK3':
-            R1    = _R(Q_n, p, c, dt)
-            Q1    = Q_n + dt * (R1 + S)
-            R2    = _R(Q1, p, c, dt)
-            Q2    = 0.75 * Q_n + 0.25 * (Q1 + dt * (R2 + S))
-            R3    = _R(Q2, p, c, dt)
-            Q_new = (Q_n + 2.0 * (Q2 + dt * (R3 + S))) / 3.0
+            Q1    = Q_n + dt_b * RHS_n                     # stage 1: reuse RHS_n
+            R2    = _R(Q1, p, c, dt_min)
+            Q2    = 0.75 * Q_n + 0.25 * (Q1 + dt_b * (R2 + S))
+            R3    = _R(Q2, p, c, dt_min)
+            Q_new = (Q_n + 2.0 * (Q2 + dt_b * (R3 + S))) / 3.0
         elif time_method == 'RK4':
-            k1    = _R(Q_n, p, c, dt) + S
-            k2    = _R(Q_n + 0.5 * dt * k1, p, c, dt) + S
-            k3    = _R(Q_n + 0.5 * dt * k2, p, c, dt) + S
-            k4    = _R(Q_n +       dt * k3,  p, c, dt) + S
-            Q_new = Q_n + (dt / 6.0) * (k1 + 2*k2 + 2*k3 + k4)
+            k1    = RHS_n                                   # reuse RHS_n
+            k2    = _R(Q_n + 0.5 * dt_b * k1, p, c, dt_min) + S
+            k3    = _R(Q_n + 0.5 * dt_b * k2, p, c, dt_min) + S
+            k4    = _R(Q_n +       dt_b * k3,  p, c, dt_min) + S
+            Q_new = Q_n + (dt_b / 6.0) * (k1 + 2*k2 + 2*k3 + k4)
         elif time_method == 'implicit':
-            # Diagonal implicit Euler: denom = 1 + dt*(λ_L + λ_R)/dx
-            # Allows CFL >> 1 for accelerated convergence to steady state.
-            lam      = jnp.abs(u) + c
+            # Per-cell denom: each cell uses its own dt_vec[i], giving uniformly
+            # strong damping across the domain — not just at the throat.
             lam_face = jnp.maximum(lam[:-1], lam[1:])
             lam_L    = jnp.concatenate([lam_face[:1],  lam_face])
             lam_R    = jnp.concatenate([lam_face, lam_face[-1:]])
-            denom    = 1.0 + dt * (lam_L + lam_R) / dx
-            Q_new    = Q_n + dt * (_R(Q_n, p, c, dt) + S) / denom[jnp.newaxis, :]
+            denom    = 1.0 + dt_vec * (lam_L + lam_R) / dx   # (Nj,) per-cell
+            Q_new    = Q_n + dt_b * RHS_n / denom[jnp.newaxis, :]
         else:
-            Q_new = Q_n + dt * (_R(Q_n, p, c, dt) + S)  # fallback to Euler
+            Q_new = Q_n + dt_b * RHS_n  # fallback to Euler
 
-        return Q_new, p, c, dt
+        return Q_new, p, c, dt_min, ssr
 
     return step
 
@@ -891,9 +912,10 @@ def fvm_euler_1d(x, t, parameters):
     warmup      = 50
 
     # Gas-specific setup
-    flux_method = parameters['space_method']
-    method      = parameters['time_method']
-    recon       = parameters.get('reconstruction', 'constant')
+    flux_method  = parameters['space_method']
+    method       = parameters['time_method']
+    recon        = parameters.get('reconstruction', 'constant')
+    warmup_cfg   = parameters.get('warmup_cfg', None)
 
     if perfect_gas:
         cp, cv  = hyp.fvm_solver.specific_heat2()
@@ -924,40 +946,113 @@ def fvm_euler_1d(x, t, parameters):
     if use_jax:
         _jax_step = make_jax_step(fluid, A_nodes, D_hydraulic, roughness,
                                   dx, CFL, p_out, h0, s0, recon, flux_method, method)
-        Q_jax    = jnp.asarray(Q[:, :, 0])
-        Q_init   = Q[:, :, 0].copy()
-        t_total  = 0.0
-        dt_last  = 0.0
-        residual = 1.0
-        print("JAX step compiled — first iteration includes XLA compile time.", flush=True)
+        Q_jax  = jnp.asarray(Q[:, :, 0])
+        Q_init = Q[:, :, 0].copy()
 
+        # ── Optional warmup phase ─────────────────────────────────────────────
+        # Run N_wu iterations with cheap settings (e.g. Rusanov, constant recon)
+        # to establish a decent initial field before the main solver takes over.
+        # Compiled as a single fori_loop — no Python overhead between warmup iters.
+        if warmup_cfg is not None:
+            wu_n     = int(warmup_cfg.get('n_iterations',  200))
+            wu_flux  = str(warmup_cfg.get('flux_method',   'rusanov'))
+            wu_recon = str(warmup_cfg.get('reconstruction','constant'))
+            wu_cfl   = float(warmup_cfg.get('CFL',          CFL))
+            # Only build warmup step when settings differ from main settings
+            wu_differs = (wu_flux != flux_method or wu_recon != recon or wu_cfl != CFL)
+            if wu_differs:
+                _wu_step = make_jax_step(fluid, A_nodes, D_hydraulic, roughness,
+                                         dx, wu_cfl, p_out, h0, s0,
+                                         wu_recon, wu_flux, method)
+            else:
+                _wu_step = _jax_step   # identical settings: reuse compiled kernel
+
+            @jax.jit
+            def _wu_run(Q0):
+                def body(i, Q):
+                    Q_new, _, _, _, _ = _wu_step(Q)
+                    return Q_new
+                return jax.lax.fori_loop(0, wu_n, body, Q0)
+
+            print(f"Warmup: {wu_n} iters with flux={wu_flux}, recon={wu_recon}, "
+                  f"CFL={wu_cfl} ...", flush=True)
+            t_wu = _time.perf_counter()
+            Q_jax = _wu_run(Q_jax)
+            jax.block_until_ready(Q_jax)
+            print(f"Warmup done in {_time.perf_counter()-t_wu:.1f} s", flush=True)
+
+        # ── Fully compiled solver: jax.lax.while_loop stays on-device ────────
+        # No Python↔XLA sync between iterations → maximum throughput.
+        # Convergence checks (threshold + plateau) compiled as JAX ops inside
+        # the loop — zero Python overhead per iteration.
+        _max_iter = jnp.int32(max_iter)
+        _tol      = jnp.float64(steady_thr)
+        _warmup_j = jnp.int32(warmup)
+
+        @jax.jit
+        def _jax_run(Q0):
+
+            def cond_fn(carry):
+                _, n, res, res_hist = carry
+                below_thr = res < _tol
+                hist_max  = jnp.max(res_hist)
+                hist_min  = jnp.min(res_hist) + 1e-300
+                plateau   = (n >= _warmup_j) & (hist_max / hist_min < 1.5) & (res < 3.0 * _tol)
+                return (n < _max_iter) & ~(below_thr | plateau)
+
+            def body_fn(carry):
+                Q, n, _, res_hist = carry
+                # ssr (steady-state residual) is returned free from step() —
+                # it is computed there anyway as part of RHS_n, at no extra cost.
+                Q_new, _, _, _, res = _jax_step(Q)
+                res_hist_new = jnp.roll(res_hist, -1).at[-1].set(res)
+
+                # Adaptive print frequency: every 1 / 10 / 50 iters.
+                # jax.debug.print works inside while_loop; jax.lax.cond gates
+                # the sync so it only happens at print time, not every step.
+                should_print = jnp.where(
+                    n < 10,  jnp.bool_(True),
+                    jnp.where(n < 100, n % 10 == 0, n % 50 == 0))
+                jax.lax.cond(
+                    should_print,
+                    lambda args: jax.debug.print(
+                        "Iter {n:5d}  SSR = {res:.3e}", n=args[0], res=args[1]),
+                    lambda args: None,
+                    (n, res),
+                )
+
+                return Q_new, n + 1, res, res_hist_new
+
+            res_hist0 = jnp.ones(5, dtype=jnp.float64)  # initialise history to large value
+            init      = (Q0, jnp.int32(0), jnp.float64(1.0), res_hist0)
+            Q_f, n_f, res_f, _ = jax.lax.while_loop(cond_fn, body_fn, init)
+            return Q_f, n_f, res_f
+
+        print("Compiling and running solver (jax.lax.while_loop) ...", flush=True)
+        print("  First call includes XLA compilation; subsequent calls reuse the kernel.",
+              flush=True)
+        t0 = _time.perf_counter()
         try:
-            while n < max_iter:
-                Q_new, p_jax, c_jax, dt_jax = _jax_step(Q_jax)
-
-                freq = 1 if n < 10 else (10 if n < 100 else 50)
-                if n % freq == 0:
-                    dt_last  = float(dt_jax)
-                    dQ       = jnp.abs(Q_new[:, 1:-1] - Q_jax[:, 1:-1]) / (jnp.abs(Q_jax[:, 1:-1]) + 1e-300)
-                    residual = float(jnp.max(jnp.sqrt(jnp.mean(dQ**2, axis=1))))
-                    print(f"Iter {n:5d}  residual = {residual:.4e}"
-                          f"  dt = {dt_last:.3e}  p_min = {float(jnp.min(p_jax)):.4e}", flush=True)
-                    if n > warmup and residual < steady_thr:
-                        print(f"Converged after {n} iterations.", flush=True)
-                        Q_jax = Q_new
-                        break
-
-                t_total += dt_last
-                Q_jax    = Q_new
-                n       += 1
-
+            Q_final, n_final, res_final = _jax_run(Q_jax)
+            jax.block_until_ready(Q_final)
         except KeyboardInterrupt:
-            print("Interrupted — returning current solution.")
+            print("Interrupted — returning initial solution.")
+            Q_out = np.zeros((N, Nj, 2))
+            Q_out[:, :, 0] = Q_init
+            Q_out[:, :, 1] = Q_init
+            return Q_out, np.array([0.0, 0.0])
+
+        elapsed  = _time.perf_counter() - t0
+        n_done   = int(n_final)
+        res_done = float(res_final)
+        reason   = "below threshold" if res_done < float(steady_thr) else "plateau / max_iter"
+        print(f"Done: {n_done} iterations ({reason}). "
+              f"NRMS = {res_done:.3e}.  Computational time = {elapsed:.1f} s", flush=True)
 
         Q_out = np.zeros((N, Nj, 2))
         Q_out[:, :, 0] = Q_init
-        Q_out[:, :, 1] = np.asarray(Q_jax)
-        return Q_out, np.array([0.0, t_total])
+        Q_out[:, :, 1] = np.asarray(Q_final)
+        return Q_out, np.array([0.0, elapsed])
 
     # ── NumPy path (perfect gas or Roe) ──────────────────────────────────
     try:
