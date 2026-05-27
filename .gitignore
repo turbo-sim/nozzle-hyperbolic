@@ -1,6 +1,32 @@
+# Fluid property tables (large binary files — regenerated on first run)
+*.pkl
 *.npz
+fluid_tables/
 
-# Compiled Python files
+# Compiled Python
 __pycache__/
 *.pyc
 *.pyo
+*.pyd
+
+# Distribution / packaging
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# OS artefacts
+Thumbs.db
+.DS_Store
+*.db
+
+# Archives
+*.zip
+
+# IDE
+.vscode/
+.idea/

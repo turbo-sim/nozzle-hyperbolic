@@ -1,0 +1,49 @@
+boundary_conditions:
+  p_stagnation:  130e5
+  T_stagnation: 348
+  p_out: 78e5
+ 
+# Numerical settings
+numerical_settings:
+  Nx: 50 # Number of cells
+  x1: -0.03201  # Left boundary
+  x2: 0.06636   # Right boundary
+  t1: 0.00  # Initial time
+  t2: 120  # Final time
+  CFL: 100 # Maximum allowed local Courant number
+  max_iterations: 1000000
+  residuals: 0.0001
+  flux_method: hllc
+  time_discretization: implicit
+  reconstruction: constant  # constant | muscl_minmod | muscl_van_leer | muscl_superbee
+                                 # NOTE: MUSCL + euler requires CFL ≤ 0.5
+  # Optional warmup phase: run N iterations with cheap settings before switching to
+  # the main flux/reconstruction above. Omit this block to skip warmup entirely.
+  warmup:
+    n_iterations: 100
+    flux_method: rusanov
+    reconstruction: constant
+    CFL: 100
+ 
+nozzle_parameters:
+  type: axisymmetric  # planar or axisymmetric
+  width: 6.48e-3  # channel depth [m] (planar only)
+  r0: 3
+  rt: 0.5
+  roughness: 0.000002
+ 
+fluid:
+  perfect_gas: false
+  fluid_name: CO2
+  use_lookup_table: true   # true = FluidBicubic (fast, requires table build);
+                           # false = jxp.Fluid  (direct HEOS, slower, no table needed)
+  lut:                     # only used when use_lookup_table: true
+    backend:   HEOS
+    h_min:     50000.0     # J/kg
+    h_max:     850000.0    # J/kg
+    p_min:     10000.0     # Pa
+    p_max:     30000000.0  # Pa
+    N_h:       200
+    N_p:       200
+    table_dir: fluid_tables
+

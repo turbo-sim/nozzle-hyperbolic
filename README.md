@@ -9,7 +9,7 @@ Commands to clone repository, create Conda environment, and install all required
 git clone https://github.com/turbo-sim/nozzle-hyperbolic
 cd nozzle-hyperbolic
 conda env create -f environment.yaml
-conda activate hyperbolic_env
+conda activate hyper_env
 poetry install
 ```
 
