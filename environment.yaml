@@ -1,4 +1,4 @@
-name: hyperbolic_env
+name: hyper_env
 channels:
  - conda-forge
 dependencies:
