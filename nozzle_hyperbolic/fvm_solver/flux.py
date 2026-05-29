@@ -2,10 +2,13 @@
 Numerical flux functions for the quasi-1D Euler equations.
 
 All functions return area-weighted fluxes FA at each interface:
-    FA[:, i]  ≈  F_{i+1/2} * A_{i+1/2}
+
+FA[:, i]  ≈  F_{i+1/2} * A_{i+1/2}
 
 so the caller (R in fvm.py) can directly compute the flux divergence
-    -(FA_{i+1/2} - FA_{i-1/2}) / (A_i * dx)
+
+-(FA_{i+1/2} - FA_{i-1/2}) / (A_i * dx)
+
 without any additional area scaling.
 """
 

@@ -1,6 +1,6 @@
-## 4. Fully implicit time integration
+# Fully implicit time integration
 
-### 4.1 Backward Euler (implicit Euler)
+## Backward Euler (implicit Euler)
 
 The fully implicit backward Euler update requires finding $\mathbf{Q}^{n+1}$ satisfying:
 
@@ -16,7 +16,7 @@ $$\left(\mathbf{I} - \Delta t\,\frac{\partial \mathcal{L}}{\partial \mathbf{Q}}\
 
 This is a linear system solved at each time step. The diagonal implicit scheme of §3.5 is a further approximation that retains only the diagonal of the Jacobian $\partial\mathcal{L}/\partial\mathbf{Q}$, avoiding the full matrix solve. The Jacobian $\partial\mathcal{L}/\partial\mathbf{Q}$ can be calculated using JAX.
 
-### 4.2 Full nonlinear solve via root finding
+## Full nonlinear solve via root finding
 
 Without linearisation, define the residual over all $N_x$ cells:
 
@@ -24,7 +24,7 @@ $$\mathbf{G}(\mathbf{Q}^{n+1}) = \mathbf{Q}^{n+1} - \mathbf{Q}^n - \Delta t\,\ma
 
 This nonlinear system can be solved with Newton or Gauss-Newton methods (e.g. via the `optimistix` library), with the exact Jacobian $\partial\mathbf{G}/\partial\mathbf{Q}$ computed automatically by JAX (no need to implement the Jacobian calculation, it is handled by optimistix)
 
-### 4.3 Direct steady-state solve
+## Direct steady-state solve
 
 Since the steady-state solution satisfies $\mathcal{L}(\mathbf{Q}^{\infty}) = \mathbf{0}$ regardless of $\Delta t$, two equivalent formulations are available:
 

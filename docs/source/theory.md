@@ -1,4 +1,9 @@
+(theory)=
+
 # Nozzle-hyperbolic: governing equations and numerical method
+
+This is an example about how to cite a reference {cite}`denton_loss_1993`.
+
 
 ## 1. Governing equations
 

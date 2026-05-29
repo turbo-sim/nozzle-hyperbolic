@@ -1,32 +1,83 @@
-# Fluid property tables (large binary files — regenerated on first run)
-*.pkl
-*.npz
-fluid_tables/
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
 
-# Compiled Python
+# Compiled Python files
 __pycache__/
 *.pyc
 *.pyo
-*.pyd
 
-# Distribution / packaging
-*.egg-info/
-dist/
-build/
-.eggs/
+# Visual Studio Code specific
+.vscode/
+settings.json 
+*.code-workspace 
 
-# Jupyter
-.ipynb_checkpoints/
-*.ipynb
-
-# OS artefacts
-Thumbs.db
+# Other
+*.log
+*.tmp
+*.bak
 .DS_Store
-*.db
+*.swp 
 
-# Archives
+# Sphinx generated files
+_build/
+docs/_build/
+docs/.doctrees/
+docs/.buildinfo
+.doctrees/
+environment.pickle
+
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Generated LaTeX files
+*.latex
+
+# Other common directories and files
+*.log
+*.bak
+*.swp
+*.bak~
+*.cache
+*.tmp
+*.~lock.*
+
+# Environment directories
+.env
+venv/
+
+# Temporary excel/debug artifacts
+.tmp_xlsx_inspect/
+
+tmp_*.xlsx
+tmp_*.py
+tmp_common_funcs.py
+
+# Debug plots
+turboflow/Debug_plots/
+
+# Optional scratch archives/xmls
 *.zip
 
-# IDE
-.vscode/
-.idea/
+# Results folders
+**/output/
+**/output*/
+**/results/
+**/fluid_tables/
