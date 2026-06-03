@@ -5,25 +5,45 @@ boundary_conditions:
  
 # Numerical settings
 numerical_settings:
-  Nx: 50 # Number of cells
+  Nx: 200 # Number of cells
   x1: -0.03201  # Left boundary
   x2: 0.06636   # Right boundary
   t1: 0.00  # Initial time
   t2: 120  # Final time
-  CFL: 100 # Maximum allowed local Courant number
+  CFL: 10 # Maximum allowed local Courant number
   max_iterations: 1000000
   residuals: 0.0001
+  # ── Flux method ────────────────────────────────────────────────────────
+  # rusanov | hll | hllc | lf    (JAX, real gas)
+  # roe                           (NumPy, real gas)
+  # NOTE: ignored when time_discretization is fvs_newton
   flux_method: hllc
-  time_discretization: implicit
-  reconstruction: constant  # constant | muscl_minmod | muscl_van_leer | muscl_superbee
-                                 # NOTE: MUSCL + euler requires CFL ≤ 0.5
-  # Optional warmup phase: run N iterations with cheap settings before switching to
-  # the main flux/reconstruction above. Omit this block to skip warmup entirely.
+
+  # ── Time discretization ─────────────────────────────────────────────────
+  # euler           — explicit forward Euler            (JAX/NumPy)
+  # RK3             — SSP Runge-Kutta 3rd order         (JAX/NumPy)
+  # RK4             — classic 4th-order Runge-Kutta     (JAX/NumPy)
+  # implicit        — diagonal implicit (pseudo-time)   (JAX/NumPy)
+  # fvs_newton  — Städtke FVS + full Newton-Raphson (JAX, real gas only)
+  #                   Works in (p,u,h) primitives; flux_method is ignored.
+  #                   Jacobian via jax.jacobian; 3 Newton iters/step.
+  #                   Keep Nx <= 500 (dense Jacobian). CFL can be raised to 5-10.
+  # time_discretization: implicit
+  time_discretization: fvs_newton
+
+  # ── Reconstruction ──────────────────────────────────────────────────────
+  # constant | muscl_minmod | muscl_van_leer | muscl_superbee
+  # NOTE: ignored for fvs_newton (always uses Van Leer in (p,u,h))
+  # NOTE: MUSCL + euler requires CFL <= 0.5
+  reconstruction: MUSCL
+
+  # ── Warmup (JAX path only, not fvs_newton) ──────────────────────────
+  # Omit this block to skip warmup entirely.
   warmup:
     n_iterations: 100
     flux_method: rusanov
     reconstruction: constant
-    CFL: 100
+    CFL: 20
  
 nozzle_parameters:
   type: axisymmetric  # planar or axisymmetric
@@ -43,7 +63,6 @@ fluid:
     h_max:     850000.0    # J/kg
     p_min:     10000.0     # Pa
     p_max:     30000000.0  # Pa
-    N_h:       200
-    N_p:       200
+    N_h:       80
+    N_p:       80
     table_dir: fluid_tables
-

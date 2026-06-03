@@ -10,7 +10,7 @@ import jaxprop as jxp
 hyp.set_plot_options(grid=False)
 
 ## Read settings
-with open("settings.yaml", 'r') as file:
+with open("settings_shock_tube.yaml", 'r') as file:
     case_data = yaml.safe_load(file)
 
 hyp.print_dict(case_data)
@@ -68,28 +68,37 @@ if perfect_gas:
 roughness    = case_data["nozzle_parameters"]["roughness"]
 nozzle_type  = case_data["nozzle_parameters"]["type"].lower()
 
-file_path  = "Lettieri_nozzle.xlsx"
-sheet_name = "Sheet1"
-_, _, spline = hyp.fit_nozzle_shape(file_path, sheet_name, degree=10)
-
-r = np.array([spline(xi) if xi >= -0.03201 else 0.006365 for xi in x])
-h = r  # half-height (planar) or radius (axisymmetric)
-
-if nozzle_type == "planar":
-    width       = float(case_data["nozzle_parameters"]["width"])
-    A_nodes     = 2 * r * width
-    D_hydraulic = 4 * A_nodes / (2 * (width + 2 * r))
-elif nozzle_type == "axisymmetric":
-    A_nodes     = np.pi * r**2
-    D_hydraulic = 2 * r
+if nozzle_type == "shock_tube":
+    # Constant-area duct — no Excel file needed
+    A_ref       = float(case_data["nozzle_parameters"].get("area", 1.0))
+    A_nodes     = np.full(Nx, A_ref)
+    D_hydraulic = np.full(Nx, 2.0 * np.sqrt(A_ref / np.pi))  # equivalent circular duct
+    r = np.sqrt(A_nodes / np.pi)   # for overlay plot
 else:
-    raise ValueError(f"Unknown nozzle type '{nozzle_type}'. Choose 'planar' or 'axisymmetric'.")
+    file_path  = "Lettieri_nozzle.xlsx"
+    sheet_name = "Sheet1"
+    _, _, spline = hyp.fit_nozzle_shape(file_path, sheet_name, degree=10)
+
+    r = np.array([spline(xi) if xi >= -0.03201 else 0.006365 for xi in x])
+
+    if nozzle_type == "planar":
+        width       = float(case_data["nozzle_parameters"]["width"])
+        A_nodes     = 2 * r * width
+        D_hydraulic = 4 * A_nodes / (2 * (width + 2 * r))
+    elif nozzle_type == "axisymmetric":
+        A_nodes     = np.pi * r**2
+        D_hydraulic = 2 * r
+    else:
+        raise ValueError(f"Unknown nozzle type '{nozzle_type}'. "
+                         f"Choose 'planar', 'axisymmetric', or 'shock_tube'.")
+
+h = r  # half-height / radius for overlay plots
 
 ## Parameters dict
 parameters = {
     "perfect_gas":    perfect_gas,
     "fluid_name":     fluid_name,
-    "fluid":          fluid,  # INJECT ENGINE CONTEXT DOWNSTREAM
+    "fluid":          fluid,
     "residuals":      residuals,
     "max_iterations": case_data["numerical_settings"]["max_iterations"],
     "A_nodes":        A_nodes,
@@ -104,54 +113,60 @@ parameters = {
     "time_method":    case_data["numerical_settings"]["time_discretization"],
     "reconstruction": case_data["numerical_settings"].get("reconstruction", "constant"),
     "warmup_cfg":     case_data["numerical_settings"].get("warmup", None),
+    "nozzle_type":    nozzle_type,
 }
 if perfect_gas:
     parameters["gamma"] = cp / cv
+if nozzle_type == "shock_tube":
+    parameters["shock_tube_cfg"] = case_data["nozzle_parameters"]["shock_tube"]
 
-## Isentropic initialization
-print("Computing isentropic initialization...")
-Q_init = hyp.fvm_solver.isentropic_initialization(x, A_nodes, parameters)
+## Initial condition
+print("Computing initialization...")
+if nozzle_type == "shock_tube":
+    Q_init = hyp.fvm_solver.shock_tube_Q_initialization(x, A_nodes, parameters)
+else:
+    Q_init = hyp.fvm_solver.isentropic_initialization(x, A_nodes, parameters)
 parameters["Q_o"] = lambda _: Q_init
 print("Initialization done.")
 
-## Plot initial solution + area
-if perfect_gas:
-    rho0 = Q_init[0]
-    u0   = Q_init[1] / Q_init[0]
-    p0   = (cp / cv - 1) * (Q_init[2] - 0.5 * Q_init[1]**2 / Q_init[0])
-else:
-    rho0  = Q_init[0]
-    u0    = Q_init[1] / Q_init[0]
-    e0    = Q_init[2] / Q_init[0] - 0.5 * u0**2
-    _st0  = hyp.fvm_solver.state_from_rho_u_batch(fluid, rho0, e0)
-    p0    = np.asarray(_st0.pressure, dtype=float)
+# ## Plot initial solution + area
+# if perfect_gas:
+#     rho0 = Q_init[0]
+#     u0   = Q_init[1] / Q_init[0]
+#     p0   = (cp / cv - 1) * (Q_init[2] - 0.5 * Q_init[1]**2 / Q_init[0])
+# else:
+#     rho0  = Q_init[0]
+#     u0    = Q_init[1] / Q_init[0]
+#     e0    = Q_init[2] / Q_init[0] - 0.5 * u0**2
+#     _st0  = hyp.fvm_solver.state_from_rho_u_batch(fluid, rho0, e0)
+#     p0    = np.asarray(_st0.pressure, dtype=float)
 
-fig_init, axes = plt.subplots(2, 2, figsize=(10, 6))
-fig_init.suptitle("Initial solution")
+# fig_init, axes = plt.subplots(2, 2, figsize=(10, 6))
+# fig_init.suptitle("Initial solution")
 
-ax = axes[0, 0]
-ax.plot(x, rho0)
-ax.set_ylabel(r"$\rho$ [kg/m³]")
+# ax = axes[0, 0]
+# ax.plot(x, rho0)
+# ax.set_ylabel(r"$\rho$ [kg/m³]")
 
-ax = axes[0, 1]
-ax.plot(x, u0)
-ax.set_ylabel("u [m/s]")
+# ax = axes[0, 1]
+# ax.plot(x, u0)
+# ax.set_ylabel("u [m/s]")
 
-ax = axes[1, 0]
-ax.plot(x, p0 / 1e5)
-ax.set_ylabel("p [bar]")
+# ax = axes[1, 0]
+# ax.plot(x, p0 / 1e5)
+# ax.set_ylabel("p [bar]")
 
-ax = axes[1, 1]
-ax.plot(x, A_nodes * 1e4)
-ax.plot(x, h * 1e3, "k--", label="r [mm]")
-ax.set_ylabel(r"A [cm²]")
-ax.legend()
+# ax = axes[1, 1]
+# ax.plot(x, A_nodes * 1e4)
+# ax.plot(x, h * 1e3, "k--", label="r [mm]")
+# ax.set_ylabel(r"A [cm²]")
+# ax.legend()
 
-for ax in axes.flat:
-    ax.set_xlabel("x [m]")
+# for ax in axes.flat:
+#     ax.set_xlabel("x [m]")
 
-plt.tight_layout()
-plt.show()
+# plt.tight_layout()
+# plt.show()
 
 ## Solve
 Q, t = hyp.fvm_solver.fvm_euler_1d(x, t, parameters)
@@ -245,6 +260,81 @@ else:
 
 plt.tight_layout()
 plt.show()
+
+## Shock tube: compare with exact Sod solution
+if nozzle_type == "shock_tube":
+    from scipy.optimize import brentq as _brentq_sod
+    cfg_st   = case_data["nozzle_parameters"]["shock_tube"]
+    x_d      = float(cfg_st.get("x_diaphragm", 0.5 * (x1 + x2)))
+    p_L_st   = float(cfg_st["p_L"]);  T_L_st = float(cfg_st["T_L"]);  u_L_st = float(cfg_st.get("u_L", 1.0))
+    p_R_st   = float(cfg_st["p_R"]);  T_R_st = float(cfg_st["T_R"]);  u_R_st = float(cfg_st.get("u_R", 1.0))
+
+    # Approximate ideal-gas sound speeds for exact solution
+    st_L_ex  = jxp.Fluid(fluid_name).get_state(jxp.PT_INPUTS, p_L_st, T_L_st)
+    st_R_ex  = jxp.Fluid(fluid_name).get_state(jxp.PT_INPUTS, p_R_st, T_R_st)
+    rho_L_ex = float(st_L_ex.rhomass);  rho_R_ex = float(st_R_ex.rhomass)
+    gam_ex   = float(st_L_ex.cpmass / st_L_ex.cvmass)
+    cL_ex    = float(st_L_ex.speed_sound);  cR_ex = float(st_R_ex.speed_sound)
+
+    AL = 2 / ((gam_ex + 1) * rho_L_ex);  BL = (gam_ex - 1) / (gam_ex + 1) * p_L_st
+    AR = 2 / ((gam_ex + 1) * rho_R_ex);  BR = (gam_ex - 1) / (gam_ex + 1) * p_R_st
+
+    def _fK(p, pK, cK, AK, BK):
+        return ((p - pK) * np.sqrt(AK / (p + BK)) if p > pK
+                else 2 * cK / (gam_ex - 1) * ((p / pK) ** ((gam_ex - 1) / (2 * gam_ex)) - 1))
+
+    p_star = _brentq_sod(lambda p: _fK(p, p_L_st, cL_ex, AL, BL)
+                                  + _fK(p, p_R_st, cR_ex, AR, BR)
+                                  + (u_R_st - u_L_st), 1e-6 * p_L_st, 10 * p_L_st)
+    u_star = (0.5 * (u_L_st + u_R_st)
+              + 0.5 * (_fK(p_star, p_R_st, cR_ex, AR, BR) - _fK(p_star, p_L_st, cL_ex, AL, BL)))
+    rhoL_star = (rho_L_ex * (p_star / p_L_st + (gam_ex-1)/(gam_ex+1))
+                 / ((gam_ex-1)/(gam_ex+1) * p_star / p_L_st + 1)) if p_star > p_L_st \
+                else rho_L_ex * (p_star / p_L_st) ** (1 / gam_ex)
+    rhoR_star = (rho_R_ex * (p_star / p_R_st + (gam_ex-1)/(gam_ex+1))
+                 / ((gam_ex-1)/(gam_ex+1) * p_star / p_R_st + 1)) if p_star > p_R_st \
+                else rho_R_ex * (p_star / p_R_st) ** (1 / gam_ex)
+    cL_star = np.sqrt(gam_ex * p_star / rhoL_star)
+    S_HL = u_L_st - cL_ex;  S_TL = u_star - cL_star
+    S_R  = u_R_st + cR_ex * np.sqrt((gam_ex+1)/(2*gam_ex)*p_star/p_R_st + (gam_ex-1)/(2*gam_ex))
+
+    t_phys = float(t[-1])   # elapsed physical time
+    rho_ex = np.empty_like(x);  u_ex = np.empty_like(x);  p_ex = np.empty_like(x)
+    for i, xi in enumerate(x):
+        s = (xi - x_d) / t_phys if t_phys > 0 else 0.0
+        if s <= S_HL:
+            rho_ex[i], u_ex[i], p_ex[i] = rho_L_ex, u_L_st, p_L_st
+        elif s <= S_TL:
+            u_ex[i] = 2/(gam_ex+1)*(cL_ex + (gam_ex-1)/2*u_L_st + s)
+            c_fan   = cL_ex + (gam_ex-1)/2*(u_L_st - u_ex[i])
+            p_ex[i] = p_L_st * (c_fan/cL_ex)**(2*gam_ex/(gam_ex-1))
+            rho_ex[i] = gam_ex * p_ex[i] / c_fan**2
+        elif s <= u_star:
+            rho_ex[i], u_ex[i], p_ex[i] = rhoL_star, u_star, p_star
+        elif s <= S_R:
+            rho_ex[i], u_ex[i], p_ex[i] = rhoR_star, u_star, p_star
+        else:
+            rho_ex[i], u_ex[i], p_ex[i] = rho_R_ex, u_R_st, p_R_st
+
+    fig_sod, axes_sod = plt.subplots(1, 3, figsize=(13, 4))
+    fig_sod.suptitle(f"Sod shock tube — {parameters['space_method']},  "
+                     f"N={Nx},  t={t_phys:.3e} s")
+    for ax, ylabel, num, ex in zip(
+            axes_sod,
+            [r"$\rho$ [kg/m³]", r"$u$ [m/s]", r"$p$ [Pa]"],
+            [density, velocity, pressure],
+            [rho_ex, u_ex, p_ex]):
+        ax.plot(x, ex,  "k-",  lw=1.5, label="Exact")
+        ax.plot(x, num, "r--", lw=1.0, label="FVM")
+        ax.set_xlabel("x [m]");  ax.set_ylabel(ylabel)
+        ax.legend(fontsize=9)
+    plt.tight_layout()
+    plt.show()
+
+    print("\n  L1 errors (interior cells, vs exact Sod):")
+    print(f"  density  : {np.mean(np.abs(density[1:-1]  - rho_ex[1:-1])):.4e} kg/m³")
+    print(f"  velocity : {np.mean(np.abs(velocity[1:-1] - u_ex[1:-1])):.4e} m/s")
+    print(f"  pressure : {np.mean(np.abs(pressure[1:-1] - p_ex[1:-1])):.4e} Pa")
 
 ## Diagnostics
 min_index  = np.argmin(A_nodes)

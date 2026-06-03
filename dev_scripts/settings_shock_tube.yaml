@@ -1,0 +1,54 @@
+boundary_conditions:
+  p_stagnation: 1.0e5   # = p_L  (waves don't reach boundary during t2)
+  T_stagnation: 348.0   # = T_L
+  p_out:        1.0e4   # = p_R
+
+numerical_settings:
+  Nx: 800
+  x1: 0.0
+  x2: 1.0
+  t1: 0.00
+  t2: 5.4e-4            # physical end time ≈ 0.2/c_L s — waves clear of boundaries
+  CFL: 0.3
+  max_iterations: 10000
+  residuals: 1.0e-12    # will not converge (transient) — loop runs to t2
+
+  # ── Flux method ────────────────────────────────────────────────────────
+  # rusanov | hll | hllc | lf    (JAX path — recommended for shock tube)
+  flux_method: hllc
+
+  # ── Time discretization ─────────────────────────────────────────────────
+  # euler | implicit   (use explicit for transient validation)
+  time_discretization: euler
+
+  # ── Reconstruction ──────────────────────────────────────────────────────
+  # Use constant (1st order) first — FVS+MUSCL is not TVD for strong shocks.
+  # Switch to muscl_van_leer for smoother profiles once base case passes.
+  reconstruction: constant
+
+nozzle_parameters:
+  type: shock_tube
+  area: 1.0             # constant cross-section [m²]
+  roughness: 0.0        # no friction for shock tube
+  shock_tube:
+    x_diaphragm: 0.5
+    p_L: 1.0e5          # Pa
+    T_L: 348.0          # K   → rho_L ≈ 1.0 kg/m³ for Air
+    u_L: 1.0            # m/s (small but non-zero — avoids K-matrix singularity at u=0)
+    p_R: 1.0e4          # Pa
+    T_R: 278.0          # K   → rho_R ≈ 0.125 kg/m³ for Air
+    u_R: 1.0            # m/s
+
+fluid:
+  perfect_gas: false
+  fluid_name: Air
+  use_lookup_table: true
+  lut:
+    backend:   HEOS
+    h_min:     100000.0   # J/kg  →  T ~ 100 K
+    h_max:     500000.0   # J/kg  →  T ~ 500 K
+    p_min:     1000.0     # Pa
+    p_max:     500000.0   # Pa
+    N_h:       100
+    N_p:       60
+    table_dir: fluid_tables

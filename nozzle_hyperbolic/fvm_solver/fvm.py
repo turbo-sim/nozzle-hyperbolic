@@ -289,6 +289,141 @@ def isentropic_initialization(x, A_nodes, parameters):
     return Q0
 
 
+def shock_tube_Q_initialization(x, A_nodes, parameters):
+    """
+    Step-function initial condition for shock tube tests.
+    Returns Q (3, N) in conservative form.
+
+    Reads 'shock_tube_cfg' from parameters:
+        x_diaphragm, p_L, T_L, u_L, p_R, T_R, u_R
+    """
+    fluid = parameters.get('fluid') or jxp.Fluid(name=parameters['fluid_name'])
+    cfg   = parameters['shock_tube_cfg']
+    x_d   = float(cfg.get('x_diaphragm', 0.5 * (x[0] + x[-1])))
+    p_L, T_L, u_L = float(cfg['p_L']), float(cfg['T_L']), float(cfg.get('u_L', 1.0))
+    p_R, T_R, u_R = float(cfg['p_R']), float(cfg['T_R']), float(cfg.get('u_R', 1.0))
+
+    st_L  = fluid.get_state(jxp.PT_INPUTS, p_L, T_L)
+    st_R  = fluid.get_state(jxp.PT_INPUTS, p_R, T_R)
+    rho_L, e_L = float(st_L.rhomass), float(st_L.umass)
+    rho_R, e_R = float(st_R.rhomass), float(st_R.umass)
+
+    Q0           = np.zeros((3, len(x)))
+    left         = x <= x_d
+    Q0[0, left]  = rho_L;           Q0[0, ~left] = rho_R
+    Q0[1, left]  = rho_L * u_L;     Q0[1, ~left] = rho_R * u_R
+    Q0[2, left]  = rho_L * (e_L + 0.5 * u_L**2)
+    Q0[2, ~left] = rho_R * (e_R + 0.5 * u_R**2)
+    return Q0
+
+
+def shock_tube_puh_initialization(x, A_nodes, parameters):
+    """
+    Step-function initial condition for the FVS Newton solver.
+    Returns U_ph (N, 3) in primitive (p, u, h) form.
+    """
+    fluid = parameters.get('fluid') or jxp.Fluid(name=parameters['fluid_name'])
+    cfg   = parameters['shock_tube_cfg']
+    x_d   = float(cfg.get('x_diaphragm', 0.5 * (x[0] + x[-1])))
+    p_L, T_L, u_L = float(cfg['p_L']), float(cfg['T_L']), float(cfg.get('u_L', 1.0))
+    p_R, T_R, u_R = float(cfg['p_R']), float(cfg['T_R']), float(cfg.get('u_R', 1.0))
+
+    st_L = fluid.get_state(jxp.PT_INPUTS, p_L, T_L)
+    st_R = fluid.get_state(jxp.PT_INPUTS, p_R, T_R)
+    h_L  = float(st_L.hmass);  h_R = float(st_R.hmass)
+
+    U0          = np.zeros((len(x), 3))
+    left        = x <= x_d
+    U0[left]    = [p_L, u_L, h_L]
+    U0[~left]   = [p_R, u_R, h_R]
+    return U0
+
+
+def stadtke_puh_initialization(x, A_nodes, parameters):
+    """
+    Initial condition for the Städtke Newton solver in primitive (p, u, h) form.
+
+    Uses the same isentropic-table algorithm as isentropic_initialization for
+    real gas, but returns U_ph (N, 3) directly — no conservative-to-primitive
+    round-trip, so h and p are exact and self-consistent with HmassP_INPUTS.
+
+    Returns U_ph : (N, 3)  — columns are (p, u, h).
+    """
+    fluid       = parameters.get('fluid') or jxp.Fluid(name=parameters['fluid_name'])
+    p_stag      = parameters['pT_stagnation'][0]
+    T_stag      = parameters['pT_stagnation'][1]
+    p_out       = parameters['p_out']
+    A_throat    = float(np.min(A_nodes))
+    i_throat    = int(np.argmin(A_nodes))
+    Nj          = len(x)
+
+    st_stag = fluid.get_state(jxp.PT_INPUTS, p_stag, T_stag)
+    h0      = float(st_stag.hmass)
+    s0      = float(st_stag.smass)
+
+    h_lo = float(getattr(fluid, 'h_min', 50e3))  + 10.0
+    h_hi = min(float(getattr(fluid, 'h_max', 850e3)) - 10.0, h0 - 10.0)
+    p_lo = float(getattr(fluid, 'p_min', 1e4))   * 1.01
+    p_hi = float(getattr(fluid, 'p_max', 300e5)) * 0.99
+
+    # Build isentropic table: for each h, find p s.t. s(h,p) = s0
+    N_tab  = 300
+    h_tab  = np.linspace(h_lo, h_hi, N_tab)
+    p_lo_v = np.full(N_tab, p_lo)
+    p_hi_v = np.full(N_tab, min(p_stag * 1.05, p_hi))
+    for _ in range(50):
+        p_mid  = 0.5 * (p_lo_v + p_hi_v)
+        s_pred = np.asarray(
+            fluid.get_state(jxp.HmassP_INPUTS, h_tab, p_mid).entropy, dtype=float)
+        p_lo_v = np.where(s_pred > s0, p_mid, p_lo_v)
+        p_hi_v = np.where(s_pred < s0, p_mid, p_hi_v)
+    p_iso = 0.5 * (p_lo_v + p_hi_v)
+
+    # Remove entries where bisection converged to the lower bound — these are states
+    # outside the physical region (solid, two-phase, or below EOS table range) where
+    # the EOS returns zero entropy so the bisection always shrinks p_hi → p_lo.
+    valid  = p_iso > p_lo * 1.05
+    if not np.any(valid):
+        raise ValueError(
+            "stadtke_puh_initialization: isentropic bisection found no valid states. "
+            "Check that stagnation conditions (p_stag, T_stag) are within the EOS "
+            "table bounds (h_min, h_max, p_min, p_max).")
+    h_tab  = h_tab[valid]
+    p_iso  = p_iso[valid]
+
+    rho_iso = np.asarray(
+        fluid.get_state(jxp.HmassP_INPUTS, h_tab, p_iso).rhomass, dtype=float)
+    u_tab  = np.sqrt(np.maximum(2.0 * (h0 - h_tab), 0.0))
+    G_tab  = rho_iso * u_tab                     # mass flux per unit area
+
+    # Throat at G_max
+    k_thr = int(np.argmax(G_tab))
+    G_thr = G_tab[k_thr]
+    m_dot = G_thr * A_throat
+
+    # Subsonic branch (h decreasing from h_thr to h0, G decreasing)
+    sub_G = G_tab[k_thr:][::-1];  sub_h = h_tab[k_thr:][::-1];  sub_p = p_iso[k_thr:][::-1]
+    # Supersonic branch (h decreasing toward h_lo, G increasing toward G_thr)
+    sup_G = G_tab[:k_thr + 1];    sup_h = h_tab[:k_thr + 1];    sup_p = p_iso[:k_thr + 1]
+
+    h_cells = np.empty(Nj)
+    p_cells = np.empty(Nj)
+    for i in range(Nj):
+        G_target              = m_dot / A_nodes[i]
+        seg_G, seg_h, seg_p   = (sub_G, sub_h, sub_p) if i <= i_throat else (sup_G, sup_h, sup_p)
+        idx                   = np.clip(np.searchsorted(seg_G, G_target), 1, len(seg_G) - 1)
+        t                     = (G_target - seg_G[idx-1]) / max(seg_G[idx] - seg_G[idx-1], 1e-300)
+        h_cells[i]            = seg_h[idx-1] + t * (seg_h[idx] - seg_h[idx-1])
+        p_cells[i]            = seg_p[idx-1] + t * (seg_p[idx] - seg_p[idx-1])
+
+    u_cells = np.sqrt(np.maximum(2.0 * (h0 - h_cells), 0.0))
+    # jax.debug.print("initial p:{uo}", uo=p_cells)
+    # jax.debug.print("initial u:{uo}", uo=u_cells)
+    # jax.debug.print("initial h:{uo}", uo=h_cells)
+
+    return np.stack([p_cells, u_cells, h_cells], axis=1)  # (N, 3)
+
+
 # ---------------------------------------------------------------------------
 # Thermodynamic helpers
 # ---------------------------------------------------------------------------
@@ -653,25 +788,131 @@ def _jax_F_lf(Q_L, Q_R, p_L, c_L, p_R, c_R, A_L, A_R, dx, dt):
 def _jax_F_hllc(Q_L, Q_R, p_L, c_L, p_R, c_R, A_L, A_R, fluid):
     rho_L = Q_L[0];  rho_R = Q_R[0]
     u_L   = Q_L[1] / rho_L;  u_R = Q_R[1] / rho_R
+    E_L   = Q_L[2] / rho_L;  E_R = Q_R[2] / rho_R   # specific total energy
     S_L   = jnp.minimum(u_L - c_L, u_R - c_R)
     S_R   = jnp.maximum(u_L + c_L, u_R + c_R)
     denom = rho_L * (S_L - u_L) - rho_R * (S_R - u_R)
     S_M   = (p_R - p_L + rho_L * u_L * (S_L - u_L) - rho_R * u_R * (S_R - u_R)) / jnp.where(jnp.abs(denom) > 1e-300, denom, 1e-300)
-    rho_Ls = rho_L * (S_L - u_L) / jnp.where(jnp.abs(S_L - S_M) > 1e-300, S_L - S_M, 1e-300)
-    rho_Rs = rho_R * (S_R - u_R) / jnp.where(jnp.abs(S_R - S_M) > 1e-300, S_R - S_M, 1e-300)
-    p_Ls   = p_L + rho_L * (S_L - u_L) * (S_M - u_L)
-    p_Rs   = p_R + rho_R * (S_R - u_R) * (S_M - u_R)
-    _stL   = fluid.get_state(jxp.DmassP_INPUTS, rho_Ls, p_Ls)
-    _stR   = fluid.get_state(jxp.DmassP_INPUTS, rho_Rs, p_Rs)
-    e_Ls   = _stL.umass;  e_Rs = _stR.umass
-    Q_Ls   = jnp.stack([rho_Ls, rho_Ls * S_M, rho_Ls * (e_Ls + 0.5 * S_M**2)])
-    Q_Rs   = jnp.stack([rho_Rs, rho_Rs * S_M, rho_Rs * (e_Rs + 0.5 * S_M**2)])
+    dL    = jnp.where(jnp.abs(S_L - S_M) > 1e-300, S_L - S_M, 1e-300)
+    dR    = jnp.where(jnp.abs(S_R - S_M) > 1e-300, S_R - S_M, 1e-300)
+    rho_Ls = rho_L * (S_L - u_L) / dL
+    rho_Rs = rho_R * (S_R - u_R) / dR
+    # Star total energy via Toro (2009) eq. 10.73 — no EOS call required.
+    # rhoE* = rho* * (E + (S* - u) * (S* + p / (rho*(S - u))))
+    rhoE_Ls = rho_Ls * (E_L + (S_M - u_L) * (S_M + p_L / jnp.where(jnp.abs(rho_L * (S_L - u_L)) > 1e-300, rho_L * (S_L - u_L), 1e-300)))
+    rhoE_Rs = rho_Rs * (E_R + (S_M - u_R) * (S_M + p_R / jnp.where(jnp.abs(rho_R * (S_R - u_R)) > 1e-300, rho_R * (S_R - u_R), 1e-300)))
+    Q_Ls   = jnp.stack([rho_Ls, rho_Ls * S_M, rhoE_Ls])
+    Q_Rs   = jnp.stack([rho_Rs, rho_Rs * S_M, rhoE_Rs])
     F_L    = _jax_euler_flux(Q_L, p_L);  F_R = _jax_euler_flux(Q_R, p_R)
     A_face = 0.5 * (A_L + A_R)
     FA_L   = F_L * A_face;  FA_R = F_R * A_face
     FA_Ls  = FA_L + S_L * (Q_Ls - Q_L) * A_face
     FA_Rs  = FA_R + S_R * (Q_Rs - Q_R) * A_face
     return jnp.where(S_L > 0.0, FA_L, jnp.where(S_M >= 0.0, FA_Ls, jnp.where(S_R >= 0.0, FA_Rs, FA_R)))
+
+
+# ---------------------------------------------------------------------------
+# Städtke FVS flux  (JAX, operates in (p, u, h) primitive space)
+# ---------------------------------------------------------------------------
+
+def _jax_F_fvs_stadtke(U_L, U_R, fluid, delta_factor=0.1):
+    """
+    Städtke flux-vector-splitting interface flux for all faces simultaneously.
+
+    Primitive states U_L, U_R : (Nfaces, 3)  — columns are (p, u, h).
+    Returns conservative flux  F̂ : (Nfaces, 3)  — (ρu, ρu²+p, uρH).
+
+    Algorithm (theory doc §5):
+      1. Average state → EOS → ρ, a, G → rho_p, rho_h.
+      2. Build split matrices G_k = λ_k v_k ⊗ l_k  (each (Nfaces,3,3)).
+      3. Build flux Jacobian K = ∂F/∂U  (Nfaces,3,3).
+      4. Projection: R̃_k = K G_k K⁻¹ / λ_k^safe  via batched solve.
+      5. Upwind sum:  R̃⁺ = Σ_{λ_k≥0} R̃_k,  R̃⁻ = Σ_{λ_k<0} R̃_k.
+      6. F̂ = R̃⁺ F_L + R̃⁻ F_R  (physical fluxes from actual L/R states).
+    """
+    # ── Averaged state ────────────────────────────────────────────────────
+    U_avg  = 0.5 * (U_L + U_R)
+    p_a    = U_avg[:, 0];  u_a = U_avg[:, 1];  h_a = U_avg[:, 2]
+
+    st_a   = fluid.get_state(jxp.HmassP_INPUTS, h_a, p_a)
+    rho_a  = st_a["rho"]
+    a_a    = st_a["a"]
+    G_a    = st_a["G"]
+    rho_p  = (1.0 + G_a) / a_a**2        # (∂ρ/∂p)_h  — theory §1.3
+    rho_h  = -(rho_a * G_a) / a_a**2     # (∂ρ/∂h)_p
+
+    # ── Eigenvalues ───────────────────────────────────────────────────────
+    lam1 = u_a + a_a;  lam2 = u_a - a_a;  lam3 = u_a
+
+    # ── Split matrices  G_k = λ_k (v_k ⊗ l_k)  (each (Nfaces,3,3)) ──────
+    # Right eigenvectors:  v1=(ρa,1,a),  v2=(-ρa,1,-a),  v3=(0,0,1)
+    # Left eigenvectors:   l1=(1/2ρa,1/2,0),  l2=(-1/2ρa,1/2,0),  l3=(-1/ρ,0,1)
+    z = jnp.zeros_like(u_a);  o = jnp.ones_like(u_a)
+
+    v1 = jnp.stack([ rho_a * a_a,  o,          a_a  ], axis=-1)  # (N,3)
+    v2 = jnp.stack([-rho_a * a_a,  o,         -a_a  ], axis=-1)
+    v3 = jnp.stack([ z,             z,          o    ], axis=-1)
+    l1 = jnp.stack([ 0.5 / (rho_a * a_a),  0.5 * o,  z], axis=-1)
+    l2 = jnp.stack([-0.5 / (rho_a * a_a),  0.5 * o,  z], axis=-1)
+    l3 = jnp.stack([-1.0 / rho_a,           z,        o], axis=-1)
+
+    def _outer_scaled(v, l, lam):
+        return lam[:, None, None] * jnp.einsum('...i,...j->...ij', v, l)
+
+    G1 = _outer_scaled(v1, l1, lam1)
+    G2 = _outer_scaled(v2, l2, lam2)
+    G3 = _outer_scaled(v3, l3, lam3)
+
+    # ── Flux Jacobian  K = ∂F/∂U  (Nfaces,3,3) ───────────────────────────
+    H_a  = h_a + 0.5 * u_a**2
+    r0   = jnp.stack([u_a * rho_p,            rho_a,               u_a * rho_h           ], axis=-1)
+    r1   = jnp.stack([u_a**2 * rho_p + 1.0,   2.0 * rho_a * u_a,  u_a**2 * rho_h        ], axis=-1)
+    r2   = jnp.stack([u_a * rho_p * H_a,       rho_a * (H_a + u_a**2), u_a * (rho_h * H_a + rho_a)], axis=-1)
+    K    = jnp.stack([r0, r1, r2], axis=1)   # (Nfaces, 3, 3)
+
+    # ── Projection matrices  R̃_k = K G_k K⁻¹ / λ_k^safe  ─────────────
+    # Solve Kᵀ Xᵀ = (K G_k)ᵀ  →  X = K G_k K⁻¹ = R_k; then divide by λ^safe.
+    delta  = delta_factor * (jnp.abs(u_a) + a_a)  # (Nfaces,)
+
+    def _safe(lam):
+        # jnp.sign(0) = 0 in JAX → would give 0/0; use where to always return ±1.
+        sign = jnp.where(lam >= 0.0, 1.0, -1.0)
+        return sign * jnp.maximum(jnp.abs(lam), delta)
+
+    def _Rt(Gk, lam):
+        KGk  = K @ Gk                                               # (N,3,3) batched matmul
+        KT   = K.swapaxes(-1, -2)
+        Rk_T = jnp.linalg.solve(KT, KGk.swapaxes(-1, -2))         # solve KᵀXᵀ = (KGk)ᵀ
+        return Rk_T.swapaxes(-1, -2) / _safe(lam)[:, None, None]   # R̃_k
+
+    Rt1 = _Rt(G1, lam1)
+    Rt2 = _Rt(G2, lam2)
+    Rt3 = _Rt(G3, lam3)
+
+    # ── Sum by TRUE eigenvalue sign ───────────────────────────────────────
+    s1p = jnp.where(lam1[:, None, None] >= 0.0, 1.0, 0.0)
+    s2p = jnp.where(lam2[:, None, None] >= 0.0, 1.0, 0.0)
+    s3p = jnp.where(lam3[:, None, None] >= 0.0, 1.0, 0.0)
+
+    R_plus  = s1p * Rt1 + s2p * Rt2 + s3p * Rt3
+    R_minus = (1.0 - s1p) * Rt1 + (1.0 - s2p) * Rt2 + (1.0 - s3p) * Rt3
+
+    # ── Physical fluxes from ACTUAL L/R states ────────────────────────────
+    st_L  = fluid.get_state(jxp.HmassP_INPUTS, U_L[:, 2], U_L[:, 0])
+    st_R  = fluid.get_state(jxp.HmassP_INPUTS, U_R[:, 2], U_R[:, 0])
+    rho_L = st_L["rho"];  rho_R = st_R["rho"]
+    H_L   = U_L[:, 2] + 0.5 * U_L[:, 1]**2
+    H_R   = U_R[:, 2] + 0.5 * U_R[:, 1]**2
+    F_L   = jnp.stack([rho_L * U_L[:, 1],
+                        rho_L * U_L[:, 1]**2 + U_L[:, 0],
+                        U_L[:, 1] * rho_L * H_L], axis=-1)
+    F_R   = jnp.stack([rho_R * U_R[:, 1],
+                        rho_R * U_R[:, 1]**2 + U_R[:, 0],
+                        U_R[:, 1] * rho_R * H_R], axis=-1)
+
+    # F̂ = R̃⁺ F_L + R̃⁻ F_R  (batched matvec)
+    return (jnp.einsum('...ij,...j->...i', R_plus,  F_L)
+          + jnp.einsum('...ij,...j->...i', R_minus, F_R))
 
 
 def _bc_inlet_real_jax(Q_n, h0, s0, fluid):
@@ -815,13 +1056,27 @@ def make_jax_step(fluid, A, D_h, roughness, dx, CFL, p_out, h0, s0,
     def _bc_outlet(Q_n):
         rho_out  = 2.0 * Q_n[0, -2] * A_j[-2] / A_j[-1] - Q_n[0, -3] * A_j[-3] / A_j[-1]
         rhou_out = 2.0 * Q_n[1, -2] * A_j[-2] / A_j[-1] - Q_n[1, -3] * A_j[-3] / A_j[-1]
+        # Clamp rho to physical range before EOS call (high-CFL extrapolation can go negative)
+        rho_out  = jnp.clip(rho_out, 1.0, 1e5)
         u_out    = rhou_out / rho_out
-        rho_arr  = jnp.expand_dims(rho_out, 0)
-        p_arr    = jnp.array([p_out], dtype=jnp.float64)
-        e_out    = fluid.get_state(jxp.DmassP_INPUTS, rho_arr, p_arr).umass[0]
-        Q_n      = Q_n.at[0, -1].set(rho_out)
-        Q_n      = Q_n.at[1, -1].set(rhou_out)
-        Q_n      = Q_n.at[2, -1].set(rho_out * (e_out + 0.5 * u_out**2))
+        # Find h_out s.t. rho(h_out, p_out) = rho_out via bisection on HmassP_INPUTS
+        # (avoids DmassP_INPUTS which uses an internal Newton solver that can fail).
+        # rho decreases with h at constant p, so the bracket [h_lo, h_hi] always works.
+        rho_t  = jnp.expand_dims(rho_out, 0)
+        p_arr  = jnp.array([p_out], dtype=jnp.float64)
+        hlo    = jnp.array([h_lo],  dtype=jnp.float64)
+        hhi    = jnp.array([h_hi],  dtype=jnp.float64)
+        for _ in range(15):
+            hm   = 0.5 * (hlo + hhi)
+            rhm  = fluid.get_state(jxp.HmassP_INPUTS, hm, p_arr).rhomass
+            hlo  = jnp.where(rhm > rho_t, hm, hlo)
+            hhi  = jnp.where(rhm < rho_t, hm, hhi)
+        h_out  = 0.5 * (hlo + hhi)
+        st_out = fluid.get_state(jxp.HmassP_INPUTS, h_out, p_arr)
+        e_out  = st_out.umass[0]
+        Q_n    = Q_n.at[0, -1].set(rho_out)
+        Q_n    = Q_n.at[1, -1].set(rhou_out)
+        Q_n    = Q_n.at[2, -1].set(rho_out * (e_out + 0.5 * u_out**2))
         return Q_n
 
     @jax.jit
@@ -893,6 +1148,197 @@ def make_jax_step(fluid, A, D_h, roughness, dx, CFL, p_out, h0, s0,
 
 
 # ---------------------------------------------------------------------------
+# Städtke Newton implicit solver  — (p, u, h) primitive variables
+# ---------------------------------------------------------------------------
+
+def _conservative_to_puh(Q, fluid):
+    """Convert conservative Q (3, N) → primitive U_ph (N, 3) of (p, u, h)."""
+    rho    = Q[0]
+    e_int  = Q[2] / rho - 0.5 * (Q[1] / rho)**2
+    states = state_from_rho_u_batch(fluid, rho, e_int)
+    if isinstance(states, list):
+        p = np.array([float(s.pressure) for s in states])
+        h = np.array([float(s.hmass)    for s in states])
+    else:
+        p = np.asarray(states.pressure, dtype=float)
+        h = np.asarray(states.hmass,    dtype=float)
+    return np.stack([p, Q[1] / rho, h], axis=1)  # (N, 3)
+
+
+def _puh_to_conservative(U, fluid):
+    """Convert primitive U_ph (N, 3) → conservative Q (3, N)."""
+    p, u, h = U[:, 0], U[:, 1], U[:, 2]
+    st  = fluid.get_state(jxp.HmassP_INPUTS, h, p)
+    rho = np.asarray(st.rhomass, dtype=float)
+    e   = h - p / rho          # h = e + p/ρ  →  e = h - p/ρ
+    return np.array([rho, rho * u, rho * (e + 0.5 * u**2)])  # (3, N)
+
+
+def make_jax_stadtke_step(fluid, A, D_h, roughness, dx, CFL, p_out, h0, s0,
+                           delta_factor=0.1, newton_iter=20):
+    """
+    Build a @jax.jit step function implementing the Städtke Newton implicit scheme.
+
+    The solver works in primitive (p, u, h) variables:
+      - MUSCL reconstruction with Van Leer limiter in (p, u, h).
+      - Städtke FVS interface flux  (_jax_F_fvs_stadtke).
+      - Fully implicit residual assembled in conservative form.
+      - Newton-Raphson: Jacobian via jax.jacobian, solve via jnp.linalg.solve.
+      - `newton_iter` iterations are unrolled inside @jax.jit.
+
+    step(U_n) → (U_new, dt, ssr)
+      U_n   : (N, 3) — primitive state at time n
+      U_new : (N, 3) — primitive state at time n+1
+      dt    : scalar — time step used
+      ssr   : scalar — max relative change (convergence metric)
+    """
+    N      = len(A)
+    A_j    = jnp.asarray(A,   dtype=jnp.float64)
+    D_h_j  = jnp.asarray(D_h, dtype=jnp.float64)
+    A_face = 0.5 * (A_j[:-1] + A_j[1:])   # (N-1,) — face areas
+    V_cell = A_j * dx                       # (N,)   — cell volumes
+
+    # dA/dx / A  (precomputed, geometry is constant)
+    dAdx_A = jnp.concatenate([
+        (A_j[1:2]   - A_j[:1])    / (A_j[:1]   * dx),
+        (A_j[2:]    - A_j[:-2])   / (A_j[1:-1] * 2.0 * dx),
+        (A_j[-1:]   - A_j[-2:-1]) / (A_j[-1:]  * dx),
+    ])  # (N,)
+
+    h_lo  = float(getattr(fluid, 'h_min', 50e3))  + 1.0
+    h_hi  = float(getattr(fluid, 'h_max', 850e3)) - 1.0
+    p_lo  = float(getattr(fluid, 'p_min', 1e4))   * 1.01
+    p_hi  = float(getattr(fluid, 'p_max', 300e5)) * 0.99
+    h0_j  = jnp.float64(h0)
+    s0_j  = jnp.float64(s0)
+    pout_j = jnp.float64(p_out)
+
+    # ── Inner functions (all JAX-traceable) ──────────────────────────────
+
+    def _V_from_U(U):
+        """Primitive (N,3) → conservative V=(ρ, ρu, ρH−p) (N,3)."""
+        p_, u_, h_ = U[:, 0], U[:, 1], U[:, 2]
+        st   = fluid.get_state(jxp.HmassP_INPUTS, h_, p_)
+        rho_ = st["rho"]
+        H_   = h_ + 0.5 * u_**2
+        return jnp.stack([rho_, rho_ * u_, rho_ * H_ - p_], axis=1)
+
+    def _muscl_ph(U):
+        """MUSCL Van Leer in (p,u,h). (N,3) → U_L, U_R each (N-1,3)."""
+        dU    = U[1:] - U[:-1]                           # (N-1, 3)
+        vl    = lambda a, b: jnp.where(a * b > 0, 2.0 * a * b / (a + b + 1e-300), 0.0)
+        sigma = jnp.zeros_like(U).at[1:-1].set(vl(dU[:-1], dU[1:]))
+        U_L   = U[:-1] + 0.5 * sigma[:-1]
+        U_R   = U[1:]  - 0.5 * sigma[1:]
+        # positivity guard on pressure
+        U_L   = U_L.at[:, 0].set(jnp.maximum(U_L[:, 0], 1.0))
+        U_R   = U_R.at[:, 0].set(jnp.maximum(U_R[:, 0], 1.0))
+        return U_L, U_R
+
+    def _bc_inlet(U):
+        """Inlet BC: extrapolate u, isentropic static state from (h0, s0)."""
+        u_in = 2.0 * U[1, 1] - U[2, 1]
+        h_s  = jnp.expand_dims(
+                   jnp.clip(h0_j - 0.5 * u_in**2,
+                             jnp.float64(h_lo + 1.0),
+                             jnp.float64(h_hi - 1.0)), 0)
+        plo  = jnp.array([p_lo], dtype=jnp.float64)
+        phi  = jnp.array([p_hi], dtype=jnp.float64)
+        for _ in range(12):                              # 12-iter bisection on s(h,p)=s0
+            pm    = 0.5 * (plo + phi)
+            s_mid = fluid.get_state(jxp.HmassP_INPUTS, h_s, pm)["s"]
+            plo   = jnp.where(s_mid > s0_j, pm, plo)
+            phi   = jnp.where(s_mid < s0_j, pm, phi)
+        p_s = 0.5 * (plo + phi)
+
+        # jax.debug.print("inlet values - p_s:{ps}, h_s:{hs}", ps=p_s, hs=h_s)
+        return U.at[0].set(jnp.array([p_s[0], u_in, h_s[0]]))
+
+    def _bc_outlet(U):
+        """Outlet BC: fix p_out (subsonic) or zero-gradient (supersonic)."""
+        u_out  = U[-2, 1];  h_out = U[-2, 2];  p_prev = U[-2, 0]
+        a_out  = fluid.get_state(jxp.HmassP_INPUTS,
+                     jnp.expand_dims(h_out,  0),
+                     jnp.expand_dims(p_prev, 0))["a"][0]
+        p_ghost = jnp.where(jnp.abs(u_out) < a_out, pout_j, p_prev)
+        # jax.debug.print("outlet values - a_out:{ao}", ao=a_out)
+
+        return U.at[-1].set(jnp.array([p_ghost, u_out, h_out]))
+
+    def _residual(U_int_flat, U_n_flat, dt):
+        """
+        Conservative residual for interior cells 1..N-2.
+
+        U_int_flat : (3*(N-2),) — Newton unknowns (interior cells only)
+        U_n_flat   : (3*N,)     — full state at time n (fixed)
+        Returns    : (3*(N-2),) — residual R (zero at steady state)
+        """
+        U_int = U_int_flat.reshape(N - 2, 3)
+        U_n   = U_n_flat.reshape(N, 3)
+
+        # Assemble full domain; BCs overwrite ghost cells 0 and N-1
+        U   = jnp.concatenate([U_n[:1], U_int, U_n[-1:]], axis=0)
+        U   = _bc_inlet(U)
+        U   = _bc_outlet(U)
+
+        V_new = _V_from_U(U)
+        V_old = _V_from_U(U_n)
+
+        U_L, U_R = _muscl_ph(U)
+        F_hat    = _jax_F_fvs_stadtke(U_L, U_R, fluid, delta_factor)  # (N-1, 3)
+
+        # Source: area variation + wall friction — momentum only (theory §7.3)
+        st_U  = fluid.get_state(jxp.HmassP_INPUTS, U[:, 2], U[:, 0])
+        rho_U = st_U["rho"]
+        mu_U  = st_U["mu"]
+        Re    = rho_U * jnp.abs(U[:, 1]) * D_h_j / jnp.maximum(mu_U, 1e-12)
+        tau_w = _haaland_jnp(Re, roughness, D_h_j) * rho_U * U[:, 1]**2 / 8.0
+        src   = jnp.zeros((N, 3)).at[:, 1].set(
+                    U[:, 0] * dAdx_A - tau_w * 4.0 / D_h_j)
+
+        # Residual for interior cells 1..N-2  (indices in arrays: [1:-1])
+        # Right face of cell i is face i; left face is face i-1.
+        # For cells 1..N-2: right faces = F_hat[1:], left faces = F_hat[:-1]
+        Vc    = V_cell[1:-1, None]                                         # (N-2, 1)
+        dV    = V_new[1:-1] - V_old[1:-1]                                  # (N-2, 3)
+        fdiv  = A_face[1:, None] * F_hat[1:] - A_face[:-1, None] * F_hat[:-1]  # (N-2, 3)
+        R     = Vc * dV + dt * fdiv - dt * Vc * src[1:-1]
+        return R.flatten()
+
+    # Jacobian function — created once, compiled into the JIT kernel
+    _jac_fn = jax.jacobian(_residual, argnums=0)
+
+    @jax.jit
+    def step(U_n):
+        # ── dt from CFL at current primitive state ────────────────────────
+        st_c = fluid.get_state(jxp.HmassP_INPUTS, U_n[:, 2], U_n[:, 0])
+        a_c  = st_c["a"]
+        dt   = CFL * dx / jnp.max(jnp.abs(U_n[:, 1]) + a_c)
+
+        U_n_flat  = U_n.reshape(-1)                    # (3*N,)
+        U_k       = U_n[1:-1].reshape(-1)              # (3*(N-2),) — initial Newton iterate
+
+        # ── Newton iterations (Python loop → unrolled by JAX trace) ──────
+        for _ in range(newton_iter):
+            R_k = _residual(U_k, U_n_flat, dt)
+            J_k = _jac_fn(U_k, U_n_flat, dt)
+            U_k = U_k + jnp.linalg.solve(J_k, -R_k)
+
+        # ── Reconstruct full solution with updated BCs ────────────────────
+        U_new = jnp.concatenate([U_n[:1], U_k.reshape(N - 2, 3), U_n[-1:]], axis=0)
+        U_new = _bc_inlet(U_new)
+        U_new = _bc_outlet(U_new)
+
+        # ── Convergence metric: max relative change in (p, u, h) ─────────
+        ssr = jnp.max(jnp.abs(U_new[1:-1] - U_n[1:-1])
+                      / (jnp.abs(U_n[1:-1]) + 1e-300))
+
+        return U_new, dt, ssr
+
+    return step
+
+
+# ---------------------------------------------------------------------------
 # Main solver
 # ---------------------------------------------------------------------------
 
@@ -941,8 +1387,84 @@ def fvm_euler_1d(x, t, parameters):
     print("Starting time integration "
           f"(max_iter={max_iter}, tol={steady_thr:.1e}) ...", flush=True)
 
+    # ── Städtke Newton implicit path (real gas, (p,u,h) primitives) ─────
+    use_stadtke = (not perfect_gas) and (method == 'fvs_newton')
+    if use_stadtke:
+        Q_init = Q[:, :, 0].copy()
+        if parameters.get('nozzle_type', 'nozzle') == 'shock_tube':
+            U0 = shock_tube_puh_initialization(x, A_nodes, parameters)
+        else:
+            U0 = stadtke_puh_initialization(x, A_nodes, parameters)  # (N, 3)
+
+        _stadtke_step = make_jax_stadtke_step(
+            fluid, A_nodes, D_hydraulic, roughness,
+            dx, CFL, p_out, h0, s0)
+
+        U_jax     = jnp.asarray(U0, dtype=jnp.float64)
+        _max_iter = jnp.int32(max_iter)
+        _tol      = jnp.float64(steady_thr)
+        _warmup_j = jnp.int32(warmup)
+
+        @jax.jit
+        def _stadtke_run(U0_j):
+            def cond_fn(carry):
+                _, n, res, res_hist = carry
+                below_thr = res < _tol
+                hist_max  = jnp.max(res_hist)
+                hist_min  = jnp.min(res_hist) + 1e-300
+                plateau   = (n >= _warmup_j) & (hist_max / hist_min < 1.5) & (res < 3.0 * _tol)
+                return (n < _max_iter) & ~(below_thr | plateau)
+
+            def body_fn(carry):
+                U, n, _, res_hist = carry
+                U_new, _, res     = _stadtke_step(U)
+                res_hist_new      = jnp.roll(res_hist, -1).at[-1].set(res)
+                should_print = jnp.where(
+                    n < 10,  jnp.bool_(True),
+                    jnp.where(n < 100, n % 10 == 0, n % 50 == 0))
+                jax.lax.cond(
+                    should_print,
+                    lambda args: jax.debug.print(
+                        "Iter {n:5d}  SSR = {res:.3e}", n=args[0], res=args[1]),
+                    lambda args: None,
+                    (n, res),
+                )
+                return U_new, n + 1, res, res_hist_new
+
+            res_hist0 = jnp.ones(5, dtype=jnp.float64)
+            init      = (U0_j, jnp.int32(0), jnp.float64(1.0), res_hist0)
+            U_f, n_f, res_f, _ = jax.lax.while_loop(cond_fn, body_fn, init)
+            return U_f, n_f, res_f
+
+        print("Compiling and running Städtke Newton solver ...", flush=True)
+        t0 = _time.perf_counter()
+        try:
+            U_final, n_final, res_final = _stadtke_run(U_jax)
+            jax.block_until_ready(U_final)
+        except KeyboardInterrupt:
+            print("Interrupted — returning initial solution.")
+            Q_out = np.zeros((N, Nj, 2))
+            Q_out[:, :, 0] = Q_init
+            Q_out[:, :, 1] = Q_init
+            return Q_out, np.array([0.0, 0.0])
+
+        elapsed  = _time.perf_counter() - t0
+        n_done   = int(n_final)
+        res_done = float(res_final)
+        reason   = "below threshold" if res_done < float(steady_thr) else "plateau / max_iter"
+        print(f"Done: {n_done} iterations ({reason}). "
+              f"SSR = {res_done:.3e}.  Computational time = {elapsed:.1f} s", flush=True)
+
+        U_np    = np.asarray(U_final)
+        Q_final = _puh_to_conservative(U_np, fluid)
+
+        Q_out = np.zeros((N, Nj, 2))
+        Q_out[:, :, 0] = Q_init
+        Q_out[:, :, 1] = Q_final
+        return Q_out, np.array([0.0, elapsed])
+
     # ── JAX path (real gas, non-Roe) ─────────────────────────────────────
-    use_jax = (not perfect_gas) and (flux_method != 'roe')
+    use_jax = (not perfect_gas) and (flux_method != 'roe') and (method != 'fvs_newton')
     if use_jax:
         _jax_step = make_jax_step(fluid, A_nodes, D_hydraulic, roughness,
                                   dx, CFL, p_out, h0, s0, recon, flux_method, method)
@@ -988,28 +1510,28 @@ def fvm_euler_1d(x, t, parameters):
         _max_iter = jnp.int32(max_iter)
         _tol      = jnp.float64(steady_thr)
         _warmup_j = jnp.int32(warmup)
+        _t_end_j  = jnp.float64(t_end)   # physical end time — used for transient cases
 
         @jax.jit
         def _jax_run(Q0):
 
             def cond_fn(carry):
-                _, n, res, res_hist = carry
+                _, n, t_phys, res, res_hist = carry
                 below_thr = res < _tol
                 hist_max  = jnp.max(res_hist)
                 hist_min  = jnp.min(res_hist) + 1e-300
                 plateau   = (n >= _warmup_j) & (hist_max / hist_min < 1.5) & (res < 3.0 * _tol)
-                return (n < _max_iter) & ~(below_thr | plateau)
+                time_done = t_phys >= _t_end_j   # transient stop: physical time reached
+                return (n < _max_iter) & ~(below_thr | plateau | time_done)
 
             def body_fn(carry):
-                Q, n, _, res_hist = carry
+                Q, n, t_phys, _, res_hist = carry
                 # ssr (steady-state residual) is returned free from step() —
                 # it is computed there anyway as part of RHS_n, at no extra cost.
-                Q_new, _, _, _, res = _jax_step(Q)
+                Q_new, _, _, dt, res = _jax_step(Q)
                 res_hist_new = jnp.roll(res_hist, -1).at[-1].set(res)
 
                 # Adaptive print frequency: every 1 / 10 / 50 iters.
-                # jax.debug.print works inside while_loop; jax.lax.cond gates
-                # the sync so it only happens at print time, not every step.
                 should_print = jnp.where(
                     n < 10,  jnp.bool_(True),
                     jnp.where(n < 100, n % 10 == 0, n % 50 == 0))
@@ -1021,11 +1543,11 @@ def fvm_euler_1d(x, t, parameters):
                     (n, res),
                 )
 
-                return Q_new, n + 1, res, res_hist_new
+                return Q_new, n + 1, t_phys + dt, res, res_hist_new
 
-            res_hist0 = jnp.ones(5, dtype=jnp.float64)  # initialise history to large value
-            init      = (Q0, jnp.int32(0), jnp.float64(1.0), res_hist0)
-            Q_f, n_f, res_f, _ = jax.lax.while_loop(cond_fn, body_fn, init)
+            res_hist0 = jnp.ones(5, dtype=jnp.float64)
+            init      = (Q0, jnp.int32(0), jnp.float64(0.0), jnp.float64(1.0), res_hist0)
+            Q_f, n_f, _, res_f, _ = jax.lax.while_loop(cond_fn, body_fn, init)
             return Q_f, n_f, res_f
 
         print("Compiling and running solver (jax.lax.while_loop) ...", flush=True)
