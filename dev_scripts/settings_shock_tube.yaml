@@ -4,7 +4,7 @@ boundary_conditions:
   p_out:        1.0e4   # = p_R
 
 numerical_settings:
-  Nx: 500
+  Nx: 50
   x1: 0.0
   x2: 1.0
   t1: 0.00
@@ -32,18 +32,19 @@ numerical_settings:
   # true  = Haaland friction (default for nozzle cases)
   wall_friction: false
 
-nozzle_parameters:
-  type: shock_tube
+geometry:
+  function: get_shock_tube
+  roughness: 0.0
   area: 1.0             # constant cross-section [m²]
-  roughness: 0.0        # no friction for shock tube
-  shock_tube:
-    x_diaphragm: 0.5
-    p_L: 1.0e5          # Pa
-    T_L: 348.0          # K   → rho_L ≈ 1.0 kg/m³ for Air
-    u_L: 1.0            # m/s — must be nonzero for FVS (K-matrix singular at u=0)
-    p_R: 1.0e4          # Pa
-    T_R: 278.0          # K   → rho_R ≈ 0.125 kg/m³ for Air
-    u_R: 1.0            # m/s — must be nonzero for FVS
+
+shock_tube:
+  x_diaphragm: 0.5
+  p_L: 1.0e5            # Pa
+  T_L: 348.0            # K   → rho_L ≈ 1.0 kg/m³ for Air
+  u_L: 1.0              # m/s — must be nonzero for FVS (K-matrix singular at u=0)
+  p_R: 1.0e4            # Pa
+  T_R: 278.0            # K   → rho_R ≈ 0.125 kg/m³ for Air
+  u_R: 1.0              # m/s — must be nonzero for FVS
 
 fluid:
   perfect_gas: false    # fvs_newton requires real-gas EOS (perfect_gas not supported)

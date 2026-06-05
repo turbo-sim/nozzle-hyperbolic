@@ -1,7 +1,7 @@
 boundary_conditions:
-  p_stagnation:  130e5
+  p_stagnation:  5e5
   T_stagnation: 348
-  p_out: 78e5
+  p_out: 4e5
  
 # Numerical settings
 numerical_settings:
@@ -50,24 +50,36 @@ numerical_settings:
     reconstruction: constant
     CFL: 20
  
-nozzle_parameters:
-  type: axisymmetric  # planar or axisymmetric
-  width: 6.48e-3  # channel depth [m] (planar only)
-  r0: 3
-  rt: 0.5
-  roughness: 0.000002
+geometry:
+  function: get_pipe
+  roughness: 0.0
+  # area: 1.0 
  
+# fluid:
+#   perfect_gas: false
+#   fluid_name: CO2
+#   use_lookup_table: true   # true = FluidBicubic (fast, requires table build);
+#                            # false = jxp.Fluid  (direct HEOS, slower, no table needed)
+#   lut:                     # only used when use_lookup_table: true
+#     backend:   HEOS
+#     h_min:     50000.0     # J/kg
+#     h_max:     850000.0    # J/kg
+#     p_min:     10000.0     # Pa
+#     p_max:     30000000.0  # Pa
+#     N_h:       80
+#     N_p:       80
+#     table_dir: fluid_tables
+
 fluid:
-  perfect_gas: false
-  fluid_name: CO2
-  use_lookup_table: true   # true = FluidBicubic (fast, requires table build);
-                           # false = jxp.Fluid  (direct HEOS, slower, no table needed)
-  lut:                     # only used when use_lookup_table: true
+  perfect_gas: false    # fvs_newton requires real-gas EOS (perfect_gas not supported)
+  fluid_name: Air
+  use_lookup_table: true
+  lut:
     backend:   HEOS
-    h_min:     50000.0     # J/kg
-    h_max:     850000.0    # J/kg
-    p_min:     10000.0     # Pa
-    p_max:     30000000.0  # Pa
-    N_h:       80
-    N_p:       80
+    h_min:     100000.0   # J/kg  →  T ~ 100 K
+    h_max:     500000.0   # J/kg  →  T ~ 500 K
+    p_min:     1000.0     # Pa
+    p_max:     500000.0   # Pa
+    N_h:       100
+    N_p:       60
     table_dir: fluid_tables
