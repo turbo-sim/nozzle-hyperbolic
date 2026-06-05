@@ -4,13 +4,13 @@ boundary_conditions:
   p_out:        1.0e4   # = p_R
 
 numerical_settings:
-  Nx: 50
+  Nx: 500
   x1: 0.0
   x2: 1.0
   t1: 0.00
   t2: 5.4e-4            # physical end time ≈ 0.2/c_L s — waves clear of boundaries
-  CFL: 0.01
-  max_iterations: 10000
+  CFL: 0.5              # FVS Newton is implicit — can go above 0.5; lower = more accurate
+  max_iterations: 100000
   residuals: 1.0e-8    # will not converge (transient) — loop runs to t2
 
   # ── Flux method ────────────────────────────────────────────────────────
@@ -18,13 +18,19 @@ numerical_settings:
   flux_method: hllc
 
   # ── Time discretization ─────────────────────────────────────────────────
-  # euler | implicit   (use explicit for transient validation)
-  time_discretization: euler
+  # euler        — explicit Euler  (fast, reference)
+  # fvs_newton   — Städtke FVS + Newton implicit  (requires perfect_gas: false)
+  time_discretization: fvs_newton
 
   # ── Reconstruction ──────────────────────────────────────────────────────
   # Use constant (1st order) first — FVS+MUSCL is not TVD for strong shocks.
   # Switch to muscl_van_leer for smoother profiles once base case passes.
   reconstruction: constant
+
+  # ── Wall friction ────────────────────────────────────────────────────────
+  # false = frictionless (Sod shock tube has no pipe wall, tau_w must be zero)
+  # true  = Haaland friction (default for nozzle cases)
+  wall_friction: false
 
 nozzle_parameters:
   type: shock_tube
@@ -34,13 +40,13 @@ nozzle_parameters:
     x_diaphragm: 0.5
     p_L: 1.0e5          # Pa
     T_L: 348.0          # K   → rho_L ≈ 1.0 kg/m³ for Air
-    u_L: 1.0e-6         # m/s (near-zero; 1.0 needed only for Städtke FVS — not HLLC)
+    u_L: 1.0            # m/s — must be nonzero for FVS (K-matrix singular at u=0)
     p_R: 1.0e4          # Pa
     T_R: 278.0          # K   → rho_R ≈ 0.125 kg/m³ for Air
-    u_R: 1.0e-6         # m/s
+    u_R: 1.0            # m/s — must be nonzero for FVS
 
 fluid:
-  perfect_gas: false
+  perfect_gas: false    # fvs_newton requires real-gas EOS (perfect_gas not supported)
   fluid_name: Air
   use_lookup_table: true
   lut:
