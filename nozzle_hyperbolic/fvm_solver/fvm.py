@@ -1328,7 +1328,7 @@ def make_jax_stadtke_step(fluid, A, D_h, roughness, dx, CFL, p_out, h0, s0,
     # Jacobian function — created once, compiled into the JIT kernel
     _jac_fn = jax.jacobian(_residual, argnums=0)
 
-    # @jax.jit  # disabled: skip XLA compilation, run eagerly
+    @jax.jit
     def step(U_n):
         # ── dt from CFL at current primitive state ────────────────────────
         st_c = fluid.get_state(jxp.HmassP_INPUTS, U_n[:, 2], U_n[:, 0])
@@ -1429,57 +1429,46 @@ def fvm_euler_1d(x, t, parameters):
         _tol      = jnp.float64(steady_thr)
         _warmup_j = jnp.int32(warmup)
 
-        # @jax.jit  # disabled: skip XLA compilation, lax.while_loop runs eagerly
-        _t_end_j = jnp.float64(t_end)
-
-        def _stadtke_run(U0_j):
-            def cond_fn(carry):
-                _, n, t_phys, res, res_hist = carry
-                below_thr = res < _tol
-                hist_max  = jnp.max(res_hist)
-                hist_min  = jnp.min(res_hist) + 1e-300
-                plateau   = (n >= _warmup_j) & (hist_max / hist_min < 1.5) & (res < 3.0 * _tol)
-                time_done = t_phys >= _t_end_j
-                return (n < _max_iter) & ~(below_thr | plateau | time_done)
-
-            def body_fn(carry):
-                U, n, t_phys, _, res_hist = carry
-                U_new, dt, res = _stadtke_step(U)
-                res_hist_new   = jnp.roll(res_hist, -1).at[-1].set(res)
-                should_print = jnp.where(
-                    n < 10,  jnp.bool_(True),
-                    jnp.where(n < 100, n % 10 == 0, n % 50 == 0))
-                jax.lax.cond(
-                    should_print,
-                    lambda args: jax.debug.print(
-                        "Iter {n:5d}  t={t:.3e}  SSR = {res:.3e}",
-                        n=args[0], t=args[1], res=args[2]),
-                    lambda args: None,
-                    (n, t_phys, res),
-                )
-                return U_new, n + 1, t_phys + dt, res, res_hist_new
-
-            res_hist0 = jnp.ones(5, dtype=jnp.float64)
-            init      = (U0_j, jnp.int32(0), jnp.float64(0.0), jnp.float64(1.0), res_hist0)
-            U_f, n_f, t_f, res_f, _ = jax.lax.while_loop(cond_fn, body_fn, init)
-            return U_f, n_f, t_f, res_f
-
-        print("Compiling and running Städtke Newton solver ...", flush=True)
+        print("Compiling Städtke Newton step ...", flush=True)
         t0 = _time.perf_counter()
-        try:
-            U_final, n_final, t_final, res_final = _stadtke_run(U_jax)
-            jax.block_until_ready(U_final)
-        except KeyboardInterrupt:
-            print("Interrupted — returning initial solution.")
-            Q_out = np.zeros((N, Nj, 2))
-            Q_out[:, :, 0] = Q_init
-            Q_out[:, :, 1] = Q_init
-            return Q_out, np.array([0.0, 0.0])
 
-        elapsed   = _time.perf_counter() - t0
-        n_done    = int(n_final)
-        t_done    = float(t_final)
-        res_done  = float(res_final)
+        # Trigger JIT compilation with the first step
+        U_jax, _dt0, _res0 = _stadtke_step(U_jax)
+        jax.block_until_ready(U_jax)
+        compile_time = _time.perf_counter() - t0
+        print(f"Compiled in {compile_time:.1f} s. Running ...", flush=True)
+
+        n      = 1
+        t_phys = float(_dt0)
+        res    = float(_res0)
+        res_hist = [res] * 5
+
+        try:
+            while n < max_iter and t_phys < t_end:
+                below_thr = res < steady_thr
+                hist_max  = max(res_hist)
+                hist_min  = min(res_hist) + 1e-300
+                plateau   = (n >= warmup) and (hist_max / hist_min < 1.5) and (res < 3.0 * steady_thr)
+                if below_thr or plateau:
+                    break
+
+                U_jax, dt_j, res_j = _stadtke_step(U_jax)
+                dt  = float(dt_j)
+                res = float(res_j)
+                t_phys += dt
+                n      += 1
+                res_hist = res_hist[1:] + [res]
+
+                if n < 10 or (n < 100 and n % 10 == 0) or n % 50 == 0:
+                    print(f"  Iter {n:5d}  t={t_phys:.3e}  SSR={res:.3e}", flush=True)
+
+        except KeyboardInterrupt:
+            print("Interrupted — returning current solution.")
+
+        elapsed  = _time.perf_counter() - t0
+        n_done   = n
+        t_done   = t_phys
+        res_done = res
         if res_done < float(steady_thr):
             reason = "below threshold"
         elif t_done >= float(t_end):
@@ -1489,7 +1478,7 @@ def fvm_euler_1d(x, t, parameters):
         print(f"Done: {n_done} iterations ({reason}). "
               f"SSR = {res_done:.3e}.  Computational time = {elapsed:.1f} s", flush=True)
 
-        U_np    = np.asarray(U_final)
+        U_np    = np.asarray(U_jax)
         Q_final = _puh_to_conservative(U_np, fluid)
 
         Q_out = np.zeros((N, Nj, 2))
