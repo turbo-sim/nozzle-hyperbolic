@@ -1,6 +1,14 @@
 # %%
 import jax
 jax.config.update("jax_enable_x64", True)
+
+# Persist XLA compiled kernels across runs — first run compiles once, all
+# subsequent runs (same settings, same Nx) load from cache and skip compilation.
+# The cache is keyed on the computation graph + hardware, so it is safe to share.
+import pathlib
+_cache_dir = pathlib.Path(__file__).parent.parent / ".jax_cache"
+_cache_dir.mkdir(exist_ok=True)
+jax.config.update("jax_compilation_cache_dir", str(_cache_dir))
 import yaml
 import numpy as np
 import matplotlib.pyplot as plt
@@ -14,6 +22,16 @@ with open("settings_shock_tube.yaml", 'r') as file:
     case_data = yaml.safe_load(file)
 
 hyp.print_dict(case_data)
+
+## Output directory
+run_name = (
+    f"{case_data['nozzle_parameters']['type']}_"
+    f"{case_data['numerical_settings']['flux_method']}_"
+    f"N{case_data['numerical_settings']['Nx']}"
+)
+out_dir  = pathlib.Path(run_name)
+out_dir.mkdir(parents=True, exist_ok=True)
+print(f"Output directory: {out_dir.resolve()}")
 
 ## Fluid
 perfect_gas = case_data["fluid"]["perfect_gas"]
@@ -193,6 +211,18 @@ else:
     Z           = np.asarray(_states.Z,           dtype=float)
     Ma          = velocity / sound_speed
 
+## Save solution as CSV
+if perfect_gas:
+    csv_header = "x,rho,u,p,Ma"
+    csv_data   = np.column_stack([x, density, velocity, pressure, Ma])
+else:
+    csv_header = "x,rho,u,p,T,c,Ma,s,Qvap,Z"
+    csv_data   = np.column_stack([x, density, velocity, pressure,
+                                   temperature, sound_speed, Ma, s, Qvap, Z])
+sol_path = out_dir / "solution.csv"
+np.savetxt(sol_path, csv_data, delimiter=",", header=csv_header, comments="")
+print(f"Solution saved → {sol_path}")
+
 ## Plots
 def _add_nozzle_overlay(ax_main, x, r, x2, show_ylabel=False):
     ax2 = ax_main.twinx()
@@ -255,10 +285,22 @@ else:
         _add_nozzle_overlay(ax, x, r, x2, show_ylabel=(k % 3 == 2))
 
     fluid = jxp.Fluid(fluid_name)
-    fig_ph, ax_ph = fluid.plot_phase_diagram()
-    ax_ph.plot(s, temperature, "o")
+    try:
+        fig_ph, ax_ph = fluid.plot_phase_diagram()
+        ax_ph.plot(s, temperature, "o")
+    except (AttributeError, Exception):
+        # Single-phase fluid (e.g. Air) has no saturation line — plain T-s plot
+        fig_ph, ax_ph = plt.subplots(figsize=(6, 5))
+        ax_ph.scatter(s, temperature, s=10)
+        ax_ph.set_xlabel(r'$s$ [J/(kg·K)]')
+        ax_ph.set_ylabel(r'$T$ [K]')
+        ax_ph.set_title(f"{fluid_name} — T-s diagram")
 
-plt.tight_layout()
+fig.tight_layout()
+fig.savefig(out_dir / "solution.png", dpi=150, bbox_inches='tight')
+if not perfect_gas:
+    fig_ph.tight_layout()
+    fig_ph.savefig(out_dir / "phase_diagram.png", dpi=150, bbox_inches='tight')
 plt.show()
 
 ## Shock tube: compare with exact Sod solution
@@ -301,17 +343,17 @@ if nozzle_type == "shock_tube":
     t_phys = float(t[-1])   # elapsed physical time
     rho_ex = np.empty_like(x);  u_ex = np.empty_like(x);  p_ex = np.empty_like(x)
     for i, xi in enumerate(x):
-        s = (xi - x_d) / t_phys if t_phys > 0 else 0.0
-        if s <= S_HL:
+        xi_s = (xi - x_d) / t_phys if t_phys > 0 else 0.0
+        if xi_s <= S_HL:
             rho_ex[i], u_ex[i], p_ex[i] = rho_L_ex, u_L_st, p_L_st
-        elif s <= S_TL:
-            u_ex[i] = 2/(gam_ex+1)*(cL_ex + (gam_ex-1)/2*u_L_st + s)
+        elif xi_s <= S_TL:
+            u_ex[i] = 2/(gam_ex+1)*(cL_ex + (gam_ex-1)/2*u_L_st + xi_s)
             c_fan   = cL_ex + (gam_ex-1)/2*(u_L_st - u_ex[i])
             p_ex[i] = p_L_st * (c_fan/cL_ex)**(2*gam_ex/(gam_ex-1))
             rho_ex[i] = gam_ex * p_ex[i] / c_fan**2
-        elif s <= u_star:
+        elif xi_s <= u_star:
             rho_ex[i], u_ex[i], p_ex[i] = rhoL_star, u_star, p_star
-        elif s <= S_R:
+        elif xi_s <= S_R:
             rho_ex[i], u_ex[i], p_ex[i] = rhoR_star, u_star, p_star
         else:
             rho_ex[i], u_ex[i], p_ex[i] = rho_R_ex, u_R_st, p_R_st
@@ -329,6 +371,7 @@ if nozzle_type == "shock_tube":
         ax.set_xlabel("x [m]");  ax.set_ylabel(ylabel)
         ax.legend(fontsize=9)
     plt.tight_layout()
+    fig_sod.savefig(out_dir / "sod_comparison.png", dpi=150, bbox_inches='tight')
     plt.show()
 
     print("\n  L1 errors (interior cells, vs exact Sod):")
@@ -357,35 +400,44 @@ H_int     = H_field[1:-1]
 H_mean    = np.mean(H_int)
 H_dev     = np.abs(H_field - H_mean) / np.abs(H_mean) * 100  # % deviation
 
-print("=" * 55)
-print("  Spatial conservation residuals  (interior cells)")
-print("=" * 55)
-print(f"  Mass flux  — mean: {m_dot_mean:.6g} kg/s")
-print(f"               max deviation: {np.max(m_dot_dev[1:-1]):.3f} %")
-print(f"  Tot. enth. — mean: {H_mean:.6g} J/kg")
-print(f"               max deviation: {np.max(H_dev[1:-1]):.3f} %")
-if not perfect_gas:
-    ds = s[-1] - s[0]
-    print(f"  Entropy    — inlet: {s[0]:.6g}  outlet: {s[-1]:.6g}  Δs = {ds:+.4g} J/(kg·K)")
-print("=" * 55)
-print(f"  Mass flow rate (outlet): {m_dot[-1]:.6g} kg/s")
-print(f"  Pressure at throat: {pressure[min_index]:.6g} Pa,  outlet: {pressure[-1]:.6g} Pa")
-print("=" * 55)
+if nozzle_type == "shock_tube":
+    # Conservation diagnostics assume steady-state flow — not meaningful for a
+    # transient shock tube where mass flux and enthalpy vary across the domain.
+    print("=" * 55)
+    print("  Shock tube — steady-state conservation diagnostics")
+    print("  skipped (transient case: mass flux and H not uniform)")
+    print("=" * 55)
+else:
+    print("=" * 55)
+    print("  Spatial conservation residuals  (interior cells)")
+    print("=" * 55)
+    print(f"  Mass flux  — mean: {m_dot_mean:.6g} kg/s")
+    print(f"               max deviation: {np.max(m_dot_dev[1:-1]):.3f} %")
+    print(f"  Tot. enth. — mean: {H_mean:.6g} J/kg")
+    print(f"               max deviation: {np.max(H_dev[1:-1]):.3f} %")
+    if not perfect_gas:
+        ds = s[-1] - s[0]
+        print(f"  Entropy    — inlet: {s[0]:.6g}  outlet: {s[-1]:.6g}  Δs = {ds:+.4g} J/(kg·K)")
+    print("=" * 55)
+    print(f"  Mass flow rate (outlet): {m_dot[-1]:.6g} kg/s")
+    print(f"  Pressure at throat: {pressure[min_index]:.6g} Pa,  outlet: {pressure[-1]:.6g} Pa")
+    print("=" * 55)
 
-fig_res, axes_res = plt.subplots(1, 2, figsize=(10, 4))
-fig_res.suptitle("Spatial conservation residuals (interior cells only)")
+    fig_res, axes_res = plt.subplots(1, 2, figsize=(10, 4))
+    fig_res.suptitle("Spatial conservation residuals (interior cells only)")
 
-ax = axes_res[0]
-ax.plot(x[1:-1], m_dot_dev[1:-1])
-ax.set_xlabel("x [m]")
-ax.set_ylabel(r"$|\dot{m} - \bar{\dot{m}}| / \bar{\dot{m}}$ [%]")
-ax.set_title("Mass flux deviation")
+    ax = axes_res[0]
+    ax.plot(x[1:-1], m_dot_dev[1:-1])
+    ax.set_xlabel("x [m]")
+    ax.set_ylabel(r"$|\dot{m} - \bar{\dot{m}}| / \bar{\dot{m}}$ [%]")
+    ax.set_title("Mass flux deviation")
 
-ax = axes_res[1]
-ax.plot(x[1:-1], H_dev[1:-1])
-ax.set_xlabel("x [m]")
-ax.set_ylabel(r"$|H - \bar{H}| / \bar{H}$ [%]")
-ax.set_title("Total enthalpy deviation")
+    ax = axes_res[1]
+    ax.plot(x[1:-1], H_dev[1:-1])
+    ax.set_xlabel("x [m]")
+    ax.set_ylabel(r"$|H - \bar{H}| / \bar{H}$ [%]")
+    ax.set_title("Total enthalpy deviation")
 
-plt.tight_layout()
-plt.show()
+    plt.tight_layout()
+    fig_res.savefig(out_dir / "residuals.png", dpi=150, bbox_inches='tight')
+    plt.show()

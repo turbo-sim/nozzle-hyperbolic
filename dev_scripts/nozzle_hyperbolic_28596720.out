@@ -1,0 +1,93 @@
+boundary_conditions: 
+    p_stagnation: 1.0e5
+    T_stagnation: 348.0
+    p_out: 1.0e4
+numerical_settings: 
+    Nx: 80
+    x1: 0.0
+    x2: 1.0
+    t1: 0.0
+    t2: 0.00054
+    CFL: 0.01
+    max_iterations: 1000
+    residuals: 1e-12
+    flux_method: hllc
+    time_discretization: euler
+    reconstruction: constant
+nozzle_parameters: 
+    type: shock_tube
+    area: 1.0
+    roughness: 0.0
+    shock_tube: 
+        x_diaphragm: 0.5
+        p_L: 1.0e5
+        T_L: 348.0
+        u_L: 1e-06
+        p_R: 1.0e4
+        T_R: 278.0
+        u_R: 1e-06
+fluid: 
+    perfect_gas: False
+    fluid_name: Air
+    use_lookup_table: True
+    lut: 
+        backend: HEOS
+        h_min: 100000.0
+        h_max: 500000.0
+        p_min: 1000.0
+        p_max: 500000.0
+        N_h: 100
+        N_p: 60
+        table_dir: fluid_tables
+Output directory: /zhome/da/5/214921/Documents/nozzle-hyperbolic/dev_scripts/shock_tube_hllc_N80
+Loaded property table from: fluid_tables/Air_100x60.pkl
+Computing initialization...
+Initialization done.
+Starting time integration (max_iter=1000, tol=1.0e-12) ...
+Running solver (eager mode, no XLA compilation) ...
+Iter     0  SSR = 5.528e+07
+Iter     1  SSR = 5.966e+05
+Iter     2  SSR = 5.792e+03
+Iter     3  SSR = 4.849e+01
+Iter     4  SSR = 2.708e+01
+Iter     5  SSR = 1.821e+01
+Iter     6  SSR = 1.366e+01
+Iter     7  SSR = 1.282e+01
+Iter     8  SSR = 1.921e+01
+Iter     9  SSR = 1.674e+01
+Iter    10  SSR = 9.868e+00
+Iter    20  SSR = 4.373e+00
+Iter    30  SSR = 3.180e+00
+Iter    40  SSR = 2.445e+00
+Iter    50  SSR = 3.157e+00
+Iter    60  SSR = 1.906e+00
+Iter    70  SSR = 1.796e+00
+Iter    80  SSR = 7.681e+00
+Iter    90  SSR = 1.482e+00
+Iter   100  SSR = 1.425e+00
+Iter   150  SSR = 1.060e+00
+Iter   200  SSR = 8.840e-01
+Iter   250  SSR = 7.711e-01
+Iter   300  SSR = 7.028e-01
+Iter   350  SSR = 7.378e-01
+Iter   400  SSR = 7.251e-01
+Iter   450  SSR = 7.740e-01
+Iter   500  SSR = 1.036e+00
+Iter   550  SSR = 5.425e-01
+Iter   600  SSR = 5.244e-01
+Iter   650  SSR = 5.822e-01
+Iter   700  SSR = 5.171e-01
+Iter   750  SSR = 4.410e-01
+Iter   800  SSR = 4.166e-01
+Iter   850  SSR = 4.288e-01
+Iter   900  SSR = 1.141e+00
+Iter   950  SSR = 2.678e-01
+Done: 1000 iterations (max iterations). t_phys = 2.064e-04 s,  NRMS = 2.684e-01.  Computational time = 384.9 s
+hllc computed
+Traceback [1;36m(most recent call last)[0m:
+[0m  File [0;32m~/Documents/nozzle-hyperbolic/dev_scripts/main.py:223[0m
+    np.savetxt(sol_path, csv_data, delimiter=",", header=csv_header, comments="")[0m
+[1;36m  File [1;32m~/Documents/nozzle-hyperbolic/.venv/lib/python3.12/site-packages/numpy/lib/_npyio_impl.py:1565[1;36m in [1;35msavetxt[1;36m
+[1;33m    open(fname, 'wt').close()[1;36m
+[1;31mFileNotFoundError[0m[1;31m:[0m [Errno 2] No such file or directory: 'shock_tube_hllc_N80/solution.csv'
+
