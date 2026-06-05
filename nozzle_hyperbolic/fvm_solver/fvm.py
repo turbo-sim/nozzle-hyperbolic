@@ -995,13 +995,15 @@ def make_jax_step(fluid, A, D_h, roughness, dx, CFL, p_out, h0, s0,
         p_lo = jnp.where(bad, p_lo_r, p_lo)
         p_hi = jnp.where(bad, p_hi_r, p_hi)
         p    = 0.5 * (p_lo + p_hi)
-        for _ in range(15):
+        def _bisect_eos(_, carry):
+            p_lo, p_hi, p = carry
             h        = jnp.clip(e + p / rho, h_lo + 1.0, h_hi - 1.0)
             rho_pred = fluid.get_state(jxp.HmassP_INPUTS, h, p).density
             residual = rho_pred - rho
             p_lo     = jnp.where(residual < 0, p, p_lo)
             p_hi     = jnp.where(residual > 0, p, p_hi)
-            p        = 0.5 * (p_lo + p_hi)
+            return p_lo, p_hi, 0.5 * (p_lo + p_hi)
+        p_lo, p_hi, p = jax.lax.fori_loop(0, 15, _bisect_eos, (p_lo, p_hi, p))
         h_f = jnp.clip(e + p / rho, h_lo + 1.0, h_hi - 1.0)
         _st = fluid.get_state(jxp.HmassP_INPUTS, h_f, p)
         return _st.pressure, _st.speed_sound, _st.viscosity
@@ -1039,11 +1041,14 @@ def make_jax_step(fluid, A, D_h, roughness, dx, CFL, p_out, h0, s0,
         h_s   = jnp.expand_dims(h0_j - 0.5 * u_in**2, 0)   # shape (1,)
         plo   = jnp.array([p_lo_r], dtype=jnp.float64)
         phi   = jnp.array([p_hi_r], dtype=jnp.float64)
-        for _ in range(12):
+        def _bisect_inlet(_, carry):
+            plo, phi = carry
             pm    = 0.5 * (plo + phi)
             s_mid = fluid.get_state(jxp.HmassP_INPUTS, h_s, pm).entropy
             plo   = jnp.where(s_mid > s0_j, pm, plo)
             phi   = jnp.where(s_mid < s0_j, pm, phi)
+            return plo, phi
+        plo, phi = jax.lax.fori_loop(0, 12, _bisect_inlet, (plo, phi))
         p_s   = 0.5 * (plo + phi)
         st    = fluid.get_state(jxp.HmassP_INPUTS, h_s, p_s)
         rho_s = st.rhomass[0]
@@ -1066,11 +1071,14 @@ def make_jax_step(fluid, A, D_h, roughness, dx, CFL, p_out, h0, s0,
         p_arr  = jnp.array([p_out], dtype=jnp.float64)
         hlo    = jnp.array([h_lo],  dtype=jnp.float64)
         hhi    = jnp.array([h_hi],  dtype=jnp.float64)
-        for _ in range(15):
-            hm   = 0.5 * (hlo + hhi)
-            rhm  = fluid.get_state(jxp.HmassP_INPUTS, hm, p_arr).rhomass
-            hlo  = jnp.where(rhm > rho_t, hm, hlo)
-            hhi  = jnp.where(rhm < rho_t, hm, hhi)
+        def _bisect_outlet(_, carry):
+            hlo, hhi = carry
+            hm  = 0.5 * (hlo + hhi)
+            rhm = fluid.get_state(jxp.HmassP_INPUTS, hm, p_arr).rhomass
+            hlo = jnp.where(rhm > rho_t, hm, hlo)
+            hhi = jnp.where(rhm < rho_t, hm, hhi)
+            return hlo, hhi
+        hlo, hhi = jax.lax.fori_loop(0, 15, _bisect_outlet, (hlo, hhi))
         h_out  = 0.5 * (hlo + hhi)
         st_out = fluid.get_state(jxp.HmassP_INPUTS, h_out, p_arr)
         e_out  = st_out.umass[0]
@@ -1079,7 +1087,7 @@ def make_jax_step(fluid, A, D_h, roughness, dx, CFL, p_out, h0, s0,
         Q_n    = Q_n.at[2, -1].set(rho_out * (e_out + 0.5 * u_out**2))
         return Q_n
 
-    @jax.jit
+    # @jax.jit  # disabled: skip XLA compilation, run eagerly
     def step(Q_n):
         Q_n = _bc_inlet(Q_n)
         Q_n = _bc_outlet(Q_n)
@@ -1244,11 +1252,14 @@ def make_jax_stadtke_step(fluid, A, D_h, roughness, dx, CFL, p_out, h0, s0,
                              jnp.float64(h_hi - 1.0)), 0)
         plo  = jnp.array([p_lo], dtype=jnp.float64)
         phi  = jnp.array([p_hi], dtype=jnp.float64)
-        for _ in range(12):                              # 12-iter bisection on s(h,p)=s0
+        def _bisect_inlet(_, carry):
+            plo, phi = carry
             pm    = 0.5 * (plo + phi)
             s_mid = fluid.get_state(jxp.HmassP_INPUTS, h_s, pm)["s"]
             plo   = jnp.where(s_mid > s0_j, pm, plo)
             phi   = jnp.where(s_mid < s0_j, pm, phi)
+            return plo, phi
+        plo, phi = jax.lax.fori_loop(0, 12, _bisect_inlet, (plo, phi))
         p_s = 0.5 * (plo + phi)
 
         # jax.debug.print("inlet values - p_s:{ps}, h_s:{hs}", ps=p_s, hs=h_s)
@@ -1308,7 +1319,7 @@ def make_jax_stadtke_step(fluid, A, D_h, roughness, dx, CFL, p_out, h0, s0,
     # Jacobian function — created once, compiled into the JIT kernel
     _jac_fn = jax.jacobian(_residual, argnums=0)
 
-    @jax.jit
+    # @jax.jit  # disabled: skip XLA compilation, run eagerly
     def step(U_n):
         # ── dt from CFL at current primitive state ────────────────────────
         st_c = fluid.get_state(jxp.HmassP_INPUTS, U_n[:, 2], U_n[:, 0])
@@ -1405,7 +1416,7 @@ def fvm_euler_1d(x, t, parameters):
         _tol      = jnp.float64(steady_thr)
         _warmup_j = jnp.int32(warmup)
 
-        @jax.jit
+        # @jax.jit  # disabled: skip XLA compilation, lax.while_loop runs eagerly
         def _stadtke_run(U0_j):
             def cond_fn(carry):
                 _, n, res, res_hist = carry
@@ -1461,7 +1472,7 @@ def fvm_euler_1d(x, t, parameters):
         Q_out = np.zeros((N, Nj, 2))
         Q_out[:, :, 0] = Q_init
         Q_out[:, :, 1] = Q_final
-        return Q_out, np.array([0.0, elapsed])
+        return Q_out, np.array([0.0, t_end])
 
     # ── JAX path (real gas, non-Roe) ─────────────────────────────────────
     use_jax = (not perfect_gas) and (flux_method != 'roe') and (method != 'fvs_newton')
@@ -1512,7 +1523,7 @@ def fvm_euler_1d(x, t, parameters):
         _warmup_j = jnp.int32(warmup)
         _t_end_j  = jnp.float64(t_end)   # physical end time — used for transient cases
 
-        @jax.jit
+        # @jax.jit  # disabled: skip XLA compilation, lax.while_loop runs eagerly
         def _jax_run(Q0):
 
             def cond_fn(carry):
@@ -1547,15 +1558,13 @@ def fvm_euler_1d(x, t, parameters):
 
             res_hist0 = jnp.ones(5, dtype=jnp.float64)
             init      = (Q0, jnp.int32(0), jnp.float64(0.0), jnp.float64(1.0), res_hist0)
-            Q_f, n_f, _, res_f, _ = jax.lax.while_loop(cond_fn, body_fn, init)
-            return Q_f, n_f, res_f
+            Q_f, n_f, t_f, res_f, _ = jax.lax.while_loop(cond_fn, body_fn, init)
+            return Q_f, n_f, t_f, res_f
 
-        print("Compiling and running solver (jax.lax.while_loop) ...", flush=True)
-        print("  First call includes XLA compilation; subsequent calls reuse the kernel.",
-              flush=True)
+        print("Running solver (eager mode, no XLA compilation) ...", flush=True)
         t0 = _time.perf_counter()
         try:
-            Q_final, n_final, res_final = _jax_run(Q_jax)
+            Q_final, n_final, t_final, res_final = _jax_run(Q_jax)
             jax.block_until_ready(Q_final)
         except KeyboardInterrupt:
             print("Interrupted — returning initial solution.")
@@ -1566,15 +1575,24 @@ def fvm_euler_1d(x, t, parameters):
 
         elapsed  = _time.perf_counter() - t0
         n_done   = int(n_final)
+        t_done   = float(t_final)
         res_done = float(res_final)
-        reason   = "below threshold" if res_done < float(steady_thr) else "plateau / max_iter"
+        if res_done < float(steady_thr):
+            reason = "below threshold"
+        elif t_done >= float(t_end):
+            reason = "physical time reached"
+        elif n_done >= max_iter:
+            reason = "max iterations"
+        else:
+            reason = "plateau"
         print(f"Done: {n_done} iterations ({reason}). "
-              f"NRMS = {res_done:.3e}.  Computational time = {elapsed:.1f} s", flush=True)
+              f"t_phys = {t_done:.3e} s,  NRMS = {res_done:.3e}.  "
+              f"Computational time = {elapsed:.1f} s", flush=True)
 
         Q_out = np.zeros((N, Nj, 2))
         Q_out[:, :, 0] = Q_init
         Q_out[:, :, 1] = np.asarray(Q_final)
-        return Q_out, np.array([0.0, elapsed])
+        return Q_out, np.array([0.0, t_done])
 
     # ── NumPy path (perfect gas or Roe) ──────────────────────────────────
     try:
