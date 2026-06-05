@@ -31,6 +31,11 @@ numerical_settings:
   # time_discretization: implicit
   time_discretization: fvs_newton
 
+  # ── Wall friction ────────────────────────────────────────────────────────
+  # true  = Haaland pipe friction on momentum (default)
+  # false = frictionless duct (shock tube validation)
+  wall_friction: true
+
   # ── Reconstruction ──────────────────────────────────────────────────────
   # constant | muscl_minmod | muscl_van_leer | muscl_superbee
   # NOTE: ignored for fvs_newton (always uses Van Leer in (p,u,h))

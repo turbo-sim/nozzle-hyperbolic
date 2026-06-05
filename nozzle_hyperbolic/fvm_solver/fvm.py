@@ -513,7 +513,7 @@ def _bc_outlet_real(Q_n, p_out, A_nodes, fluid):
 # Real-gas properties + friction  (single combined loop)
 # ---------------------------------------------------------------------------
 
-def _real_gas_state_and_friction(Q_n, D_hydraulic, roughness, fluid):
+def _real_gas_state_and_friction(Q_n, D_hydraulic, roughness, fluid, wall_friction=True):
     """
     Compute p, c, tau_w for every cell.
 
@@ -537,10 +537,11 @@ def _real_gas_state_and_friction(Q_n, D_hydraulic, roughness, fluid):
         mu_arr = np.full(Nj, 1e-5)
 
     tau_w = np.zeros(Nj)
-    for j in range(Nj):
-        Re  = rho[j] * abs(u[j]) * D_hydraulic[j] / max(mu_arr[j], 1e-12)
-        Cf  = Haaland(Re, roughness, D_hydraulic[j])
-        tau_w[j] = Cf * rho[j] * u[j]**2 / 8.0
+    if wall_friction:
+        for j in range(Nj):
+            Re  = rho[j] * abs(u[j]) * D_hydraulic[j] / max(mu_arr[j], 1e-12)
+            Cf  = Haaland(Re, roughness, D_hydraulic[j])
+            tau_w[j] = Cf * rho[j] * u[j]**2 / 8.0
 
     return p, c, tau_w
 
@@ -938,7 +939,8 @@ def _bc_outlet_real_jax(Q_n, p_out, A_nodes, fluid):
 
 
 def make_jax_step(fluid, A, D_h, roughness, dx, CFL, p_out, h0, s0,
-                  recon, flux_method, time_method):
+                  recon, flux_method, time_method, wall_friction=True,
+                  transmissive_bc=False):
     """
     Returns a @jax.jit compiled step function for the real-gas Euler solver.
     BCs are applied inside step() — no Python calls needed between iterations.
@@ -1035,6 +1037,8 @@ def make_jax_step(fluid, A, D_h, roughness, dx, CFL, p_out, h0, s0,
         return RHS
 
     def _bc_inlet(Q_n):
+        if transmissive_bc:
+            return Q_n.at[:, 0].set(Q_n[:, 1])
         # Extrapolate velocity; find isentropic static state via 12-iter bisection.
         # Uses 1-element arrays so FluidBicubic's vmap path is exercised, not scalar.
         u_in  = 2.0 * Q_n[1, 1] / Q_n[0, 1] - Q_n[1, 2] / Q_n[0, 2]
@@ -1059,6 +1063,8 @@ def make_jax_step(fluid, A, D_h, roughness, dx, CFL, p_out, h0, s0,
         return Q_n
 
     def _bc_outlet(Q_n):
+        if transmissive_bc:
+            return Q_n.at[:, -1].set(Q_n[:, -2])
         rho_out  = 2.0 * Q_n[0, -2] * A_j[-2] / A_j[-1] - Q_n[0, -3] * A_j[-3] / A_j[-1]
         rhou_out = 2.0 * Q_n[1, -2] * A_j[-2] / A_j[-1] - Q_n[1, -3] * A_j[-3] / A_j[-1]
         # Clamp rho to physical range before EOS call (high-CFL extrapolation can go negative)
@@ -1100,6 +1106,7 @@ def make_jax_step(fluid, A, D_h, roughness, dx, CFL, p_out, h0, s0,
 
         Re    = rho * jnp.abs(u) * D_h_j / jnp.maximum(mu, 1e-12)
         tau_w = _haaland_jnp(Re, roughness, D_h_j) * rho * u**2 / 8.0
+        tau_w = tau_w if wall_friction else jnp.zeros_like(tau_w)
 
         S = jnp.stack([jnp.zeros_like(p), p * _dA_dx_j - tau_w * 4.0 / D_h_j, jnp.zeros_like(p)])
 
@@ -1183,7 +1190,8 @@ def _puh_to_conservative(U, fluid):
 
 
 def make_jax_stadtke_step(fluid, A, D_h, roughness, dx, CFL, p_out, h0, s0,
-                           delta_factor=0.1, newton_iter=20):
+                           delta_factor=0.1, newton_iter=20, wall_friction=True,
+                           transmissive_bc=False):
     """
     Build a @jax.jit step function implementing the Städtke Newton implicit scheme.
 
@@ -1244,7 +1252,9 @@ def make_jax_stadtke_step(fluid, A, D_h, roughness, dx, CFL, p_out, h0, s0,
         return U_L, U_R
 
     def _bc_inlet(U):
-        """Inlet BC: extrapolate u, isentropic static state from (h0, s0)."""
+        """Inlet BC: zero-gradient (shock tube) or isentropic reservoir (nozzle)."""
+        if transmissive_bc:
+            return U.at[0].set(U[1])
         u_in = 2.0 * U[1, 1] - U[2, 1]
         h_s  = jnp.expand_dims(
                    jnp.clip(h0_j - 0.5 * u_in**2,
@@ -1261,19 +1271,17 @@ def make_jax_stadtke_step(fluid, A, D_h, roughness, dx, CFL, p_out, h0, s0,
             return plo, phi
         plo, phi = jax.lax.fori_loop(0, 12, _bisect_inlet, (plo, phi))
         p_s = 0.5 * (plo + phi)
-
-        # jax.debug.print("inlet values - p_s:{ps}, h_s:{hs}", ps=p_s, hs=h_s)
         return U.at[0].set(jnp.array([p_s[0], u_in, h_s[0]]))
 
     def _bc_outlet(U):
-        """Outlet BC: fix p_out (subsonic) or zero-gradient (supersonic)."""
+        """Outlet BC: zero-gradient (shock tube) or p_out/supersonic (nozzle)."""
+        if transmissive_bc:
+            return U.at[-1].set(U[-2])
         u_out  = U[-2, 1];  h_out = U[-2, 2];  p_prev = U[-2, 0]
         a_out  = fluid.get_state(jxp.HmassP_INPUTS,
                      jnp.expand_dims(h_out,  0),
                      jnp.expand_dims(p_prev, 0))["a"][0]
         p_ghost = jnp.where(jnp.abs(u_out) < a_out, pout_j, p_prev)
-        # jax.debug.print("outlet values - a_out:{ao}", ao=a_out)
-
         return U.at[-1].set(jnp.array([p_ghost, u_out, h_out]))
 
     def _residual(U_int_flat, U_n_flat, dt):
@@ -1304,6 +1312,7 @@ def make_jax_stadtke_step(fluid, A, D_h, roughness, dx, CFL, p_out, h0, s0,
         mu_U  = st_U["mu"]
         Re    = rho_U * jnp.abs(U[:, 1]) * D_h_j / jnp.maximum(mu_U, 1e-12)
         tau_w = _haaland_jnp(Re, roughness, D_h_j) * rho_U * U[:, 1]**2 / 8.0
+        tau_w = tau_w if wall_friction else jnp.zeros_like(tau_w)
         src   = jnp.zeros((N, 3)).at[:, 1].set(
                     U[:, 0] * dAdx_A - tau_w * 4.0 / D_h_j)
 
@@ -1373,6 +1382,9 @@ def fvm_euler_1d(x, t, parameters):
     method       = parameters['time_method']
     recon        = parameters.get('reconstruction', 'constant')
     warmup_cfg   = parameters.get('warmup_cfg', None)
+    wall_friction    = parameters.get('wall_friction', True)
+    _nozzle_type     = parameters.get('nozzle_type', 'nozzle')
+    transmissive_bc  = (_nozzle_type == 'shock_tube')
 
     if perfect_gas:
         cp, cv  = hyp.fvm_solver.specific_heat2()
@@ -1409,7 +1421,8 @@ def fvm_euler_1d(x, t, parameters):
 
         _stadtke_step = make_jax_stadtke_step(
             fluid, A_nodes, D_hydraulic, roughness,
-            dx, CFL, p_out, h0, s0)
+            dx, CFL, p_out, h0, s0, wall_friction=wall_friction,
+            transmissive_bc=transmissive_bc)
 
         U_jax     = jnp.asarray(U0, dtype=jnp.float64)
         _max_iter = jnp.int32(max_iter)
@@ -1417,40 +1430,44 @@ def fvm_euler_1d(x, t, parameters):
         _warmup_j = jnp.int32(warmup)
 
         # @jax.jit  # disabled: skip XLA compilation, lax.while_loop runs eagerly
+        _t_end_j = jnp.float64(t_end)
+
         def _stadtke_run(U0_j):
             def cond_fn(carry):
-                _, n, res, res_hist = carry
+                _, n, t_phys, res, res_hist = carry
                 below_thr = res < _tol
                 hist_max  = jnp.max(res_hist)
                 hist_min  = jnp.min(res_hist) + 1e-300
                 plateau   = (n >= _warmup_j) & (hist_max / hist_min < 1.5) & (res < 3.0 * _tol)
-                return (n < _max_iter) & ~(below_thr | plateau)
+                time_done = t_phys >= _t_end_j
+                return (n < _max_iter) & ~(below_thr | plateau | time_done)
 
             def body_fn(carry):
-                U, n, _, res_hist = carry
-                U_new, _, res     = _stadtke_step(U)
-                res_hist_new      = jnp.roll(res_hist, -1).at[-1].set(res)
+                U, n, t_phys, _, res_hist = carry
+                U_new, dt, res = _stadtke_step(U)
+                res_hist_new   = jnp.roll(res_hist, -1).at[-1].set(res)
                 should_print = jnp.where(
                     n < 10,  jnp.bool_(True),
                     jnp.where(n < 100, n % 10 == 0, n % 50 == 0))
                 jax.lax.cond(
                     should_print,
                     lambda args: jax.debug.print(
-                        "Iter {n:5d}  SSR = {res:.3e}", n=args[0], res=args[1]),
+                        "Iter {n:5d}  t={t:.3e}  SSR = {res:.3e}",
+                        n=args[0], t=args[1], res=args[2]),
                     lambda args: None,
-                    (n, res),
+                    (n, t_phys, res),
                 )
-                return U_new, n + 1, res, res_hist_new
+                return U_new, n + 1, t_phys + dt, res, res_hist_new
 
             res_hist0 = jnp.ones(5, dtype=jnp.float64)
-            init      = (U0_j, jnp.int32(0), jnp.float64(1.0), res_hist0)
-            U_f, n_f, res_f, _ = jax.lax.while_loop(cond_fn, body_fn, init)
-            return U_f, n_f, res_f
+            init      = (U0_j, jnp.int32(0), jnp.float64(0.0), jnp.float64(1.0), res_hist0)
+            U_f, n_f, t_f, res_f, _ = jax.lax.while_loop(cond_fn, body_fn, init)
+            return U_f, n_f, t_f, res_f
 
         print("Compiling and running Städtke Newton solver ...", flush=True)
         t0 = _time.perf_counter()
         try:
-            U_final, n_final, res_final = _stadtke_run(U_jax)
+            U_final, n_final, t_final, res_final = _stadtke_run(U_jax)
             jax.block_until_ready(U_final)
         except KeyboardInterrupt:
             print("Interrupted — returning initial solution.")
@@ -1459,10 +1476,16 @@ def fvm_euler_1d(x, t, parameters):
             Q_out[:, :, 1] = Q_init
             return Q_out, np.array([0.0, 0.0])
 
-        elapsed  = _time.perf_counter() - t0
-        n_done   = int(n_final)
-        res_done = float(res_final)
-        reason   = "below threshold" if res_done < float(steady_thr) else "plateau / max_iter"
+        elapsed   = _time.perf_counter() - t0
+        n_done    = int(n_final)
+        t_done    = float(t_final)
+        res_done  = float(res_final)
+        if res_done < float(steady_thr):
+            reason = "below threshold"
+        elif t_done >= float(t_end):
+            reason = f"t_end reached ({t_done:.3e} s)"
+        else:
+            reason = "plateau / max_iter"
         print(f"Done: {n_done} iterations ({reason}). "
               f"SSR = {res_done:.3e}.  Computational time = {elapsed:.1f} s", flush=True)
 
@@ -1472,13 +1495,15 @@ def fvm_euler_1d(x, t, parameters):
         Q_out = np.zeros((N, Nj, 2))
         Q_out[:, :, 0] = Q_init
         Q_out[:, :, 1] = Q_final
-        return Q_out, np.array([0.0, t_end])
+        return Q_out, np.array([0.0, t_done])
 
     # ── JAX path (real gas, non-Roe) ─────────────────────────────────────
     use_jax = (not perfect_gas) and (flux_method != 'roe') and (method != 'fvs_newton')
     if use_jax:
         _jax_step = make_jax_step(fluid, A_nodes, D_hydraulic, roughness,
-                                  dx, CFL, p_out, h0, s0, recon, flux_method, method)
+                                  dx, CFL, p_out, h0, s0, recon, flux_method, method,
+                                  wall_friction=wall_friction,
+                                  transmissive_bc=transmissive_bc)
         Q_jax  = jnp.asarray(Q[:, :, 0])
         Q_init = Q[:, :, 0].copy()
 
@@ -1496,7 +1521,9 @@ def fvm_euler_1d(x, t, parameters):
             if wu_differs:
                 _wu_step = make_jax_step(fluid, A_nodes, D_hydraulic, roughness,
                                          dx, wu_cfl, p_out, h0, s0,
-                                         wu_recon, wu_flux, method)
+                                         wu_recon, wu_flux, method,
+                                         wall_friction=wall_friction,
+                                         transmissive_bc=transmissive_bc)
             else:
                 _wu_step = _jax_step   # identical settings: reuse compiled kernel
 
@@ -1621,7 +1648,8 @@ def fvm_euler_1d(x, t, parameters):
                 c     = np.sqrt(gamma * p / rho)
                 tau_w = np.zeros(Nj)
             else:
-                p, c, tau_w = _real_gas_state_and_friction(Q_n, D_hydraulic, roughness, fluid)
+                p, c, tau_w = _real_gas_state_and_friction(Q_n, D_hydraulic, roughness, fluid,
+                                                            wall_friction=wall_friction)
                 p[-1] = p_out
 
             if n == 0:

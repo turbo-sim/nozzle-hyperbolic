@@ -132,6 +132,7 @@ parameters = {
     "reconstruction": case_data["numerical_settings"].get("reconstruction", "constant"),
     "warmup_cfg":     case_data["numerical_settings"].get("warmup", None),
     "nozzle_type":    nozzle_type,
+    "wall_friction":  bool(case_data["numerical_settings"].get("wall_friction", True)),
 }
 if perfect_gas:
     parameters["gamma"] = cp / cv
@@ -341,22 +342,23 @@ if nozzle_type == "shock_tube":
     S_R  = u_R_st + cR_ex * np.sqrt((gam_ex+1)/(2*gam_ex)*p_star/p_R_st + (gam_ex-1)/(2*gam_ex))
 
     t_phys = float(t[-1])   # elapsed physical time
-    rho_ex = np.empty_like(x);  u_ex = np.empty_like(x);  p_ex = np.empty_like(x)
-    for i, xi in enumerate(x):
-        xi_s = (xi - x_d) / t_phys if t_phys > 0 else 0.0
-        if xi_s <= S_HL:
-            rho_ex[i], u_ex[i], p_ex[i] = rho_L_ex, u_L_st, p_L_st
-        elif xi_s <= S_TL:
-            u_ex[i] = 2/(gam_ex+1)*(cL_ex + (gam_ex-1)/2*u_L_st + xi_s)
-            c_fan   = cL_ex + (gam_ex-1)/2*(u_L_st - u_ex[i])
-            p_ex[i] = p_L_st * (c_fan/cL_ex)**(2*gam_ex/(gam_ex-1))
-            rho_ex[i] = gam_ex * p_ex[i] / c_fan**2
-        elif xi_s <= u_star:
-            rho_ex[i], u_ex[i], p_ex[i] = rhoL_star, u_star, p_star
-        elif xi_s <= S_R:
-            rho_ex[i], u_ex[i], p_ex[i] = rhoR_star, u_star, p_star
-        else:
-            rho_ex[i], u_ex[i], p_ex[i] = rho_R_ex, u_R_st, p_R_st
+    xi_s = (x - x_d) / t_phys if t_phys > 0 else np.zeros_like(x)
+    gm1 = gam_ex - 1.0;  gp1 = gam_ex + 1.0
+    # rarefaction fan: u, p, rho as functions of xi_s
+    u_fan   = 2/gp1 * (cL_ex + gm1/2*u_L_st + xi_s)
+    c_fan   = cL_ex + gm1/2*(u_L_st - u_fan)
+    p_fan   = p_L_st * (c_fan/cL_ex)**(2*gam_ex/gm1)
+    rho_fan = gam_ex * p_fan / c_fan**2
+    rho_ex = np.where(xi_s < S_HL, rho_L_ex,
+             np.where(xi_s < S_TL, rho_fan,
+             np.where(xi_s < u_star, rhoL_star,
+             np.where(xi_s < S_R,   rhoR_star, rho_R_ex))))
+    u_ex   = np.where(xi_s < S_HL, u_L_st,
+             np.where(xi_s < S_TL, u_fan,
+             np.where(xi_s < S_R,  u_star, u_R_st)))
+    p_ex   = np.where(xi_s < S_HL, p_L_st,
+             np.where(xi_s < S_TL, p_fan,
+             np.where(xi_s < S_R,  p_star, p_R_st)))
 
     fig_sod, axes_sod = plt.subplots(1, 3, figsize=(13, 4))
     fig_sod.suptitle(f"Sod shock tube — {parameters['space_method']},  "
@@ -374,10 +376,15 @@ if nozzle_type == "shock_tube":
     fig_sod.savefig(out_dir / "sod_comparison.png", dpi=150, bbox_inches='tight')
     plt.show()
 
-    print("\n  L1 errors (interior cells, vs exact Sod):")
-    print(f"  density  : {np.mean(np.abs(density[1:-1]  - rho_ex[1:-1])):.4e} kg/m³")
-    print(f"  velocity : {np.mean(np.abs(velocity[1:-1] - u_ex[1:-1])):.4e} m/s")
-    print(f"  pressure : {np.mean(np.abs(pressure[1:-1] - p_ex[1:-1])):.4e} Pa")
+    print("\n  L1 / L2 errors (interior cells, vs exact Sod):")
+    for label, num, ex, unit in [
+        ("density ", density[1:-1],  rho_ex[1:-1], "kg/m³"),
+        ("velocity", velocity[1:-1], u_ex[1:-1],   "m/s"),
+        ("pressure", pressure[1:-1], p_ex[1:-1],   "Pa"),
+    ]:
+        diff = num - ex
+        print(f"  {label}  L1={np.mean(np.abs(diff)):.4e}  "
+              f"L2={np.sqrt(np.mean(diff**2)):.4e}  [{unit}]")
 
 ## Diagnostics
 min_index  = np.argmin(A_nodes)
