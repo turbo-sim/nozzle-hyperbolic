@@ -1,4 +1,6 @@
 # %%
+import os
+os.environ.setdefault("XLA_FLAGS", "--xla_cpu_multi_thread_eigen=true")
 import jax
 jax.config.update("jax_enable_x64", True)
 
@@ -18,14 +20,17 @@ import jaxprop as jxp
 hyp.set_plot_options(grid=False)
 
 ## Read settings
-with open("settings_shock_tube.yaml", 'r') as file:
+# with open("settings_shock_tube.yaml", 'r') as file:
+# with open("settings.yaml", 'r') as file:
+with open("settings_nozzle_validation.yaml", 'r') as file:
     case_data = yaml.safe_load(file)
 
 hyp.print_dict(case_data)
 
 ## Output directory
+_geo_fn   = case_data.get('geometry', {}).get('function', 'nozzle')
 run_name = (
-    f"{case_data['nozzle_parameters']['type']}_"
+    f"{_geo_fn}_"
     f"{case_data['numerical_settings']['flux_method']}_"
     f"N{case_data['numerical_settings']['Nx']}"
 )
@@ -82,35 +87,21 @@ if perfect_gas:
     cp, cv         = hyp.fvm_solver.specific_heat2()
     rho_stagnation = p_stagnation / ((cp - cv) * T_stagnation)
 
-## Nozzle geometry
-roughness    = case_data["nozzle_parameters"]["roughness"]
-nozzle_type  = case_data["nozzle_parameters"]["type"].lower()
+## Geometry
+import nozzle_hyperbolic.fvm_solver.geometry as _geom
 
-if nozzle_type == "shock_tube":
-    # Constant-area duct — no Excel file needed
-    A_ref       = float(case_data["nozzle_parameters"].get("area", 1.0))
-    A_nodes     = np.full(Nx, A_ref)
-    D_hydraulic = np.full(Nx, 2.0 * np.sqrt(A_ref / np.pi))  # equivalent circular duct
-    r = np.sqrt(A_nodes / np.pi)   # for overlay plot
-else:
-    file_path  = "Lettieri_nozzle.xlsx"
-    sheet_name = "Sheet1"
-    _, _, spline = hyp.fit_nozzle_shape(file_path, sheet_name, degree=10)
+geo_cfg     = case_data["geometry"].copy()
+geo_fn_name = geo_cfg.pop("function")
+roughness   = float(geo_cfg.pop("roughness", 0.0))
+geo_fn      = getattr(_geom, geo_fn_name)
+geo         = geo_fn(x, roughness=roughness,
+                     **{k: v for k, v in geo_cfg.items()})
 
-    r = np.array([spline(xi) if xi >= -0.03201 else 0.006365 for xi in x])
-
-    if nozzle_type == "planar":
-        width       = float(case_data["nozzle_parameters"]["width"])
-        A_nodes     = 2 * r * width
-        D_hydraulic = 4 * A_nodes / (2 * (width + 2 * r))
-    elif nozzle_type == "axisymmetric":
-        A_nodes     = np.pi * r**2
-        D_hydraulic = 2 * r
-    else:
-        raise ValueError(f"Unknown nozzle type '{nozzle_type}'. "
-                         f"Choose 'planar', 'axisymmetric', or 'shock_tube'.")
-
-h = r  # half-height / radius for overlay plots
+A_nodes     = np.asarray(geo.A)
+D_hydraulic = np.asarray(geo.D_h)
+nozzle_type = geo_fn_name.replace("get_", "")  # e.g. "shock_tube", "pipe"
+r           = geo.D_h / 2.0   # radius / half-height for overlay plots
+h           = r
 
 ## Parameters dict
 parameters = {
@@ -119,9 +110,8 @@ parameters = {
     "fluid":          fluid,
     "residuals":      residuals,
     "max_iterations": case_data["numerical_settings"]["max_iterations"],
-    "A_nodes":        A_nodes,
-    "D_hydraulic":    D_hydraulic,
-    "roughness":      roughness,
+    "geometry":       geo,
+    "A_nodes":        A_nodes,   # kept for nozzle_exact2 and legacy callers
     "dx":             dx,
     "CFL":            CFL,
     "pT_stagnation":  pT_stagnation,
@@ -136,12 +126,12 @@ parameters = {
 }
 if perfect_gas:
     parameters["gamma"] = cp / cv
-if nozzle_type == "shock_tube":
-    parameters["shock_tube_cfg"] = case_data["nozzle_parameters"]["shock_tube"]
+if "shock_tube" in nozzle_type:
+    parameters["shock_tube_cfg"] = case_data["shock_tube"]
 
 ## Initial condition
 print("Computing initialization...")
-if nozzle_type == "shock_tube":
+if "shock_tube" in nozzle_type:
     Q_init = hyp.fvm_solver.shock_tube_Q_initialization(x, A_nodes, parameters)
 else:
     Q_init = hyp.fvm_solver.isentropic_initialization(x, A_nodes, parameters)
@@ -304,10 +294,73 @@ if not perfect_gas:
     fig_ph.savefig(out_dir / "phase_diagram.png", dpi=150, bbox_inches='tight')
 plt.show()
 
+## Symmetric nozzle: compare with perfect-gas exact solution
+# Works even for real-gas fluid because Air at p0~2 bar, T0~300 K satisfies Z≈1.
+if "symmetric_nozzle" in nozzle_type and not perfect_gas:
+    _fluid_pg  = jxp.Fluid(fluid_name)
+    _st_in     = _fluid_pg.get_state(jxp.PT_INPUTS, p_stagnation, T_stagnation)
+    gamma_eff  = float(_st_in.cpmass / _st_in.cvmass)
+    rho_stag   = float(_st_in.rhomass)
+    params_ex  = {"gamma": gamma_eff, "p_out": p_out, "A_nodes": A_nodes}
+    total_bc_n = np.array([T_stagnation, p_stagnation])
+    M_exact, p_exact, u_exact, rho_exact, i_shock = \
+        hyp.fvm_solver.nozzle_exact2(x, params_ex, total_bc_n)
+    A_cr_index = np.argmin(A_nodes)
+    legend_kw  = dict(fontsize='x-small', handlelength=1.2, handletextpad=0.4,
+                      borderpad=0.4, frameon=True)
+    cases_ex = [
+        (r'$\rho\,/\,\rho_0$',
+         density / rho_stag,
+         rho_exact[:, 0] / rho_stag,
+         rho_exact[:, 1] / rho_stag,
+         rho_exact[:, 2] / rho_stag if i_shock is not None else None),
+        (r'$p\,/\,p_0$',
+         pressure / p_stagnation,
+         p_exact[:, 0] / p_stagnation,
+         p_exact[:, 1] / p_stagnation,
+         p_exact[:, 2] / p_stagnation if i_shock is not None else None),
+        ('M',
+         Ma,
+         M_exact[:, 0],
+         M_exact[:, 1],
+         M_exact[:, 2] if i_shock is not None else None),
+    ]
+    fig_ex, axes_ex = plt.subplots(1, 3, figsize=(14, 4))
+    fig_ex.suptitle(f"FVS vs exact  (γ_eff={gamma_eff:.3f})  —  {nozzle_type},  N={Nx}")
+    for k, (ax, (ylabel, num, ex_sub, ex_sup, ex_sh)) in enumerate(zip(axes_ex, cases_ex)):
+        ax.set_xlabel('x [m]');  ax.set_ylabel(ylabel)
+        ax.plot(x, num,  'go-',  lw=0.75, ms=4, mfc='w', label='FVS')
+        ax.plot(x, ex_sub, 'r--', lw=0.75, label='Exact – subsonic')
+        ax.plot(x[A_cr_index:], ex_sup[A_cr_index:], 'b--', lw=0.75, label='Exact – supersonic')
+        if ex_sh is not None:
+            ax.plot(x[i_shock - 1:], ex_sh[i_shock - 1:], 'k-', lw=0.75, label='Exact – shock')
+        ax.legend(loc='upper left', **legend_kw)
+        _add_nozzle_overlay(ax, x, r, x2, show_ylabel=(k == len(cases_ex) - 1))
+    fig_ex.tight_layout()
+    fig_ex.savefig(out_dir / "exact_comparison.png", dpi=150, bbox_inches='tight')
+    plt.show()
+
+    # Determine which exact branch to compare against
+    if i_shock is not None:
+        col = 2
+    elif Ma[-1] > 1.0:
+        col = 1
+    else:
+        col = 0
+    print(f"\n  L1 / L2 errors vs exact nozzle solution (γ_eff={gamma_eff:.3f}):")
+    for label, num_arr, ex_arr, unit in [
+        ("density ", density[1:-1],  rho_exact[1:-1, col], "kg/m³"),
+        ("pressure", pressure[1:-1], p_exact[1:-1,   col], "Pa"),
+        ("Mach    ", Ma[1:-1],       M_exact[1:-1,   col], "-"),
+    ]:
+        diff = num_arr - ex_arr
+        print(f"  {label}  L1={np.mean(np.abs(diff)):.4e}  "
+              f"L2={np.sqrt(np.mean(diff**2)):.4e}  [{unit}]")
+
 ## Shock tube: compare with exact Sod solution
-if nozzle_type == "shock_tube":
+if "shock_tube" in nozzle_type:
     from scipy.optimize import brentq as _brentq_sod
-    cfg_st   = case_data["nozzle_parameters"]["shock_tube"]
+    cfg_st   = case_data["shock_tube"]
     x_d      = float(cfg_st.get("x_diaphragm", 0.5 * (x1 + x2)))
     p_L_st   = float(cfg_st["p_L"]);  T_L_st = float(cfg_st["T_L"]);  u_L_st = float(cfg_st.get("u_L", 1.0))
     p_R_st   = float(cfg_st["p_R"]);  T_R_st = float(cfg_st["T_R"]);  u_R_st = float(cfg_st.get("u_R", 1.0))
@@ -407,7 +460,7 @@ H_int     = H_field[1:-1]
 H_mean    = np.mean(H_int)
 H_dev     = np.abs(H_field - H_mean) / np.abs(H_mean) * 100  # % deviation
 
-if nozzle_type == "shock_tube":
+if "shock_tube" in nozzle_type:
     # Conservation diagnostics assume steady-state flow — not meaningful for a
     # transient shock tube where mass flux and enthalpy vary across the domain.
     print("=" * 55)

@@ -845,24 +845,17 @@ def _jax_F_fvs_stadtke(U_L, U_R, fluid, delta_factor=0.1):
     # ── Eigenvalues ───────────────────────────────────────────────────────
     lam1 = u_a + a_a;  lam2 = u_a - a_a;  lam3 = u_a
 
-    # ── Split matrices  G_k = λ_k (v_k ⊗ l_k)  (each (Nfaces,3,3)) ──────
-    # Right eigenvectors:  v1=(ρa,1,a),  v2=(-ρa,1,-a),  v3=(0,0,1)
-    # Left eigenvectors:   l1=(1/2ρa,1/2,0),  l2=(-1/2ρa,1/2,0),  l3=(-1/ρ,0,1)
+    # ── Eigenvectors  (Nfaces, 3) ────────────────────────────────────────
+    # Right:  v1=(ρa, 1, a),      v2=(-ρa, 1, -a),     v3=(0, 0, 1)
+    # Left:   l1=(1/2ρa, 1/2, 0), l2=(-1/2ρa, 1/2, 0), l3=(-1/ρ, 0, 1)
     z = jnp.zeros_like(u_a);  o = jnp.ones_like(u_a)
 
-    v1 = jnp.stack([ rho_a * a_a,  o,          a_a  ], axis=-1)  # (N,3)
-    v2 = jnp.stack([-rho_a * a_a,  o,         -a_a  ], axis=-1)
-    v3 = jnp.stack([ z,             z,          o    ], axis=-1)
+    v1 = jnp.stack([ rho_a * a_a,  o,  a_a], axis=-1)
+    v2 = jnp.stack([-rho_a * a_a,  o, -a_a], axis=-1)
+    v3 = jnp.stack([ z,             z,  o  ], axis=-1)
     l1 = jnp.stack([ 0.5 / (rho_a * a_a),  0.5 * o,  z], axis=-1)
     l2 = jnp.stack([-0.5 / (rho_a * a_a),  0.5 * o,  z], axis=-1)
     l3 = jnp.stack([-1.0 / rho_a,           z,        o], axis=-1)
-
-    def _outer_scaled(v, l, lam):
-        return lam[:, None, None] * jnp.einsum('...i,...j->...ij', v, l)
-
-    G1 = _outer_scaled(v1, l1, lam1)
-    G2 = _outer_scaled(v2, l2, lam2)
-    G3 = _outer_scaled(v3, l3, lam3)
 
     # ── Flux Jacobian  K = ∂F/∂U  (Nfaces,3,3) ───────────────────────────
     H_a  = h_a + 0.5 * u_a**2
@@ -870,25 +863,23 @@ def _jax_F_fvs_stadtke(U_L, U_R, fluid, delta_factor=0.1):
     r1   = jnp.stack([u_a**2 * rho_p + 1.0,   2.0 * rho_a * u_a,  u_a**2 * rho_h        ], axis=-1)
     r2   = jnp.stack([u_a * rho_p * H_a,       rho_a * (H_a + u_a**2), u_a * (rho_h * H_a + rho_a)], axis=-1)
     K    = jnp.stack([r0, r1, r2], axis=1)   # (Nfaces, 3, 3)
+    KT   = K.swapaxes(-1, -2)                # (Nfaces, 3, 3)
 
-    # ── Projection matrices  R̃_k = K G_k K⁻¹ / λ_k^safe  ─────────────
-    # Solve Kᵀ Xᵀ = (K G_k)ᵀ  →  X = K G_k K⁻¹ = R_k; then divide by λ^safe.
-    delta  = delta_factor * (jnp.abs(u_a) + a_a)  # (Nfaces,)
+    # ── Projection  R̃_k = K G_k K⁻¹ / λ_k^safe  (rank-1 form) ──────────
+    # G_k = λ_k (v_k ⊗ l_k)  →  K G_k K⁻¹ = λ_k (K v_k) ⊗ (K⁻ᵀ l_k)
+    # Coefficient: λ_k / λ_k^safe = |λ_k| / max(|λ_k|, δ)
+    # Cost per mode: 1 matvec + 1 single-RHS solve  (vs 1 matmul + 1 three-RHS solve)
+    delta = delta_factor * (jnp.abs(u_a) + a_a)   # entropy-fix width (Nfaces,)
 
-    def _safe(lam):
-        # jnp.sign(0) = 0 in JAX → would give 0/0; use where to always return ±1.
-        sign = jnp.where(lam >= 0.0, 1.0, -1.0)
-        return sign * jnp.maximum(jnp.abs(lam), delta)
+    def _Rt_vec(v, l, lam):
+        Kv    = jnp.einsum('...ij,...j->...i', K, v)    # K v_k        (N, 3)
+        KTl   = jnp.linalg.solve(KT, l[..., None]).squeeze(-1)  # K⁻ᵀ l_k  (N, 3)
+        coeff = jnp.abs(lam) / jnp.maximum(jnp.abs(lam), delta)
+        return coeff[:, None, None] * jnp.einsum('...i,...j->...ij', Kv, KTl)
 
-    def _Rt(Gk, lam):
-        KGk  = K @ Gk                                               # (N,3,3) batched matmul
-        KT   = K.swapaxes(-1, -2)
-        Rk_T = jnp.linalg.solve(KT, KGk.swapaxes(-1, -2))         # solve KᵀXᵀ = (KGk)ᵀ
-        return Rk_T.swapaxes(-1, -2) / _safe(lam)[:, None, None]   # R̃_k
-
-    Rt1 = _Rt(G1, lam1)
-    Rt2 = _Rt(G2, lam2)
-    Rt3 = _Rt(G3, lam3)
+    Rt1 = _Rt_vec(v1, l1, lam1)
+    Rt2 = _Rt_vec(v2, l2, lam2)
+    Rt3 = _Rt_vec(v3, l3, lam3)
 
     # ── Sum by TRUE eigenvalue sign ───────────────────────────────────────
     s1p = jnp.where(lam1[:, None, None] >= 0.0, 1.0, 0.0)
@@ -938,7 +929,7 @@ def _bc_outlet_real_jax(Q_n, p_out, A_nodes, fluid):
     return Q_n
 
 
-def make_jax_step(fluid, A, D_h, roughness, dx, CFL, p_out, h0, s0,
+def make_jax_step(fluid, A, dAdx, D_h, roughness, dx, CFL, p_out, h0, s0,
                   recon, flux_method, time_method, wall_friction=True,
                   transmissive_bc=False):
     """
@@ -946,17 +937,12 @@ def make_jax_step(fluid, A, D_h, roughness, dx, CFL, p_out, h0, s0,
     BCs are applied inside step() — no Python calls needed between iterations.
     Returns (Q_next, p, c, dt) — all JAX arrays.
     """
-    A_j   = jnp.asarray(A,   dtype=jnp.float64)
-    D_h_j = jnp.asarray(D_h, dtype=jnp.float64)
+    A_j   = jnp.asarray(A,    dtype=jnp.float64)
+    D_h_j = jnp.asarray(D_h,  dtype=jnp.float64)
     A_L   = A_j[:-1];  A_R = A_j[1:]
 
-    # Precompute dA_dx / A once — geometry is constant, no need to recompute every step.
-    # Central differences for interior, one-sided at boundaries.
-    _dA_dx_j = jnp.concatenate([
-        (A_j[1:2]   - A_j[:1])    / (A_j[:1]    * dx),
-        (A_j[2:]    - A_j[:-2])   / (A_j[1:-1]  * 2.0 * dx),
-        (A_j[-1:]   - A_j[-2:-1]) / (A_j[-1:]   * dx),
-    ])
+    # dA/dx / A  — use analytical derivative from Geometry object
+    _dA_dx_j = jnp.asarray(dAdx, dtype=jnp.float64) / A_j
 
     h_lo    = float(getattr(fluid, 'h_min', 50e3))  + 1.0
     h_hi    = float(getattr(fluid, 'h_max', 850e3)) - 1.0
@@ -1093,7 +1079,7 @@ def make_jax_step(fluid, A, D_h, roughness, dx, CFL, p_out, h0, s0,
         Q_n    = Q_n.at[2, -1].set(rho_out * (e_out + 0.5 * u_out**2))
         return Q_n
 
-    # @jax.jit  # disabled: skip XLA compilation, run eagerly
+    @jax.jit
     def step(Q_n):
         Q_n = _bc_inlet(Q_n)
         Q_n = _bc_outlet(Q_n)
@@ -1189,14 +1175,14 @@ def _puh_to_conservative(U, fluid):
     return np.array([rho, rho * u, rho * (e + 0.5 * u**2)])  # (3, N)
 
 
-def make_jax_stadtke_step(fluid, A, D_h, roughness, dx, CFL, p_out, h0, s0,
+def make_jax_stadtke_step(fluid, A, dAdx, D_h, roughness, dx, CFL, p_out, h0, s0,
                            delta_factor=0.1, newton_iter=20, wall_friction=True,
-                           transmissive_bc=False):
+                           transmissive_bc=False, recon='muscl_van_leer'):
     """
     Build a @jax.jit step function implementing the Städtke Newton implicit scheme.
 
     The solver works in primitive (p, u, h) variables:
-      - MUSCL reconstruction with Van Leer limiter in (p, u, h).
+      - recon='muscl_van_leer' (default) or 'constant' (1st-order) reconstruction in (p,u,h).
       - Städtke FVS interface flux  (_jax_F_fvs_stadtke).
       - Fully implicit residual assembled in conservative form.
       - Newton-Raphson: Jacobian via jax.jacobian, solve via jnp.linalg.solve.
@@ -1214,12 +1200,8 @@ def make_jax_stadtke_step(fluid, A, D_h, roughness, dx, CFL, p_out, h0, s0,
     A_face = 0.5 * (A_j[:-1] + A_j[1:])   # (N-1,) — face areas
     V_cell = A_j * dx                       # (N,)   — cell volumes
 
-    # dA/dx / A  (precomputed, geometry is constant)
-    dAdx_A = jnp.concatenate([
-        (A_j[1:2]   - A_j[:1])    / (A_j[:1]   * dx),
-        (A_j[2:]    - A_j[:-2])   / (A_j[1:-1] * 2.0 * dx),
-        (A_j[-1:]   - A_j[-2:-1]) / (A_j[-1:]  * dx),
-    ])  # (N,)
+    # dA/dx / A  — analytical derivative from Geometry object
+    dAdx_A = jnp.asarray(dAdx, dtype=jnp.float64) / A_j  # (N,)
 
     h_lo  = float(getattr(fluid, 'h_min', 50e3))  + 1.0
     h_hi  = float(getattr(fluid, 'h_max', 850e3)) - 1.0
@@ -1240,15 +1222,30 @@ def make_jax_stadtke_step(fluid, A, D_h, roughness, dx, CFL, p_out, h0, s0,
         return jnp.stack([rho_, rho_ * u_, rho_ * H_ - p_], axis=1)
 
     def _muscl_ph(U):
-        """MUSCL Van Leer in (p,u,h). (N,3) → U_L, U_R each (N-1,3)."""
+        """MUSCL Van Leer in (p,u,h). (N,3) → U_L, U_R each (N-1,3).
+
+        Per-face fallback to 1st-order when the reconstructed p or h would
+        land outside the EOS table bounds (spec §6.4).
+        """
         dU    = U[1:] - U[:-1]                           # (N-1, 3)
         vl    = lambda a, b: jnp.where(a * b > 0, 2.0 * a * b / (a + b + 1e-300), 0.0)
         sigma = jnp.zeros_like(U).at[1:-1].set(vl(dU[:-1], dU[1:]))
-        U_L   = U[:-1] + 0.5 * sigma[:-1]
-        U_R   = U[1:]  - 0.5 * sigma[1:]
-        # positivity guard on pressure
-        U_L   = U_L.at[:, 0].set(jnp.maximum(U_L[:, 0], 1.0))
-        U_R   = U_R.at[:, 0].set(jnp.maximum(U_R[:, 0], 1.0))
+        U_L_m = U[:-1] + 0.5 * sigma[:-1]   # MUSCL candidate
+        U_R_m = U[1:]  - 0.5 * sigma[1:]    # MUSCL candidate
+
+        # First-order fallback states (cell-centred)
+        U_L_0 = U[:-1]
+        U_R_0 = U[1:]
+
+        # Fall back if p or h of EITHER side is outside EOS table bounds
+        bad_L = ((U_L_m[:, 0] < p_lo) | (U_L_m[:, 0] > p_hi) |
+                 (U_L_m[:, 2] < h_lo) | (U_L_m[:, 2] > h_hi))
+        bad_R = ((U_R_m[:, 0] < p_lo) | (U_R_m[:, 0] > p_hi) |
+                 (U_R_m[:, 2] < h_lo) | (U_R_m[:, 2] > h_hi))
+        bad   = (bad_L | bad_R)[:, None]    # broadcast over 3 primitives
+
+        U_L = jnp.where(bad, U_L_0, U_L_m)
+        U_R = jnp.where(bad, U_R_0, U_R_m)
         return U_L, U_R
 
     def _bc_inlet(U):
@@ -1303,7 +1300,7 @@ def make_jax_stadtke_step(fluid, A, D_h, roughness, dx, CFL, p_out, h0, s0,
         V_new = _V_from_U(U)
         V_old = _V_from_U(U_n)
 
-        U_L, U_R = _muscl_ph(U)
+        U_L, U_R = _muscl_ph(U) if recon != 'constant' else (U[:-1], U[1:])
         F_hat    = _jax_F_fvs_stadtke(U_L, U_R, fluid, delta_factor)  # (N-1, 3)
 
         # Source: area variation + wall friction — momentum only (theory §7.3)
@@ -1329,20 +1326,26 @@ def make_jax_stadtke_step(fluid, A, D_h, roughness, dx, CFL, p_out, h0, s0,
     _jac_fn = jax.jacobian(_residual, argnums=0)
 
     @jax.jit
-    def step(U_n):
-        # ── dt from CFL at current primitive state ────────────────────────
+    def compute_dt(U_n):
+        """CFL-limited time step at state U_n. Returns (dt, a_c)."""
         st_c = fluid.get_state(jxp.HmassP_INPUTS, U_n[:, 2], U_n[:, 0])
         a_c  = st_c["a"]
         dt   = CFL * dx / jnp.max(jnp.abs(U_n[:, 1]) + a_c)
+        return dt, a_c
 
+    @jax.jit
+    def step(U_n, dt):
+        """Advance one implicit Newton step with the given dt. Returns (U_new, ssr)."""
         U_n_flat  = U_n.reshape(-1)                    # (3*N,)
         U_k       = U_n[1:-1].reshape(-1)              # (3*(N-2),) — initial Newton iterate
 
-        # ── Newton iterations (Python loop → unrolled by JAX trace) ──────
-        for _ in range(newton_iter):
+        # ── Newton iterations ─────────────────────────────────────────────
+        def body(_, U_k):
             R_k = _residual(U_k, U_n_flat, dt)
             J_k = _jac_fn(U_k, U_n_flat, dt)
-            U_k = U_k + jnp.linalg.solve(J_k, -R_k)
+            return U_k + jnp.linalg.solve(J_k, -R_k)
+
+        U_k = jax.lax.fori_loop(0, newton_iter, body, U_k)
 
         # ── Reconstruct full solution with updated BCs ────────────────────
         U_new = jnp.concatenate([U_n[:1], U_k.reshape(N - 2, 3), U_n[-1:]], axis=0)
@@ -1353,9 +1356,9 @@ def make_jax_stadtke_step(fluid, A, D_h, roughness, dx, CFL, p_out, h0, s0,
         ssr = jnp.max(jnp.abs(U_new[1:-1] - U_n[1:-1])
                       / (jnp.abs(U_n[1:-1]) + 1e-300))
 
-        return U_new, dt, ssr
+        return U_new, ssr
 
-    return step
+    return step, compute_dt
 
 
 # ---------------------------------------------------------------------------
@@ -1364,9 +1367,22 @@ def make_jax_stadtke_step(fluid, A, D_h, roughness, dx, CFL, p_out, h0, s0,
 
 def fvm_euler_1d(x, t, parameters):
     dx          = parameters['dx']
-    A_nodes     = parameters['A_nodes']
-    roughness   = parameters['roughness']
-    D_hydraulic = parameters['D_hydraulic']
+    geo         = parameters.get('geometry')
+    if geo is not None:
+        A_nodes     = np.asarray(geo.A)
+        dAdx_nodes  = np.asarray(geo.dAdx)
+        D_hydraulic = np.asarray(geo.D_h)
+        roughness   = float(geo.roughness)
+    else:
+        A_nodes     = parameters['A_nodes']
+        D_hydraulic = parameters['D_hydraulic']
+        roughness   = parameters['roughness']
+        dx_         = parameters['dx']
+        dAdx_nodes  = np.concatenate([
+            (A_nodes[1:2]  - A_nodes[:1])    / dx_,
+            (A_nodes[2:]   - A_nodes[:-2])   / (2.0 * dx_),
+            (A_nodes[-1:]  - A_nodes[-2:-1]) / dx_,
+        ])
     Nj          = len(x)
     N           = parameters['N_eq']
     CFL         = parameters['CFL']
@@ -1419,32 +1435,40 @@ def fvm_euler_1d(x, t, parameters):
         else:
             U0 = stadtke_puh_initialization(x, A_nodes, parameters)  # (N, 3)
 
-        _stadtke_step = make_jax_stadtke_step(
-            fluid, A_nodes, D_hydraulic, roughness,
+        _stadtke_step, _compute_dt = make_jax_stadtke_step(
+            fluid, A_nodes, dAdx_nodes, D_hydraulic, roughness,
             dx, CFL, p_out, h0, s0, wall_friction=wall_friction,
-            transmissive_bc=transmissive_bc)
+            transmissive_bc=transmissive_bc, recon=recon)
 
-        U_jax     = jnp.asarray(U0, dtype=jnp.float64)
-        _max_iter = jnp.int32(max_iter)
-        _tol      = jnp.float64(steady_thr)
-        _warmup_j = jnp.int32(warmup)
+        U_jax = jnp.asarray(U0, dtype=jnp.float64)
 
         print("Compiling Städtke Newton step ...", flush=True)
-        t0 = _time.perf_counter()
+        t0_compile = _time.perf_counter()
 
-        # Trigger JIT compilation with the first step
-        U_jax, _dt0, _res0 = _stadtke_step(U_jax)
-        jax.block_until_ready(U_jax)
-        compile_time = _time.perf_counter() - t0
+        # Trigger JIT compilation (discard result — compilation warmup only)
+        _dt_init_j, _ = _compute_dt(U_jax)
+        _U_warm, _    = _stadtke_step(U_jax, _dt_init_j)
+        jax.block_until_ready(_U_warm)
+        compile_time = _time.perf_counter() - t0_compile
         print(f"Compiled in {compile_time:.1f} s. Running ...", flush=True)
 
-        n      = 1
-        t_phys = float(_dt0)
-        res    = float(_res0)
-        res_hist = [res] * 5
+        # ── Time-step controller parameters ──────────────────────────────
+        _MAX_HALVINGS = 8     # max halvings per step before accepting anyway
+        _DP_MAX = 0.20        # max |Δp|/p   accepted per step
+        _DH_MAX = 0.10        # max |Δh|/h   accepted per step
+        _DU_MAX = 0.20        # max |Δu|/(|u|+a) accepted per step
+        _DT_GROW = 1.20       # dt growth factor after accepted step
+
+        n        = 0
+        t_phys   = 0.0
+        res      = float('inf')
+        res_hist = [float('inf')] * 5
+        dt       = float(_dt_init_j)   # current target dt; grows/shrinks adaptively
+        t0       = _time.perf_counter()
 
         try:
             while n < max_iter and t_phys < t_end:
+                # ── Convergence / plateau check ───────────────────────────
                 below_thr = res < steady_thr
                 hist_max  = max(res_hist)
                 hist_min  = min(res_hist) + 1e-300
@@ -1452,15 +1476,42 @@ def fvm_euler_1d(x, t, parameters):
                 if below_thr or plateau:
                     break
 
-                U_jax, dt_j, res_j = _stadtke_step(U_jax)
-                dt  = float(dt_j)
-                res = float(res_j)
+                # ── CFL cap for current state; grow dt toward it ──────────
+                dt_max_j, a_j = _compute_dt(U_jax)
+                dt = min(dt * _DT_GROW, float(dt_max_j))
+
+                # ── Adaptive retry: halve dt on large increments ──────────
+                halvings = 0
+                for halvings in range(_MAX_HALVINGS + 1):
+                    U_new, res_j = _stadtke_step(U_jax, jnp.float64(dt))
+                    jax.block_until_ready(U_new)
+
+                    dp = float(jnp.max(jnp.abs(U_new[:, 0] - U_jax[:, 0])
+                                       / (U_jax[:, 0] + 1e-10)))
+                    dh = float(jnp.max(jnp.abs(U_new[:, 2] - U_jax[:, 2])
+                                       / (jnp.abs(U_jax[:, 2]) + 1e-10)))
+                    du = float(jnp.max(jnp.abs(U_new[:, 1] - U_jax[:, 1])
+                                       / (jnp.abs(U_jax[:, 1]) + a_j + 1e-10)))
+
+                    if dp < _DP_MAX and dh < _DH_MAX and du < _DU_MAX:
+                        break           # accepted
+                    if halvings < _MAX_HALVINGS:
+                        dt *= 0.5       # halve and retry
+
+                # ── Advance ───────────────────────────────────────────────
+                U_jax  = U_new
+                res    = float(res_j)
                 t_phys += dt
                 n      += 1
                 res_hist = res_hist[1:] + [res]
 
-                if n < 10 or (n < 100 and n % 10 == 0) or n % 50 == 0:
-                    print(f"  Iter {n:5d}  t={t_phys:.3e}  SSR={res:.3e}", flush=True)
+                if halvings > 0:
+                    print(f"  Iter {n:5d}  t={t_phys:.3e}  dt={dt:.3e}  "
+                          f"SSR={res:.3e}  [{halvings} halving(s), "
+                          f"dp={dp:.2f} dh={dh:.2f} du={du:.2f}]", flush=True)
+                elif n < 10 or (n < 100 and n % 10 == 0) or n % 50 == 0:
+                    print(f"  Iter {n:5d}  t={t_phys:.3e}  dt={dt:.3e}  SSR={res:.3e}",
+                          flush=True)
 
         except KeyboardInterrupt:
             print("Interrupted — returning current solution.")
@@ -1489,7 +1540,7 @@ def fvm_euler_1d(x, t, parameters):
     # ── JAX path (real gas, non-Roe) ─────────────────────────────────────
     use_jax = (not perfect_gas) and (flux_method != 'roe') and (method != 'fvs_newton')
     if use_jax:
-        _jax_step = make_jax_step(fluid, A_nodes, D_hydraulic, roughness,
+        _jax_step = make_jax_step(fluid, A_nodes, dAdx_nodes, D_hydraulic, roughness,
                                   dx, CFL, p_out, h0, s0, recon, flux_method, method,
                                   wall_friction=wall_friction,
                                   transmissive_bc=transmissive_bc)
@@ -1508,7 +1559,7 @@ def fvm_euler_1d(x, t, parameters):
             # Only build warmup step when settings differ from main settings
             wu_differs = (wu_flux != flux_method or wu_recon != recon or wu_cfl != CFL)
             if wu_differs:
-                _wu_step = make_jax_step(fluid, A_nodes, D_hydraulic, roughness,
+                _wu_step = make_jax_step(fluid, A_nodes, dAdx_nodes, D_hydraulic, roughness,
                                          dx, wu_cfl, p_out, h0, s0,
                                          wu_recon, wu_flux, method,
                                          wall_friction=wall_friction,
