@@ -13,7 +13,7 @@ import jax
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 
-from nozzle_hyperbolic.fvm_solver.fvm import _jax_F_fvs_stadtke
+from nozzle_hyperbolic.fvm_solver.fvm import _jax_F_fvs_stadtke, muscl_van_leer_ph
 
 
 # ---------------------------------------------------------------------------
@@ -253,3 +253,67 @@ def test_supersonic():
 
     # With M=3 and delta=0.1*(u+a), all |λ_k| >> δ → coeff = 1, R⁻ = 0 → F̂ = F_L
     np.testing.assert_allclose(F_hat, F_L_exact, rtol=1e-6)
+
+
+# ---------------------------------------------------------------------------
+# MUSCL Van Leer reconstruction tests
+# ---------------------------------------------------------------------------
+
+def test_muscl_constant_field():
+    """Constant field → sigma = 0, U_L = U[:-1], U_R = U[1:] (atol 1e-12)."""
+    N = 10
+    U = jnp.tile(jnp.array([2.0e5, 100.0, 3.0e5]), (N, 1))
+    U_L, U_R = muscl_van_leer_ph(U)
+    np.testing.assert_allclose(np.array(U_L), np.array(U[:-1]), atol=1e-12,
+                               err_msg="U_L should equal cell-centred value for constant field")
+    np.testing.assert_allclose(np.array(U_R), np.array(U[1:]),  atol=1e-12,
+                               err_msg="U_R should equal cell-centred value for constant field")
+
+
+def test_muscl_linear_field():
+    """Linear profile → interior face values are exact midpoints (rtol 1e-10).
+
+    For a linear field, van Leer = full slope (no limiting), so the
+    reconstructed face value from both sides is exactly the cell-edge midpoint.
+    Boundary faces (0 and N-2) are 1st-order on one side — excluded.
+    """
+    N  = 12
+    dp = 1.0e3          # Pa per cell
+    p  = 2.0e5 + np.arange(N) * dp
+    u  = np.full(N, 50.0)
+    h  = 3.0e5 + np.arange(N) * 100.0   # also linear
+    U  = jnp.array(np.column_stack([p, u, h]))
+    U_L, U_R = muscl_van_leer_ph(U)
+
+    # At interior faces i=1..N-3: van Leer is unclipped, so U_L[i] = U_R[i] = face midpoint
+    for i in range(1, N - 2):
+        p_face = 0.5 * (p[i] + p[i + 1])   # exact face midpoint value
+        h_face = 0.5 * (h[i] + h[i + 1])
+        np.testing.assert_allclose(float(U_L[i, 0]), p_face, rtol=1e-10,
+                                   err_msg=f"p: U_L wrong at face {i}")
+        np.testing.assert_allclose(float(U_R[i, 0]), p_face, rtol=1e-10,
+                                   err_msg=f"p: U_R wrong at face {i}")
+        np.testing.assert_allclose(float(U_L[i, 2]), h_face, rtol=1e-10,
+                                   err_msg=f"h: U_L wrong at face {i}")
+        np.testing.assert_allclose(float(U_R[i, 2]), h_face, rtol=1e-10,
+                                   err_msg=f"h: U_R wrong at face {i}")
+
+
+def test_muscl_extremum_limited():
+    """At a non-monotone extremum the limiter clamps sigma to 0 (atol 1.0).
+
+    Cell 3 is a peak: neighbours on both sides are lower, so dU[2] and dU[3]
+    have opposite signs → van Leer returns 0 → U_L[3] = U[3] exactly.
+    """
+    N = 8
+    p = np.array([1.0, 2.0, 3.0, 6.0, 3.0, 2.0, 1.0, 0.5]) * 1e5   # peak at i=3
+    U = jnp.array(np.column_stack([p, np.full(N, 50.0), np.full(N, 3.0e5)]))
+    U_L, U_R = muscl_van_leer_ph(U)
+
+    # sigma[3] uses dU[2] = p[3]-p[2] > 0 and dU[3] = p[4]-p[3] < 0 → product < 0 → 0
+    # U_L[3] = U[3] + 0.5 * 0 = p[3]  (left state at face 3)
+    np.testing.assert_allclose(float(U_L[3, 0]), p[3], atol=1.0,
+                               err_msg="Peak cell: U_L should equal cell-centred p (no slope)")
+    # U_R[2] = U[3] - 0.5 * sigma[3] = U[3] (sigma[3]=0 because face 2 right = cell 3 = peak)
+    np.testing.assert_allclose(float(U_R[2, 0]), p[3], atol=1.0,
+                               err_msg="Peak cell right-side: U_R should equal cell-centred p")
