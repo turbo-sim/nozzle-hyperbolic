@@ -7,7 +7,7 @@
 # -- estimated wall clock time (execution time): hh:mm --
 #BSUB -W 00:30
 ### -- specify that we need 2GB of memory per core/slot -- 
-#BSUB -R "rusage[mem=12GB]"
+#BSUB -R "rusage[mem=16GB]"
 # -- number of processors
 #BSUB -n 6
 # --specify that the cores MUST BE on a single host! --
