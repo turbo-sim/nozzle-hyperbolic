@@ -23,6 +23,7 @@ hyp.set_plot_options(grid=False)
 # with open("settings_shock_tube.yaml", 'r') as file:
 # with open("settings.yaml", 'r') as file:
 with open("settings_nozzle_validation.yaml", 'r') as file:
+# with open("settings_subsonic_pipe.yaml", 'r') as file:
     case_data = yaml.safe_load(file)
 
 hyp.print_dict(case_data)
@@ -119,10 +120,13 @@ parameters = {
     "N_eq":           3,
     "space_method":   case_data["numerical_settings"]["flux_method"],
     "time_method":    case_data["numerical_settings"]["time_discretization"],
-    "reconstruction": case_data["numerical_settings"].get("reconstruction", "constant"),
-    "warmup_cfg":     case_data["numerical_settings"].get("warmup", None),
-    "nozzle_type":    nozzle_type,
-    "wall_friction":  bool(case_data["numerical_settings"].get("wall_friction", True)),
+    "reconstruction":  case_data["numerical_settings"].get("reconstruction", "constant"),
+    "initialization":  case_data["numerical_settings"].get("initialization", "simple"),
+    "delta_factor":    float(case_data["numerical_settings"].get("delta_factor", 0.1)),
+    "newton_iter":     int(case_data["numerical_settings"].get("newton_iter", 20)),
+    "warmup_cfg":      case_data["numerical_settings"].get("warmup", None),
+    "nozzle_type":     nozzle_type,
+    "wall_friction":   bool(case_data["numerical_settings"].get("wall_friction", True)),
 }
 if perfect_gas:
     parameters["gamma"] = cp / cv
@@ -201,6 +205,14 @@ else:
     Qvap        = np.asarray(_states.Q,           dtype=float)
     Z           = np.asarray(_states.Z,           dtype=float)
     Ma          = velocity / sound_speed
+
+## Mass-flux diagnostic  (ρ u A = const for steady inviscid 1D flow)
+mdot = density * velocity * A_nodes
+mdot_mean = np.mean(mdot)
+mdot_rms  = np.sqrt(np.mean((mdot - mdot_mean)**2)) / (abs(mdot_mean) + 1e-300)
+print(f"Mass flux:  mean = {mdot_mean:.4e} kg/s  |  RMS variation = {mdot_rms*100:.3f} %")
+if mdot_rms > 0.01:
+    print("  WARNING: mass flux not conserved (>1 %). Check solver or post-processing.")
 
 ## Save solution as CSV
 if perfect_gas:

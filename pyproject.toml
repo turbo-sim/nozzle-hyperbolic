@@ -29,6 +29,7 @@ nurbspy ="^1.2.3"
 #nurbspy = { path = "../nurbspy/", develop = true }
 snakeviz = "^2.2.2"
 parse = "^1.22.0"
+line-profiler = "^5.0.2"
 
 
 [tool.poetry.group.dev.dependencies]
