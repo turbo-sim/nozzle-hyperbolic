@@ -449,6 +449,82 @@ def stadtke_puh_initialization(x, A_nodes, parameters):
     return np.stack([p_cells, u_cells, h_cells], axis=1)  # (N, 3)
 
 
+def stadtke_puh_initialization_subsonic(x, A_nodes, parameters):
+    """
+    Fully-subsonic isentropic initialization for the Städtke Newton solver.
+
+    Identical to `stadtke_puh_initialization` except that the subsonic branch
+    is used for ALL cells — including those downstream of the throat.  This
+    gives a physically consistent (isentropic, mass-conserving) starting point
+    where M < 1 everywhere, which is the correct initial guess when the target
+    solution contains a normal shock in the diverging section.
+
+    The choked mass-flow rate (G_max * A_throat) is used, so the throat will be
+    at M ≈ 1 initially and the diverging section acts as a subsonic diffuser.
+    The solver then develops the shock from this state rather than jumping to
+    the supersonic branch directly.
+    """
+    fluid       = parameters.get('fluid') or jxp.Fluid(name=parameters['fluid_name'])
+    p_stag      = parameters['pT_stagnation'][0]
+    T_stag      = parameters['pT_stagnation'][1]
+    A_throat    = float(np.min(A_nodes))
+    Nj          = len(x)
+
+    st_stag = fluid.get_state(jxp.PT_INPUTS, p_stag, T_stag)
+    h0      = float(st_stag.hmass)
+    s0      = float(st_stag.smass)
+
+    h_lo = float(getattr(fluid, 'h_min', 50e3))  + 10.0
+    h_hi = min(float(getattr(fluid, 'h_max', 850e3)) - 10.0, h0 - 10.0)
+    p_lo = float(getattr(fluid, 'p_min', 1e4))   * 1.01
+    p_hi = float(getattr(fluid, 'p_max', 300e5)) * 0.99
+
+    # Build isentropic table: for each h, find p s.t. s(h,p) = s0
+    N_tab  = 300
+    h_tab  = np.linspace(h_lo, h_hi, N_tab)
+    p_lo_v = np.full(N_tab, p_lo)
+    p_hi_v = np.full(N_tab, min(p_stag * 1.05, p_hi))
+    for _ in range(50):
+        p_mid  = 0.5 * (p_lo_v + p_hi_v)
+        s_pred = np.asarray(
+            fluid.get_state(jxp.HmassP_INPUTS, h_tab, p_mid).entropy, dtype=float)
+        p_lo_v = np.where(s_pred > s0, p_mid, p_lo_v)
+        p_hi_v = np.where(s_pred < s0, p_mid, p_hi_v)
+    p_iso = 0.5 * (p_lo_v + p_hi_v)
+
+    valid  = p_iso > p_lo * 1.05
+    h_tab  = h_tab[valid];  p_iso = p_iso[valid]
+
+    rho_iso = np.asarray(
+        fluid.get_state(jxp.HmassP_INPUTS, h_tab, p_iso).rhomass, dtype=float)
+    u_tab  = np.sqrt(np.maximum(2.0 * (h0 - h_tab), 0.0))
+    G_tab  = rho_iso * u_tab
+
+    k_thr = int(np.argmax(G_tab))
+    G_thr = G_tab[k_thr]
+    m_dot = G_thr * A_throat
+
+    # Subsonic branch only: h from h_thr up to h0, G decreasing from G_max to 0
+    sub_G = G_tab[k_thr:][::-1]
+    sub_h = h_tab[k_thr:][::-1]
+    sub_p = p_iso[k_thr:][::-1]
+
+    h_cells = np.empty(Nj)
+    p_cells = np.empty(Nj)
+    for i in range(Nj):
+        G_target = m_dot / A_nodes[i]
+        # Clamp to the subsonic range (inlet/outlet may be slightly above G_max
+        # due to area ratio; cap at throat state)
+        G_target = min(G_target, sub_G[-1])
+        idx      = np.clip(np.searchsorted(sub_G, G_target), 1, len(sub_G) - 1)
+        t        = (G_target - sub_G[idx-1]) / max(sub_G[idx] - sub_G[idx-1], 1e-300)
+        h_cells[i] = sub_h[idx-1] + t * (sub_h[idx] - sub_h[idx-1])
+        p_cells[i] = sub_p[idx-1] + t * (sub_p[idx] - sub_p[idx-1])
+
+    u_cells = np.sqrt(np.maximum(2.0 * (h0 - h_cells), 0.0))
+    return np.stack([p_cells, u_cells, h_cells], axis=1)  # (N, 3)
+
+
 def stadtke_puh_initialization_simple(x, A_nodes, parameters):
     """
     Simple initialization for the Städtke Newton solver in primitive (p, u, h).
@@ -485,8 +561,26 @@ def stadtke_puh_initialization_simple(x, A_nodes, parameters):
     u_out   = min(np.sqrt(max(2.0 * (p_stag - p_out) / (rho_out + 1e-300), 0.0)), u_max)
     m_dot   = rho_out * u_out * A_nodes[-1]
 
-    # Continuity → velocity; total enthalpy → static enthalpy (clamped)
+    # Subsonic cap: ensure M < 0.9 everywhere.  The first density estimate
+    # rho_cells uses h=h0 (stagnation), which underestimates actual density
+    # (actual h < h0 → actual T < T0 → actual rho > rho_est for ideal gas).
+    # Use a conservative 0.5 multiplier to stay well below sonic.
+    a_est       = np.asarray(
+        fluid.get_state(jxp.HmassP_INPUTS, np.full(Nj, h0), p_cells)["a"],
+        dtype=float)
+    m_dot_sonic = float(np.min(0.5 * rho_cells * a_est * A_nodes))
+    m_dot       = min(m_dot, m_dot_sonic)
+
+    # First-pass velocity and enthalpy (density still uses h0 estimate)
     u_cells = np.minimum(m_dot / np.maximum(rho_cells * A_nodes, 1e-300), u_max)
+    h_cells = np.maximum(h0 - 0.5 * u_cells**2, h_lo)
+
+    # One density-correction iteration: recompute rho with the actual h,
+    # which gives higher density in the divergent (lower T) → lower u →
+    # physically correct decelerating profile in the divergent section.
+    rho_corr = np.asarray(
+        fluid.get_state(jxp.HmassP_INPUTS, h_cells, p_cells).rhomass, dtype=float)
+    u_cells = np.minimum(m_dot / np.maximum(rho_corr * A_nodes, 1e-300), u_max)
     h_cells = np.maximum(h0 - 0.5 * u_cells**2, h_lo)
 
     return np.stack([p_cells, u_cells, h_cells], axis=1)  # (N, 3)
@@ -949,28 +1043,40 @@ def _jax_F_fvs_stadtke(U_L, U_R, fluid, delta_factor=0.1):
     K    = jnp.stack([r0, r1, r2], axis=1)   # (Nfaces, 3, 3)
     KT   = K.swapaxes(-1, -2)                # (Nfaces, 3, 3)
 
-    # ── Projection  R̃_k = K G_k K⁻¹ / λ_k^safe  (rank-1 form) ──────────
-    # G_k = λ_k (v_k ⊗ l_k)  →  K G_k K⁻¹ = λ_k (K v_k) ⊗ (K⁻ᵀ l_k)
-    # Harten C¹ entropy fix: |λ|_safe = |λ|           if |λ| ≥ δ
-    #                                  (λ² + δ²)/(2δ)  if |λ| < δ
-    # C¹ at |λ|=δ (both value and derivative match) → Newton Jacobian is
-    # accurate through the sonic point; smaller δ suffices vs C⁰ clipping.
-    # Cost per mode: 1 matvec + 1 single-RHS solve  (vs 1 matmul + 1 three-RHS solve)
-    delta = delta_factor * (jnp.abs(u_a) + a_a)   # entropy-fix width (Nfaces,)
+    # ── L/R eigenvalues for strict sign-change entropy fix ───────────────
+    st_L  = fluid.get_state(jxp.HmassP_INPUTS, U_L[:, 2], U_L[:, 0])
+    st_R  = fluid.get_state(jxp.HmassP_INPUTS, U_R[:, 2], U_R[:, 0])
+    a_L   = st_L["a"];  a_R = st_R["a"]
+    lam1_L = U_L[:, 1] + a_L;  lam1_R = U_R[:, 1] + a_R
+    lam2_L = U_L[:, 1] - a_L;  lam2_R = U_R[:, 1] - a_R
+    lam3_L = U_L[:, 1];         lam3_R = U_R[:, 1]
 
-    def _Rt_vec(v, l, lam):
-        Kv      = jnp.einsum('...ij,...j->...i', K, v)
-        KTl     = jnp.linalg.solve(KT, l[..., None]).squeeze(-1)
-        abs_lam = jnp.abs(lam)
-        lam_safe = jnp.where(abs_lam >= delta,
-                             abs_lam,
-                             (lam**2 + delta**2) / (2.0 * delta))
-        coeff = abs_lam / jnp.maximum(lam_safe, 1e-300)
+    # ── Projection  R̃_k = K G_k K⁻¹ / λ_k^safe  (rank-1 form) ──────────
+    # Strict Roe-Harten entropy fix (Roe 1981, Harten & Hyman 1983):
+    #   Activate only when λ_k changes sign L→R (expansion sonic transition).
+    #   At active faces: δ_k = λ_k^R - λ_k^L  (>0 by construction),
+    #                    λ_k^safe = (λ_k^avg² + δ_k²) / (2δ_k)  [C¹ Harten form]
+    #   Elsewhere: λ_k^safe = |λ_k^avg|  (coeff = 1, no added dissipation).
+    # This means dissipation is added ONLY at the single face where a wave
+    # crosses zero from L to R — never at shocks or in smooth flow regions.
+    # delta_factor provides an optional global C¹ floor for robustness.
+    delta_global = delta_factor * (jnp.abs(u_a) + a_a)   # global floor (Nfaces,)
+
+    def _Rt_vec(v, l, lam_avg, lam_L, lam_R):
+        Kv    = jnp.einsum('...ij,...j->...i', K, v)
+        KTl   = jnp.linalg.solve(KT, l[..., None]).squeeze(-1)
+        # Strict activation: expansion sonic crossing only
+        sonic   = (lam_L < 0.0) & (lam_R > 0.0)
+        delta_k = jnp.where(sonic, lam_R - lam_L, delta_global)
+        lam_safe = jnp.where(sonic,
+                             (lam_avg**2 + delta_k**2) / (2.0 * jnp.maximum(delta_k, 1e-300)),
+                             jnp.maximum(jnp.abs(lam_avg), delta_global))
+        coeff = jnp.abs(lam_avg) / jnp.maximum(lam_safe, 1e-300)
         return coeff[:, None, None] * jnp.einsum('...i,...j->...ij', Kv, KTl)
 
-    Rt1 = _Rt_vec(v1, l1, lam1)
-    Rt2 = _Rt_vec(v2, l2, lam2)
-    Rt3 = _Rt_vec(v3, l3, lam3)
+    Rt1 = _Rt_vec(v1, l1, lam1, lam1_L, lam1_R)
+    Rt2 = _Rt_vec(v2, l2, lam2, lam2_L, lam2_R)
+    Rt3 = _Rt_vec(v3, l3, lam3, lam3_L, lam3_R)
 
     # ── Sum by TRUE eigenvalue sign ───────────────────────────────────────
     s1p = jnp.where(lam1[:, None, None] >= 0.0, 1.0, 0.0)
@@ -981,8 +1087,6 @@ def _jax_F_fvs_stadtke(U_L, U_R, fluid, delta_factor=0.1):
     R_minus = (1.0 - s1p) * Rt1 + (1.0 - s2p) * Rt2 + (1.0 - s3p) * Rt3
 
     # ── Physical fluxes from ACTUAL L/R states ────────────────────────────
-    st_L  = fluid.get_state(jxp.HmassP_INPUTS, U_L[:, 2], U_L[:, 0])
-    st_R  = fluid.get_state(jxp.HmassP_INPUTS, U_R[:, 2], U_R[:, 0])
     rho_L = st_L["rho"];  rho_R = st_R["rho"]
     H_L   = U_L[:, 2] + 0.5 * U_L[:, 1]**2
     H_R   = U_R[:, 2] + 0.5 * U_R[:, 1]**2
@@ -1368,7 +1472,12 @@ def make_jax_stadtke_step(fluid, A, A_face, dAdx, D_h, roughness, dx, CFL, p_out
         a_out  = fluid.get_state(jxp.HmassP_INPUTS,
                      jnp.expand_dims(h_out,  0),
                      jnp.expand_dims(p_prev, 0))["a"][0]
-        p_ghost = jnp.where(jnp.abs(u_out) < a_out, pout_j, p_prev)
+        # Smooth Mach switch so jax.jacobian sees a non-zero gradient near M=1.
+        # Hard where() gives zero gradient → Newton blind to BC transition →
+        # p_out cannot propagate upstream to anchor the shock.
+        M_out   = jnp.abs(u_out) / (a_out + 1e-300)
+        w       = 0.5 * (1.0 + jnp.tanh((1.0 - M_out) / 0.004))  # 1 at M«1, 0 at M»1; blend ~0.99–1.01
+        p_ghost = w * pout_j + (1.0 - w) * p_prev
         return U.at[-1].set(jnp.array([p_ghost, u_out, h_out]))
 
     def _residual(U_int_flat, U_n_flat, dt):
@@ -1417,10 +1526,12 @@ def make_jax_stadtke_step(fluid, A, A_face, dAdx, D_h, roughness, dx, CFL, p_out
 
     @jax.jit
     def compute_dt(U_n):
-        """CFL-limited time step at state U_n. Returns (dt, a_c)."""
+        """CFL-limited time step at state U_n. Returns (dt, a_c).
+        Ghost cells (indices 0 and N-1) are excluded from the CFL limit —
+        they can hold unphysical intermediate states that would collapse dt."""
         st_c = fluid.get_state(jxp.HmassP_INPUTS, U_n[:, 2], U_n[:, 0])
         a_c  = st_c["a"]
-        dt   = CFL * dx / jnp.max(jnp.abs(U_n[:, 1]) + a_c)
+        dt   = CFL * dx / jnp.max(jnp.abs(U_n[1:-1, 1]) + a_c[1:-1])
         return dt, a_c
 
     @jax.jit
@@ -1537,6 +1648,8 @@ def fvm_euler_1d(x, t, parameters):
             U0 = shock_tube_puh_initialization(x, A_nodes, parameters)
         elif init_strategy == 'isentropic':
             U0 = stadtke_puh_initialization(x, A_nodes, parameters)
+        elif init_strategy == 'subsonic':
+            U0 = stadtke_puh_initialization_subsonic(x, A_nodes, parameters)
         else:  # 'simple' (default)
             U0 = stadtke_puh_initialization_simple(x, A_nodes, parameters)
         print(f"  FVS Newton init: {init_strategy}", flush=True)
@@ -1568,6 +1681,7 @@ def fvm_euler_1d(x, t, parameters):
         _DH_MAX = 0.10        # max |Δh|/h   accepted per step
         _DU_MAX = 0.20        # max |Δu|/(|u|+a) accepted per step
         _DT_GROW = 1.20       # dt growth factor after accepted step
+        _DT_MIN  = dx / 1e12  # absolute floor: if dt collapses below this, stop
 
         n        = 0
         t_phys   = 0.0
@@ -1589,6 +1703,11 @@ def fvm_euler_1d(x, t, parameters):
                 # ── CFL cap for current state; grow dt toward it ──────────
                 dt_max_j, a_j = _compute_dt(U_jax)
                 dt = min(dt * _DT_GROW, float(dt_max_j))
+
+                if dt < _DT_MIN:
+                    print(f"  dt collapsed to {dt:.2e} (< min {_DT_MIN:.2e}) — "
+                          f"stopping at SSR={res:.3e}")
+                    break
 
                 # ── Adaptive retry: halve dt on large increments ──────────
                 halvings = 0
