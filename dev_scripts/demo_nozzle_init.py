@@ -23,6 +23,7 @@ import nozzle_hyperbolic.fvm_solver.geometry as _geom
 from nozzle_hyperbolic.fvm_solver.fvm import (
     stadtke_puh_initialization_simple,
     stadtke_puh_initialization,
+    stadtke_puh_initialization_subsonic,
 )
 
 hyp.set_plot_options(grid=False)
@@ -91,7 +92,7 @@ if perfect_gas:
 
 # ── Run both initializations ──────────────────────────────────────────────────
 print("Running simple initialization ...")
-U_simple = stadtke_puh_initialization_simple(x, A_nodes, parameters)
+U_simple = stadtke_puh_initialization_subsonic(x, A_nodes, parameters)
 
 print("Running isentropic initialization ...")
 U_isentr = stadtke_puh_initialization(x, A_nodes, parameters)
