@@ -5,13 +5,13 @@ boundary_conditions:
   p_out:        18450.0  # Pa  — supersonic design condition (A/A*=2, γ=1.4, M≈2.2)
 
 numerical_settings:
-  Nx: 100
+  Nx: 800
   x1: 0.0
   x2: 0.2           # matches geometry L=0.2
   t1: 0.00
   t2: 100.0          # large — residual criterion will stop iteration first
-  CFL: 10
-  max_iterations: 5000
+  CFL: 5
+  max_iterations: 10000
   residuals: 1.0e-6
 
   flux_method: hllc  # ignored by fvs_newton, kept for completeness
@@ -21,7 +21,7 @@ numerical_settings:
 
   reconstruction: muscl_van_leer # muscl_van_leer | constant
   delta_factor: 0.02  # Harten C¹ fix width — smaller values ok now; 0.05 is a safe default
-  newton_iter:  40    # Newton iterations per step (default 20; more = more accurate but slower compile)
+  newton_iter:  50    # Newton iterations per step (default 20; more = more accurate but slower compile)
 
   wall_friction: false  # frictionless — exact solution assumes inviscid
 

@@ -4,12 +4,12 @@ boundary_conditions:
   p_out:        1.0e4   # = p_R
 
 numerical_settings:
-  Nx: 200
+  Nx: 1000
   x1: 0.0
   x2: 1.0
   t1: 0.00
   t2: 5.4e-4            # physical end time ≈ 0.2/c_L s — waves clear of boundaries
-  CFL: 0.1              # FVS Newton is implicit — can go above 0.5; lower = more accurate
+  CFL: 0.05              # FVS Newton is implicit — can go above 0.5; lower = more accurate
   max_iterations: 100000
   residuals: 1.0e-8    # will not converge (transient) — loop runs to t2
 
@@ -25,7 +25,7 @@ numerical_settings:
   # ── Reconstruction ──────────────────────────────────────────────────────
   # Use constant (1st order) first — FVS+MUSCL is not TVD for strong shocks.
   # Switch to muscl_van_leer for smoother profiles once base case passes.
-  reconstruction: constant
+  reconstruction: muscl_van_leer
 
   # ── Wall friction ────────────────────────────────────────────────────────
   # false = frictionless (Sod shock tube has no pipe wall, tau_w must be zero)
@@ -41,10 +41,10 @@ shock_tube:
   x_diaphragm: 0.5
   p_L: 1.0e5            # Pa
   T_L: 348.0            # K   → rho_L ≈ 1.0 kg/m³ for Air
-  u_L: 1.0              # m/s — must be nonzero for FVS (K-matrix singular at u=0)
+  u_L: 1.0e-6              # m/s — must be nonzero for FVS (K-matrix singular at u=0)
   p_R: 1.0e4            # Pa
   T_R: 278.0            # K   → rho_R ≈ 0.125 kg/m³ for Air
-  u_R: 1.0              # m/s — must be nonzero for FVS
+  u_R: 1.0e-6              # m/s — must be nonzero for FVS
 
 fluid:
   perfect_gas: false    # fvs_newton requires real-gas EOS (perfect_gas not supported)

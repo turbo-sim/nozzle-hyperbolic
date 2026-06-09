@@ -20,9 +20,9 @@ import jaxprop as jxp
 hyp.set_plot_options(grid=False)
 
 ## Read settings
-# with open("settings_shock_tube.yaml", 'r') as file:
+with open("settings_shock_tube.yaml", 'r') as file:
 # with open("settings.yaml", 'r') as file:
-with open("settings_nozzle_validation.yaml", 'r') as file:
+# with open("settings_nozzle_validation.yaml", 'r') as file:
 # with open("settings_subsonic_pipe.yaml", 'r') as file:
     case_data = yaml.safe_load(file)
 
