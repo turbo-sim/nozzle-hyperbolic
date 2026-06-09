@@ -19,14 +19,15 @@ import matplotlib.pyplot as plt
 import jaxprop as jxp
 import nozzle_hyperbolic as hyp
 import nozzle_hyperbolic.fvm_solver.geometry as _geom
-from nozzle_hyperbolic.fvm_solver.fvm import isentropic_initialization
+from nozzle_hyperbolic.fvm_solver.fvm import isentropic_initialization, shock_tube_Q_initialization
 
 hyp.set_plot_options(grid=False)
 
 # ── Settings file ────────────────────────────────────────────────────────────
 # Change this line to test different cases:
-SETTINGS_FILE = "settings_subsonic_pipe.yaml"
+# SETTINGS_FILE = "settings_subsonic_pipe.yaml"
 # SETTINGS_FILE = "settings_nozzle_validation.yaml"
+SETTINGS_FILE = "settings_shock_tube.yaml"
 
 with open(SETTINGS_FILE) as f:
     case_data = yaml.safe_load(f)
@@ -74,6 +75,7 @@ roughness   = float(geo_cfg.pop("roughness", 0.0))
 geo_fn      = getattr(_geom, geo_fn_name)
 geo         = geo_fn(x, roughness=roughness, **{k: v for k, v in geo_cfg.items()})
 A_nodes     = np.asarray(geo.A)
+nozzle_type = geo_fn_name.replace("get_", "")  # e.g. "shock_tube", "pipe"
 
 # ── Parameters dict (minimal — only what initializer needs) ─────────────────
 parameters = {
@@ -87,10 +89,12 @@ parameters = {
 if perfect_gas:
     cp, cv = hyp.fvm_solver.specific_heat2()
     parameters["gamma"] = cp / cv
+if "shock_tube" in nozzle_type:
+    parameters["shock_tube_cfg"] = case_data["shock_tube"]
 
 # ── Run initializer ──────────────────────────────────────────────────────────
 print("Running isentropic_initialization ...")
-Q0 = isentropic_initialization(x, A_nodes, parameters)
+Q0 = shock_tube_Q_initialization(x, A_nodes, parameters)
 print("Done.")
 
 # ── Decode conservative Q0 → primitive (ρ, u, p, T, M, h) ───────────────────

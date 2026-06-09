@@ -341,12 +341,12 @@ if "symmetric_nozzle" in nozzle_type and not perfect_gas:
     fig_ex.suptitle(f"FVS vs exact  (γ_eff={gamma_eff:.3f})  —  {nozzle_type},  N={Nx}")
     for k, (ax, (ylabel, num, ex_sub, ex_sup, ex_sh)) in enumerate(zip(axes_ex, cases_ex)):
         ax.set_xlabel('x [m]');  ax.set_ylabel(ylabel)
-        ax.plot(x, num,  'go-',  lw=0.75, ms=4, mfc='w', label='FVS')
         ax.plot(x, ex_sub, 'r--', lw=0.75, label='Exact – subsonic')
+        ax.plot(x, num,  'g-',  lw=1.75, ms=4, mfc='w', label='FVS')
         ax.plot(x[A_cr_index:], ex_sup[A_cr_index:], 'b--', lw=0.75, label='Exact – supersonic')
         if ex_sh is not None:
             ax.plot(x[i_shock - 1:], ex_sh[i_shock - 1:], 'k-', lw=0.75, label='Exact – shock')
-        ax.legend(loc='upper left', **legend_kw)
+        # ax.legend(loc='center', **legend_kw)
         _add_nozzle_overlay(ax, x, r, x2, show_ylabel=(k == len(cases_ex) - 1))
     fig_ex.tight_layout()
     fig_ex.savefig(out_dir / "exact_comparison.png", dpi=150, bbox_inches='tight')

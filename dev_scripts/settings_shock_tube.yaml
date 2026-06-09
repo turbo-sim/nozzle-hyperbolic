@@ -4,14 +4,14 @@ boundary_conditions:
   p_out:        1.0e4   # = p_R
 
 numerical_settings:
-  Nx: 1000
+  Nx: 100
   x1: 0.0
   x2: 1.0
   t1: 0.00
   t2: 5.4e-4            # physical end time ≈ 0.2/c_L s — waves clear of boundaries
-  CFL: 0.05              # FVS Newton is implicit — can go above 0.5; lower = more accurate
+  CFL: 0.01             # FVS Newton is implicit — can go above 0.5; lower = more accurate
   max_iterations: 100000
-  residuals: 1.0e-8    # will not converge (transient) — loop runs to t2
+  residuals: 1.0e-6    # will not converge (transient) — loop runs to t2
 
   # ── Flux method ────────────────────────────────────────────────────────
   # rusanov | hll | hllc | lf    (JAX path — recommended for shock tube)
@@ -21,6 +21,8 @@ numerical_settings:
   # euler        — explicit Euler  (fast, reference)
   # fvs_newton   — Städtke FVS + Newton implicit  (requires perfect_gas: false)
   time_discretization: fvs_newton
+  delta_factor: 1e-6    # global floor on eigenvalue smoothing; 1e-12 makes Jacobian blind at shock → dt collapse
+  newton_iter:  50    # Newton iterations per step (default 20; more = more accurate but slower compile)
 
   # ── Reconstruction ──────────────────────────────────────────────────────
   # Use constant (1st order) first — FVS+MUSCL is not TVD for strong shocks.
