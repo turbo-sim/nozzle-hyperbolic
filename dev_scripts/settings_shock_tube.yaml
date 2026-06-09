@@ -43,10 +43,10 @@ shock_tube:
   x_diaphragm: 0.5
   p_L: 1.0e5            # Pa
   T_L: 348.0            # K   → rho_L ≈ 1.0 kg/m³ for Air
-  u_L: 1.0e-6              # m/s — must be nonzero for FVS (K-matrix singular at u=0)
+  u_L: 1.0              # m/s — must be nonzero for FVS (K-matrix singular at u=0)
   p_R: 1.0e4            # Pa
   T_R: 278.0            # K   → rho_R ≈ 0.125 kg/m³ for Air
-  u_R: 1.0e-6              # m/s — must be nonzero for FVS
+  u_R: 1.0            # m/s — must be nonzero for FVS
 
 fluid:
   perfect_gas: false    # fvs_newton requires real-gas EOS (perfect_gas not supported)
