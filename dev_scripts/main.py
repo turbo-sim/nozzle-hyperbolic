@@ -122,6 +122,7 @@ parameters = {
     "time_method":    case_data["numerical_settings"]["time_discretization"],
     "reconstruction":  case_data["numerical_settings"].get("reconstruction", "constant"),
     "initialization":  case_data["numerical_settings"].get("initialization", "simple"),
+    "x_shock_fraction": float(case_data["numerical_settings"].get("x_shock_fraction", 0.75)),
     "delta_factor":    float(case_data["numerical_settings"].get("delta_factor", 0.1)),
     "newton_iter":     int(case_data["numerical_settings"].get("newton_iter", 20)),
     "warmup_cfg":      case_data["numerical_settings"].get("warmup", None),
@@ -262,7 +263,8 @@ if perfect_gas:
     for k, (ax, (ylabel, num, exact_sub, exact_sup, exact_shock)) in enumerate(zip(axes, cases)):
         ax.set_xlabel('x [m]')
         ax.set_ylabel(ylabel)
-        ax.plot(x, num, 'go-', lw=0.75, ms=4, mfc='w', label='Numerical')
+        ax.plot(x[1:-1], num[1:-1], 'go-', lw=0.75, ms=4, mfc='w', label='Numerical')
+        ax.plot(x[[0, -1]], num[[0, -1]], 'r*', ms=9, zorder=5, label='Ghost (BC)')
         ax.plot(x, exact_sub, 'r--', lw=0.75, label='Exact – subsonic')
         ax.plot(x[A_cr_index:], exact_sup[A_cr_index:], 'b--', lw=0.75, label='Exact – supersonic')
         if exact_shock is not None:
@@ -282,9 +284,11 @@ else:
         (axes[1, 2], r'$Q_\mathrm{vap}$', Qvap),
     ]
     for k, (ax, ylabel, data) in enumerate(pairs):
-        ax.plot(x, data, 'go-', lw=0.75, ms=4, mfc='w')
+        ax.plot(x[1:-1], data[1:-1], 'go-', lw=0.75, ms=4, mfc='w', label='Interior')
+        ax.plot(x[[0, -1]], data[[0, -1]], 'r*', ms=9, zorder=5, label='Ghost (BC)')
         ax.set_xlabel('x [m]')
         ax.set_ylabel(ylabel)
+        ax.legend(fontsize='x-small', handlelength=1.0)
         _add_nozzle_overlay(ax, x, r, x2, show_ylabel=(k % 3 == 2))
 
     fluid = jxp.Fluid(fluid_name)
@@ -342,11 +346,12 @@ if "symmetric_nozzle" in nozzle_type and not perfect_gas:
     for k, (ax, (ylabel, num, ex_sub, ex_sup, ex_sh)) in enumerate(zip(axes_ex, cases_ex)):
         ax.set_xlabel('x [m]');  ax.set_ylabel(ylabel)
         ax.plot(x, ex_sub, 'r--', lw=0.75, label='Exact – subsonic')
-        ax.plot(x, num,  'g-',  lw=1.75, ms=4, mfc='w', label='FVS')
+        ax.plot(x[1:-1], num[1:-1], 'g-',  lw=1.75, label='FVS')
+        ax.plot(x[[0, -1]], num[[0, -1]], 'r*', ms=9, zorder=5, label='Ghost (BC)')
         ax.plot(x[A_cr_index:], ex_sup[A_cr_index:], 'b--', lw=0.75, label='Exact – supersonic')
         if ex_sh is not None:
             ax.plot(x[i_shock - 1:], ex_sh[i_shock - 1:], 'k-', lw=0.75, label='Exact – shock')
-        # ax.legend(loc='center', **legend_kw)
+        ax.legend(loc='upper left', **legend_kw)
         _add_nozzle_overlay(ax, x, r, x2, show_ylabel=(k == len(cases_ex) - 1))
     fig_ex.tight_layout()
     fig_ex.savefig(out_dir / "exact_comparison.png", dpi=150, bbox_inches='tight')

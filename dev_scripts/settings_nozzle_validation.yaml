@@ -1,27 +1,29 @@
 boundary_conditions:
   p_stagnation: 2.0e5    # Pa  — 2 bar, well into ideal-gas regime for Air
   T_stagnation: 300.0    # K
-  # p_out:        58450.0   # Pa  — supersonic design condition (A/A*=2, γ=1.4, M≈2.2)
-  p_out:        18450.0  # Pa  — supersonic design condition (A/A*=2, γ=1.4, M≈2.2)
+  p_out:        1.3e5   # Pa  — supersonic design condition (A/A*=2, γ=1.4, M≈2.2)
+  # p_out:        18450.0  # Pa  — supersonic design condition (A/A*=2, γ=1.4, M≈2.2)
+  # p_out: 6000
 
 numerical_settings:
-  Nx: 1000
+  Nx: 240
   x1: 0.0
   x2: 0.2           # matches geometry L=0.2
   t1: 0.00
   t2: 100.0          # large — residual criterion will stop iteration first
-  CFL: 50.0          # keep small for shock capture; supersonic cases can use larger
+  CFL: 0.5         # keep small for shock capture; supersonic cases can use larger
   max_iterations: 10000
   residuals: 1.0e-6
 
   flux_method: hllc  # ignored by fvs_newton, kept for completeness
 
   time_discretization: fvs_newton
-  initialization: subsonic  # 'subsonic' (isentropic, M<1 everywhere — best for shocked nozzle) | 'isentropic' | 'simple'
+  initialization: shocked   # 'shocked' | 'subsonic' | 'isentropic' | 'simple'
+  x_shock_fraction: 0.88   # 88% of nozzle length ≈ analytical shock position for p_out=58450 Pa
 
   reconstruction: muscl_van_leer # muscl_van_leer | constant
   delta_factor: 1e-6    # global floor on eigenvalue smoothing; 1e-12 makes Jacobian blind at shock → dt collapse
-  newton_iter:  50    # Newton iterations per step (default 20; more = more accurate but slower compile)
+  newton_iter:  10    # Newton iterations per step (default 20; more = more accurate but slower compile)
 
   wall_friction: false  # frictionless — exact solution assumes inviscid
 
