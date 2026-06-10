@@ -1,16 +1,16 @@
 boundary_conditions:
   p_stagnation: 2.0e5    # Pa  — 2 bar, well into ideal-gas regime for Air
   T_stagnation: 300.0    # K
-  p_out:        58450.0   # Pa  — supersonic design condition (A/A*=2, γ=1.4, M≈2.2)
-  # p_out:        18450.0  # Pa  — supersonic design condition (A/A*=2, γ=1.4, M≈2.2)
+  # p_out:        58450.0   # Pa  — supersonic design condition (A/A*=2, γ=1.4, M≈2.2)
+  p_out:        18450.0  # Pa  — supersonic design condition (A/A*=2, γ=1.4, M≈2.2)
 
 numerical_settings:
-  Nx: 100
+  Nx: 1000
   x1: 0.0
   x2: 0.2           # matches geometry L=0.2
   t1: 0.00
   t2: 100.0          # large — residual criterion will stop iteration first
-  CFL: 0.5           # keep small for shock capture; supersonic cases can use larger
+  CFL: 50.0          # keep small for shock capture; supersonic cases can use larger
   max_iterations: 10000
   residuals: 1.0e-6
 

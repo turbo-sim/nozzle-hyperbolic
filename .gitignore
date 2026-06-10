@@ -33,3 +33,7 @@ Thumbs.db
 
 # JAX
 .jax_cache/
+
+# HPC
+*.out
+*.err
