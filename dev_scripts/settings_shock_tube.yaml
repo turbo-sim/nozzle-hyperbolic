@@ -22,12 +22,12 @@ numerical_settings:
   # fvs_newton   — Städtke FVS + Newton implicit  (requires perfect_gas: false)
   time_discretization: fvs_newton
   delta_factor: 1e-6    # global floor on eigenvalue smoothing; 1e-12 makes Jacobian blind at shock → dt collapse
-  newton_iter:  50    # Newton iterations per step (default 20; more = more accurate but slower compile)
+  newton_iter:  10    # Newton iterations per step (default 20; more = more accurate but slower compile)
 
   # ── Reconstruction ──────────────────────────────────────────────────────
-  # Use constant (1st order) first — FVS+MUSCL is not TVD for strong shocks.
-  # Switch to muscl_van_leer for smoother profiles once base case passes.
-  reconstruction: muscl_van_leer
+  # constant (1st order) is required for a step-function IC: MUSCL backward
+  # difference = 0 at the diaphragm → slope ratio r = ±∞ → NaN in limiter.
+  reconstruction: muscl_minmod
 
   # ── Wall friction ────────────────────────────────────────────────────────
   # false = frictionless (Sod shock tube has no pipe wall, tau_w must be zero)
@@ -43,10 +43,10 @@ shock_tube:
   x_diaphragm: 0.5
   p_L: 1.0e5            # Pa
   T_L: 348.0            # K   → rho_L ≈ 1.0 kg/m³ for Air
-  u_L: 1.0              # m/s — must be nonzero for FVS (K-matrix singular at u=0)
+  u_L: 0.1              # m/s — small nonzero (FVS singular at u=0); u_R computed as u_L*rho_L/rho_R
   p_R: 1.0e4            # Pa
   T_R: 278.0            # K   → rho_R ≈ 0.125 kg/m³ for Air
-  u_R: 1.0            # m/s — must be nonzero for FVS
+  # u_R is computed automatically for mass-flux continuity: rho_L*u_L = rho_R*u_R → u_R ≈ 0.8 m/s
 
 fluid:
   perfect_gas: false    # fvs_newton requires real-gas EOS (perfect_gas not supported)
