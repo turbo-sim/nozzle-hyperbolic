@@ -5,7 +5,7 @@
 # -- specify queue --
 #BSUB -q hpc
 # -- estimated wall clock time (execution time): hh:mm --
-#BSUB -W 48:30
+#BSUB -W 10:30
 ### -- specify that we need 2GB of memory per core/slot -- 
 #BSUB -R "rusage[mem=16GB]"
 # -- number of processors
