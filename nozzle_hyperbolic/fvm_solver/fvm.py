@@ -1612,7 +1612,8 @@ def _puh_to_conservative(U, fluid):
 
 def make_jax_stadtke_step(fluid, A, A_face, dAdx, D_h, roughness, dx, CFL, p_out, h0, s0,
                            delta_factor=0.05, newton_iter=20, wall_friction=True,
-                           transmissive_bc=False, recon='muscl_van_leer'):
+                           transmissive_bc=False, recon='muscl_van_leer',
+                           jacobian_mode='dense'):
     """
     Build a @jax.jit step function implementing the Städtke Newton implicit scheme.
 
@@ -1701,7 +1702,16 @@ def make_jax_stadtke_step(fluid, A, A_face, dAdx, D_h, roughness, dx, CFL, p_out
         return U_L, U_R
 
     def _bc_inlet(U):
-        """Inlet BC: zero-gradient (shock tube) or isentropic reservoir (nozzle)."""
+        """Inlet BC: zero-gradient (shock tube) or isentropic reservoir (nozzle).
+
+        Solves p on the reservoir isentrope, s(h_s, p) = s0, with 3 unrolled
+        Newton steps using the exact thermodynamic derivative
+            (∂s/∂p)|_h = -1/(ρT)   →   Δp = ρT (s - s0).
+        Initial guess = pressure of the first interior cell (near-exact at
+        steady state).  Replaces a 12-iteration fori_loop bisection whose
+        repeated retracing under jax.jacobian dominated the step cost:
+        3 inline EOS calls instead of a traced loop with 12.
+        """
         if transmissive_bc:
             return U.at[0].set(U[1])
         u_in = 2.0 * U[1, 1] - U[2, 1]
@@ -1709,33 +1719,48 @@ def make_jax_stadtke_step(fluid, A, A_face, dAdx, D_h, roughness, dx, CFL, p_out
                    jnp.clip(h0_j - 0.5 * u_in**2,
                              jnp.float64(h_lo + 1.0),
                              jnp.float64(h_hi - 1.0)), 0)
-        plo  = jnp.array([p_lo], dtype=jnp.float64)
-        phi  = jnp.array([p_hi], dtype=jnp.float64)
-        def _bisect_inlet(_, carry):
-            plo, phi = carry
-            pm    = 0.5 * (plo + phi)
-            s_mid = fluid.get_state(jxp.HmassP_INPUTS, h_s, pm)["s"]
-            plo   = jnp.where(s_mid > s0_j, pm, plo)
-            phi   = jnp.where(s_mid < s0_j, pm, phi)
-            return plo, phi
-        plo, phi = jax.lax.fori_loop(0, 12, _bisect_inlet, (plo, phi))
-        p_s = 0.5 * (plo + phi)
+        p_s  = jnp.expand_dims(jnp.clip(U[1, 0], p_lo, p_hi), 0)
+        for _ in range(3):   # unrolled — no fori_loop, no retrace overhead
+            st  = fluid.get_state(jxp.HmassP_INPUTS, h_s, p_s)
+            p_s = jnp.clip(p_s + st["rho"] * st["T"] * (st["s"] - s0_j),
+                            p_lo, p_hi)
         return U.at[0].set(jnp.array([p_s[0], u_in, h_s[0]]))
 
+        # ── BISECTION VERSION (reference) — commented out ─────────────────────
+        # 12-iter fori_loop bisection on the isentrope. Robust but the loop is
+        # retraced inside every jax.jacobian context → dominated step cost.
+        #
+        # plo  = jnp.array([p_lo], dtype=jnp.float64)
+        # phi  = jnp.array([p_hi], dtype=jnp.float64)
+        # def _bisect_inlet(_, carry):
+        #     plo, phi = carry
+        #     pm    = 0.5 * (plo + phi)
+        #     s_mid = fluid.get_state(jxp.HmassP_INPUTS, h_s, pm)["s"]
+        #     plo   = jnp.where(s_mid > s0_j, pm, plo)
+        #     phi   = jnp.where(s_mid < s0_j, pm, phi)
+        #     return plo, phi
+        # plo, phi = jax.lax.fori_loop(0, 12, _bisect_inlet, (plo, phi))
+        # p_s = 0.5 * (plo + phi)
+        # return U.at[0].set(jnp.array([p_s[0], u_in, h_s[0]]))
+
     def _bc_outlet(U):
-        """Outlet BC — matches the reference conservative-variable formulation.
+        """Outlet BC in primitive (p, u, h) space.
 
         Subsonic (M < 1):
-          ρ_ghost  = area-weighted linear extrapolation of ρA  (§5.2 reference)
           u_ghost  = area-weighted linear extrapolation of ρuA / ρ_ghost
-          h_ghost  = h s.t. ρ(h_ghost, p_out) = ρ_ghost   (bisection in HmassP)
-          p_ghost  = p_out
+          h_ghost  = linear extrapolation  2·h[-2] - h[-3]
+          p_ghost  = p_out  (directly imposed — no bisection needed in primitive space)
 
         Supersonic (M ≥ 1):
           all variables extrapolated linearly (no pressure fixing)
 
         The M-switch is a smooth tanh so jax.jacobian sees a non-zero gradient
         near M=1 and Newton can propagate p_out upstream.
+
+        NOTE: a bisection version that also enforces ρ(h_ghost, p_out) = ρ_ghost
+        (area-weighted extrapolation of ρA, §5.2 reference) is kept below as
+        reference. It is correct but adds 17 EOS calls per residual evaluation,
+        making the Jacobian ~17× more expensive in the BC rows.
         """
         if transmissive_bc:
             return U.at[-1].set(U[-2])
@@ -1743,7 +1768,7 @@ def make_jax_stadtke_step(fluid, A, A_face, dAdx, D_h, roughness, dx, CFL, p_out
         h_m2 = U[-2, 2];  p_m2 = U[-2, 0];  u_m2 = U[-2, 1]
         h_m3 = U[-3, 2];  p_m3 = U[-3, 0];  u_m3 = U[-3, 1]
 
-        # EOS at the two last interior cells to get ρ and a
+        # EOS at last two interior cells — needed for ρ (momentum extrapolation) and a (Mach)
         st_m2  = fluid.get_state(jxp.HmassP_INPUTS,
                                   jnp.expand_dims(h_m2, 0), jnp.expand_dims(p_m2, 0))
         st_m3  = fluid.get_state(jxp.HmassP_INPUTS,
@@ -1751,9 +1776,9 @@ def make_jax_stadtke_step(fluid, A, A_face, dAdx, D_h, roughness, dx, CFL, p_out
         rho_m2 = st_m2["rho"][0];  a_m2 = st_m2["a"][0]
         rho_m3 = st_m3["rho"][0]
 
-        # ── area-weighted extrapolation of ρA and ρuA ────────────────────────
-        rho_g  = (2.0*rho_m2*A_j[-2] - rho_m3*A_j[-3]) / A_j[-1]
-        rho_g  = jnp.clip(rho_g, 1e-3, 1e4)           # guard against negative extrapolation
+        # ── area-weighted extrapolation of ρuA → u_ghost ─────────────────────
+        rho_g  = jnp.clip(
+            (2.0*rho_m2*A_j[-2] - rho_m3*A_j[-3]) / A_j[-1], 1e-3, 1e4)
         rhou_g = (2.0*rho_m2*u_m2*A_j[-2] - rho_m3*u_m3*A_j[-3]) / A_j[-1]
         u_g    = rhou_g / rho_g
 
@@ -1761,31 +1786,37 @@ def make_jax_stadtke_step(fluid, A, A_face, dAdx, D_h, roughness, dx, CFL, p_out
         M_out = jnp.abs(u_m2) / (a_m2 + 1e-300)
         w     = 0.5 * (1.0 + jnp.tanh((1.0 - M_out) / 0.004))  # 1 subsonic, 0 supersonic
 
-        # ── subsonic branch: h_ghost s.t. ρ(h_ghost, p_out) = ρ_ghost ───────
-        # ρ decreases monotonically with h at constant p → bisection always brackets.
-        rho_t = jnp.expand_dims(rho_g, 0)
-        p_arr = jnp.full((1,), pout_j,  dtype=jnp.float64)
-        hlo   = jnp.full((1,), h_lo,    dtype=jnp.float64)
-        hhi   = jnp.full((1,), h_hi,    dtype=jnp.float64)
-        def _bisect_out(_, carry):
-            hlo, hhi = carry
-            hm  = 0.5 * (hlo + hhi)
-            rhm = fluid.get_state(jxp.HmassP_INPUTS, hm, p_arr)["rho"]
-            hlo = jnp.where(rhm > rho_t, hm, hlo)
-            hhi = jnp.where(rhm < rho_t, hm, hhi)
-            return hlo, hhi
-        hlo, hhi = jax.lax.fori_loop(0, 15, _bisect_out, (hlo, hhi))
-        h_sub = 0.5 * (hlo[0] + hhi[0])
+        # ── subsonic: p_out imposed, h extrapolated ───────────────────────────
+        h_sub = 2.0*h_m2 - h_m3
         p_sub = pout_j
 
-        # ── supersonic branch: linear extrapolation ───────────────────────────
-        h_sup = 2.0*h_m2 - h_m3
+        # ── supersonic: full linear extrapolation ─────────────────────────────
+        h_sup = 2.0*h_m2 - h_m3   # same extrapolation — blend removes p_out
         p_sup = 2.0*p_m2 - p_m3
 
-        # ── blend ──────────────────────────────────────────────────────────────
-        h_g = w * h_sub + (1.0 - w) * jnp.clip(h_sup, h_lo, h_hi)
+        # ── blend ─────────────────────────────────────────────────────────────
+        h_g = jnp.clip(w * h_sub + (1.0 - w) * h_sup, h_lo, h_hi)
         p_g = w * p_sub + (1.0 - w) * jnp.clip(p_sup, p_lo, p_hi)
         return U.at[-1].set(jnp.array([p_g, u_g, h_g]))
+
+        # ── BISECTION VERSION (reference, §5.2) — commented out ───────────────
+        # Enforces ρ(h_ghost, p_out) = ρ_ghost (area-weighted ρA extrapolation).
+        # Correct but adds 15 EOS calls per residual eval → ~17× BC cost.
+        #
+        # rho_t = jnp.expand_dims(rho_g, 0)
+        # p_arr = jnp.full((1,), pout_j, dtype=jnp.float64)
+        # hlo   = jnp.full((1,), h_lo,   dtype=jnp.float64)
+        # hhi   = jnp.full((1,), h_hi,   dtype=jnp.float64)
+        # def _bisect_out(_, carry):
+        #     hlo, hhi = carry
+        #     hm  = 0.5 * (hlo + hhi)
+        #     rhm = fluid.get_state(jxp.HmassP_INPUTS, hm, p_arr)["rho"]
+        #     hlo = jnp.where(rhm > rho_t, hm, hlo)
+        #     hhi = jnp.where(rhm < rho_t, hm, hhi)
+        #     return hlo, hhi
+        # hlo, hhi = jax.lax.fori_loop(0, 15, _bisect_out, (hlo, hhi))
+        # h_sub = 0.5 * (hlo[0] + hhi[0])
+        # p_sub = pout_j
 
     def _residual(U_int_flat, U_n_flat, dt):
         """
@@ -1828,8 +1859,62 @@ def make_jax_stadtke_step(fluid, A, A_face, dAdx, D_h, roughness, dx, CFL, p_out
         R     = Vc * dV + dt * fdiv - dt * Vc * src[1:-1]
         return R.flatten()
 
-    # Jacobian function — created once, compiled into the JIT kernel
-    _jac_fn = jax.jacobian(_residual, argnums=0)
+    # ── Jacobian: dense (exact AD) or colored (banded compression) ───────────
+    # The residual is block-pentadiagonal: row for cell i depends only on cells
+    # i-2..i+2 (MUSCL ±2 stencil; constant ±1).  Both BCs are 2-cell-local, so
+    # ghost substitution folds dependencies INWARD — it never widens the band.
+    # Coloring exploits this: columns ≥ (2*sw+1) cells apart never share a
+    # residual row, so they can be probed together in one JVP and de-interleaved
+    # exactly.  The number of colors is fixed by the stencil — INDEPENDENT of N
+    # (15 for MUSCL, 9 for constant) — so cost scales O(N) instead of O(N²).
+    #
+    # CAVEAT: exact ONLY while every residual row stays within ±stencil_width
+    # cells (local BCs, local stencil).  Any non-local term (global constraint,
+    # wider stencil, BC reading far cells) breaks it → wrong Jacobian.  The
+    # startup `jacobian_validate` check (max|J_colored - J_dense|) is the guard.
+    _stencil_width = 1 if recon == 'constant' else 2
+    _cell_stride   = 2 * _stencil_width + 1          # cells between same-color columns
+    _stride        = 3 * _cell_stride                # DOF stride (3 vars/cell)
+    _m_dof         = 3 * (N - 2)                      # total interior DOFs
+    _n_colors      = min(_stride, _m_dof)             # graceful if N tiny
+
+    _jac_dense = jax.jacobian(_residual, argnums=0)
+
+    def _jac_colored(U_int_flat, U_n_flat, dt):
+        m_loc = U_int_flat.shape[0]
+        # Linearize once: the expensive nonlinear residual (EOS chain) runs a
+        # single time; each colored seed is then a cheap linear JVP.
+        _, jvp_fn = jax.linearize(lambda u: _residual(u, U_n_flat, dt), U_int_flat)
+        cols_idx  = jnp.arange(m_loc)
+        color_ids = jnp.arange(_n_colors)
+        S  = (cols_idx[None, :] % _stride == color_ids[:, None]).astype(U_int_flat.dtype)
+        Jc = jax.vmap(jvp_fn)(S)                       # (n_colors, m): summed columns
+        # De-interleave: for each row r (cell lr=r//3), the in-band columns are
+        # cells lr-sw..lr+sw × 3 vars; each has a unique color within the band,
+        # so J[r, c] = Jc[color(c), r].
+        rows = jnp.arange(m_loc)
+        lr   = rows // 3
+        J    = jnp.zeros((m_loc, m_loc), dtype=U_int_flat.dtype)
+        for dc in range(-_stencil_width, _stencil_width + 1):
+            for vc in range(3):
+                lc     = lr + dc
+                c      = lc * 3 + vc
+                valid  = (lc >= 0) & (lc <= (N - 3))
+                c_safe = jnp.clip(c, 0, m_loc - 1)
+                val    = jnp.where(valid, Jc[c_safe % _stride, rows], 0.0)
+                J      = J.at[rows, c_safe].add(val)   # invalid → adds 0 at clipped col
+        return J
+
+    _jac_fn = _jac_colored if jacobian_mode == 'colored' else _jac_dense
+
+    @jax.jit
+    def jac_diff(U_n, dt):
+        """max|J_colored - J_dense| at the given state — validation guard.
+        Must be ~0 (same AD graph, reordered sums).  Nonzero ⇒ sparsity broke."""
+        U_int = U_n[1:-1].reshape(-1)
+        U_nf  = U_n.reshape(-1)
+        return jnp.max(jnp.abs(_jac_colored(U_int, U_nf, dt)
+                               - _jac_dense(U_int, U_nf, dt)))
 
     @jax.jit
     def compute_dt(U_n):
@@ -1878,7 +1963,7 @@ def make_jax_stadtke_step(fluid, A, A_face, dAdx, D_h, roughness, dx, CFL, p_out
 
         return U_new, ssr
 
-    return step, compute_dt
+    return step, compute_dt, jac_diff
 
 
 # ---------------------------------------------------------------------------
@@ -1965,12 +2050,15 @@ def fvm_euler_1d(x, t, parameters):
 
         A_face = 0.5 * (A_nodes[:-1] + A_nodes[1:])
 
-        _stadtke_step, _compute_dt = make_jax_stadtke_step(
+        jacobian_mode = parameters.get('jacobian', 'dense')
+        _stadtke_step, _compute_dt, _jac_diff = make_jax_stadtke_step(
             fluid, A_nodes, A_face, dAdx_nodes, D_hydraulic, roughness,
             dx, CFL, p_out, h0, s0, wall_friction=wall_friction,
             transmissive_bc=transmissive_bc, recon=recon,
             delta_factor=parameters.get('delta_factor', 0.1),
-            newton_iter=parameters.get('newton_iter', 20))
+            newton_iter=parameters.get('newton_iter', 20),
+            jacobian_mode=jacobian_mode)
+        print(f"  Jacobian mode: {jacobian_mode}", flush=True)
 
         U_jax = jnp.asarray(U0, dtype=jnp.float64)
 
@@ -1983,6 +2071,18 @@ def fvm_euler_1d(x, t, parameters):
         jax.block_until_ready(_U_warm)
         compile_time = _time.perf_counter() - t0_compile
         print(f"Compiled in {compile_time:.1f} s. Running ...", flush=True)
+
+        # ── Jacobian sparsity guard ──────────────────────────────────────────
+        # Compares colored vs dense AD Jacobian at the initial state. Must be ~0;
+        # nonzero means a non-local term broke the banded sparsity assumption.
+        if parameters.get('jacobian_validate', False):
+            _d = float(_jac_diff(U_jax, _dt_init_j))
+            print(f"  Jacobian validation: max|J_colored - J_dense| = {_d:.3e}",
+                  flush=True)
+            if _d > 1e-6:
+                print("  WARNING: colored Jacobian differs from dense AD — "
+                      "banded sparsity assumption violated (non-local term?). "
+                      "Use jacobian: dense.", flush=True)
 
         # ── Time-step controller parameters ──────────────────────────────
         _MAX_HALVINGS = 8     # max halvings per step before accepting anyway
@@ -1998,6 +2098,8 @@ def fvm_euler_1d(x, t, parameters):
         res_hist = [float('inf')] * 5
         dt       = float(_dt_init_j)   # current target dt; grows/shrinks adaptively
         t0       = _time.perf_counter()
+        # phase timers (s): where does the per-iteration time go?
+        _tm = {'dt': 0.0, 'step': 0.0, 'check': 0.0}
 
         try:
             while n < max_iter and t_phys < t_end:
@@ -2010,8 +2112,10 @@ def fvm_euler_1d(x, t, parameters):
                     break
 
                 # ── CFL cap for current state; grow dt toward it ──────────
+                _t_a = _time.perf_counter()
                 dt_max_j, a_j = _compute_dt(U_jax)
                 dt = min(dt * _DT_GROW, float(dt_max_j))
+                _tm['dt'] += _time.perf_counter() - _t_a
 
                 if dt < _DT_MIN:
                     print(f"  dt collapsed to {dt:.2e} (< min {_DT_MIN:.2e}) — "
@@ -2021,8 +2125,11 @@ def fvm_euler_1d(x, t, parameters):
                 # ── Adaptive retry: halve dt on large increments ──────────
                 halvings = 0
                 for halvings in range(_MAX_HALVINGS + 1):
+                    _t_b = _time.perf_counter()
                     U_new, res_j = _stadtke_step(U_jax, jnp.float64(dt))
                     jax.block_until_ready(U_new)
+                    _t_c = _time.perf_counter()
+                    _tm['step'] += _t_c - _t_b
 
                     dp = float(jnp.max(jnp.abs(U_new[:, 0] - U_jax[:, 0])
                                        / (U_jax[:, 0] + 1e-10)))
@@ -2030,6 +2137,7 @@ def fvm_euler_1d(x, t, parameters):
                                        / (jnp.abs(U_jax[:, 2]) + 1e-10)))
                     du = float(jnp.max(jnp.abs(U_new[:, 1] - U_jax[:, 1])
                                        / (jnp.abs(U_jax[:, 1]) + a_j + 1e-10)))
+                    _tm['check'] += _time.perf_counter() - _t_c
 
                     if dp < _DP_MAX and dh < _DH_MAX and du < _DU_MAX:
                         break           # accepted
@@ -2053,8 +2161,9 @@ def fvm_euler_1d(x, t, parameters):
                           f"SSR={res:.3e}  [{halvings} halving(s), "
                           f"dp={dp:.2f} dh={dh:.2f} du={du:.2f}]", flush=True)
                 elif n < 10 or (n < 100 and n % 10 == 0) or n % 50 == 0:
-                    print(f"  Iter {n:5d}  t={t_phys:.3e}  dt={dt:.3e}  SSR={res:.3e}",
-                          flush=True)
+                    ms_iter = (_time.perf_counter() - t0) / n * 1e3
+                    print(f"  Iter {n:5d}  t={t_phys:.3e}  dt={dt:.3e}  SSR={res:.3e}  "
+                          f"({ms_iter:.1f} ms/iter)", flush=True)
 
         except KeyboardInterrupt:
             print("Interrupted — returning current solution.")
@@ -2070,7 +2179,14 @@ def fvm_euler_1d(x, t, parameters):
         else:
             reason = "plateau / max_iter"
         print(f"Done: {n_done} iterations ({reason}). "
-              f"SSR = {res_done:.3e}.  Computational time = {elapsed:.1f} s", flush=True)
+              f"SSR = {res_done:.3e}.  Computational time = {elapsed:.1f} s "
+              f"({elapsed / max(n_done, 1) * 1e3:.1f} ms/iter)", flush=True)
+        _nit = max(n_done, 1)
+        _other = elapsed - sum(_tm.values())
+        print(f"  per-iter breakdown:  compute_dt={_tm['dt']/_nit*1e3:7.1f} ms | "
+              f"newton_step={_tm['step']/_nit*1e3:7.1f} ms | "
+              f"accept_check={_tm['check']/_nit*1e3:7.1f} ms | "
+              f"other={_other/_nit*1e3:7.1f} ms", flush=True)
 
         U_np    = np.asarray(U_jax)
         Q_final = _puh_to_conservative(U_np, fluid)

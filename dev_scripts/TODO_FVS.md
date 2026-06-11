@@ -23,4 +23,17 @@
 
 ## Performance / architecture
 
+- [ ] **Colored (banded) Jacobian** — *main per-iteration bottleneck, measured 825 ms/iter at N=100, newton_iter=5*.
+      `jax.jacobian(_residual)` pushes one JVP per DOF (3·(N−2) ≈ 294 columns), each re-evaluating
+      the full residual EOS chain → O(N²) EOS work. The Jacobian is block-pentadiagonal
+      (MUSCL stencil = ±2 cells), so 15 colored seeds (5-cell stride × 3 vars) recover the
+      **exact same matrix** with 15 JVPs instead of 294 (~20× at N=100, ~200× at N=1000).
+      Keep the dense `jnp.linalg.solve` (294×294 LU ≈ 2 ms, negligible).
+      **CAVEAT — sparsity assumption**: coloring is exact ONLY while the residual stays local
+      (every residual row depends on cells within ±2). Holds today: MUSCL ±2 stencil; inlet ghost
+      = f(cells 1,2); outlet ghost = f(cells N−2,N−3). If anything non-local is ever added
+      (global integral constraint, wider stencil, BC depending on far cells, recursive filters),
+      the 5-cell stride is no longer valid → silent wrong Jacobian → slow/failed Newton.
+      Update the stride (or revert to full `jax.jacobian`) in that case.
+
 - [ ] **Full JIT outer loop**: replace Python `while/for/if/break/print` with `jax.lax.while_loop`, `jnp.where`, `jax.debug.print`, `jnp.roll` carry
