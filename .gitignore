@@ -37,3 +37,7 @@ Thumbs.db
 # HPC
 *.out
 *.err
+*.sh
+
+# Config files
+*.yaml

@@ -6,13 +6,13 @@ boundary_conditions:
   # p_out: 6000
 
 numerical_settings:
-  Nx: 240
+  Nx: 1000
   x1: 0.0
   x2: 0.2           # matches geometry L=0.2
   t1: 0.00
   t2: 100.0          # large — residual criterion will stop iteration first
-  CFL: 0.5         # keep small for shock capture; supersonic cases can use larger
-  max_iterations: 10000
+  CFL: 0.2         # keep small for shock capture; supersonic cases can use larger
+  max_iterations: 1000
   residuals: 1.0e-6
 
   flux_method: hllc  # ignored by fvs_newton, kept for completeness
@@ -23,7 +23,7 @@ numerical_settings:
 
   reconstruction: muscl_van_leer # muscl_van_leer | constant
   delta_factor: 1e-6    # global floor on eigenvalue smoothing; 1e-12 makes Jacobian blind at shock → dt collapse
-  newton_iter:  10    # Newton iterations per step (default 20; more = more accurate but slower compile)
+  newton_iter:  20    # Newton iterations per step (default 20; more = more accurate but slower compile)
 
   wall_friction: false  # frictionless — exact solution assumes inviscid
 
