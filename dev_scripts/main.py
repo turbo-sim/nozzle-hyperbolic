@@ -1,4 +1,7 @@
 # %%
+
+# Calculate dp and dh inside the jitted code
+
 import os
 os.environ.setdefault("XLA_FLAGS", "--xla_cpu_multi_thread_eigen=true")
 import jax
@@ -125,6 +128,8 @@ parameters = {
     "x_shock_fraction": float(case_data["numerical_settings"].get("x_shock_fraction", 0.75)),
     "delta_factor":    float(case_data["numerical_settings"].get("delta_factor", 0.1)),
     "newton_iter":     int(case_data["numerical_settings"].get("newton_iter", 20)),
+    "jacobian":         case_data["numerical_settings"].get("jacobian", "dense"),
+    "jacobian_validate": bool(case_data["numerical_settings"].get("jacobian_validate", False)),
     "warmup_cfg":      case_data["numerical_settings"].get("warmup", None),
     "nozzle_type":     nozzle_type,
     "wall_friction":   bool(case_data["numerical_settings"].get("wall_friction", True)),
@@ -183,7 +188,19 @@ print("Initialization done.")
 # plt.show()
 
 ## Solve
+# profile: true in numerical_settings → JAX device trace, viewable at
+# ui.perfetto.dev (drag in the .pb file) or `tensorboard --logdir jax_trace`
+profile_run = bool(case_data["numerical_settings"].get("profile", False))
+if profile_run:
+    trace_dir = str(out_dir / "jax_trace")
+    print(f"JAX profiler ON — trace → {trace_dir}")
+    jax.profiler.start_trace(trace_dir)
+
 Q, t = hyp.fvm_solver.fvm_euler_1d(x, t, parameters)
+
+if profile_run:
+    jax.profiler.stop_trace()
+    print(f"JAX trace saved → {trace_dir}")
 print(f"{parameters['space_method']} computed")
 
 ## Post-processing

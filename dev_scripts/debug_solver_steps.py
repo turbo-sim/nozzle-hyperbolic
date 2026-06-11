@@ -58,7 +58,7 @@ params = {"pT_stagnation": np.array([p_stag, T_stag]), "p_out": p_out,
 U0 = stadtke_puh_initialization_subsonic(x, A_nodes, params)
 
 dAdx_nodes = np.gradient(A_nodes, x)
-_step, _compute_dt = make_jax_stadtke_step(
+_step, _compute_dt, _jac_diff = make_jax_stadtke_step(
     fluid, A_nodes, A_face, dAdx_nodes,
     np.full(Nx, 2*np.sqrt(A_nodes/np.pi)),   # D_h
     0.0, dx, CFL, p_out, h0, s0,
