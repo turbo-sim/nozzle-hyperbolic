@@ -1963,7 +1963,19 @@ def make_jax_stadtke_step(fluid, A, A_face, dAdx, D_h, roughness, dx, CFL, p_out
 
         return U_new, ssr
 
-    return step, compute_dt, jac_diff
+    @jax.jit
+    def face_mass_flux(U):
+        """Quantity B — conserved face mass flux ṁ_j = A_face[j]·F̂_mass[j].
+        Uses the SAME MUSCL + BC + FVS path as the residual, so it is exactly
+        the mass flux the scheme conserves. Flat to ~machine precision at a
+        properly converged steady state. Input/returns: U (N,3) → (N-1,)."""
+        U = _bc_inlet(U)
+        U = _bc_outlet(U)
+        U_L, U_R = _muscl_ph(U) if recon != 'constant' else (U[:-1], U[1:])
+        F_hat    = _jax_F_fvs_stadtke(U_L, U_R, fluid, delta_factor)   # (N-1, 3)
+        return A_face * F_hat[:, 0]
+
+    return step, compute_dt, jac_diff, face_mass_flux
 
 
 # ---------------------------------------------------------------------------
@@ -2051,7 +2063,7 @@ def fvm_euler_1d(x, t, parameters):
         A_face = 0.5 * (A_nodes[:-1] + A_nodes[1:])
 
         jacobian_mode = parameters.get('jacobian', 'dense')
-        _stadtke_step, _compute_dt, _jac_diff = make_jax_stadtke_step(
+        _stadtke_step, _compute_dt, _jac_diff, _face_mass_flux = make_jax_stadtke_step(
             fluid, A_nodes, A_face, dAdx_nodes, D_hydraulic, roughness,
             dx, CFL, p_out, h0, s0, wall_friction=wall_friction,
             transmissive_bc=transmissive_bc, recon=recon,
@@ -2091,6 +2103,11 @@ def fvm_euler_1d(x, t, parameters):
         _DU_MAX = 0.20        # max |Δu|/(|u|+a) accepted per step
         _DT_GROW = 1.20       # dt growth factor after accepted step
         _DT_MIN  = dx / 1e12  # absolute floor: if dt collapses below this, stop
+        # adaptive_dt=False: take the full CFL-capped dt every step and accept
+        # unconditionally — no increment check, no halving (faster, but no safety
+        # net against divergence). True (default): adaptive halving as below.
+        adaptive_dt = parameters.get('adaptive_dt', True)
+        print(f"  Adaptive dt limiter: {adaptive_dt}", flush=True)
 
         n        = 0
         t_phys   = 0.0
@@ -2111,52 +2128,67 @@ def fvm_euler_1d(x, t, parameters):
                 if below_thr or plateau:
                     break
 
-                # ── CFL cap for current state; grow dt toward it ──────────
-                _t_a = _time.perf_counter()
-                dt_max_j, a_j = _compute_dt(U_jax)
-                dt = min(dt * _DT_GROW, float(dt_max_j))
-                _tm['dt'] += _time.perf_counter() - _t_a
+                if adaptive_dt:
+                    # ── CFL cap for current state; grow dt toward it ──────────
+                    _t_a = _time.perf_counter()
+                    dt_max_j, a_j = _compute_dt(U_jax)
+                    dt = min(dt * _DT_GROW, float(dt_max_j))
+                    _tm['dt'] += _time.perf_counter() - _t_a
 
-                if dt < _DT_MIN:
-                    print(f"  dt collapsed to {dt:.2e} (< min {_DT_MIN:.2e}) — "
-                          f"stopping at SSR={res:.3e}")
-                    break
+                    if dt < _DT_MIN:
+                        print(f"  dt collapsed to {dt:.2e} (< min {_DT_MIN:.2e}) — "
+                              f"stopping at SSR={res:.3e}")
+                        break
 
-                # ── Adaptive retry: halve dt on large increments ──────────
-                halvings = 0
-                for halvings in range(_MAX_HALVINGS + 1):
+                    # ── Adaptive retry: halve dt on large increments ──────────
+                    halvings = 0
+                    for halvings in range(_MAX_HALVINGS + 1):
+                        _t_b = _time.perf_counter()
+                        U_new, res_j = _stadtke_step(U_jax, jnp.float64(dt))
+                        jax.block_until_ready(U_new)
+                        _t_c = _time.perf_counter()
+                        _tm['step'] += _t_c - _t_b
+
+                        dp = float(jnp.max(jnp.abs(U_new[:, 0] - U_jax[:, 0])
+                                           / (U_jax[:, 0] + 1e-10)))
+                        dh = float(jnp.max(jnp.abs(U_new[:, 2] - U_jax[:, 2])
+                                           / (jnp.abs(U_jax[:, 2]) + 1e-10)))
+                        du = float(jnp.max(jnp.abs(U_new[:, 1] - U_jax[:, 1])
+                                           / (jnp.abs(U_jax[:, 1]) + a_j + 1e-10)))
+                        _tm['check'] += _time.perf_counter() - _t_c
+
+                        if dp < _DP_MAX and dh < _DH_MAX and du < _DU_MAX:
+                            break           # accepted
+                        if halvings < _MAX_HALVINGS:
+                            dt *= 0.5       # halve and retry
+
+                    # ── Advance ───────────────────────────────────────────────
+                    U_jax  = U_new
+                    if halvings >= _MAX_HALVINGS:
+                        # Newton stalled: dt is too small to trust the residual.
+                        # Inflate so the plateau/threshold checks can't fire.
+                        res = max(float(res_j), float(steady_thr) * 10)
+                    else:
+                        res = float(res_j)
+                else:
+                    # ── Limiter off: full CFL-capped dt, accept unconditionally ──
+                    _t_a = _time.perf_counter()
+                    dt_max_j, a_j = _compute_dt(U_jax)
+                    dt = float(dt_max_j)
+                    _tm['dt'] += _time.perf_counter() - _t_a
+
                     _t_b = _time.perf_counter()
                     U_new, res_j = _stadtke_step(U_jax, jnp.float64(dt))
                     jax.block_until_ready(U_new)
-                    _t_c = _time.perf_counter()
-                    _tm['step'] += _t_c - _t_b
+                    _tm['step'] += _time.perf_counter() - _t_b
 
-                    dp = float(jnp.max(jnp.abs(U_new[:, 0] - U_jax[:, 0])
-                                       / (U_jax[:, 0] + 1e-10)))
-                    dh = float(jnp.max(jnp.abs(U_new[:, 2] - U_jax[:, 2])
-                                       / (jnp.abs(U_jax[:, 2]) + 1e-10)))
-                    du = float(jnp.max(jnp.abs(U_new[:, 1] - U_jax[:, 1])
-                                       / (jnp.abs(U_jax[:, 1]) + a_j + 1e-10)))
-                    _tm['check'] += _time.perf_counter() - _t_c
-
-                    if dp < _DP_MAX and dh < _DH_MAX and du < _DU_MAX:
-                        break           # accepted
-                    if halvings < _MAX_HALVINGS:
-                        dt *= 0.5       # halve and retry
-
-                # ── Advance ───────────────────────────────────────────────
-                U_jax  = U_new
-                if halvings >= _MAX_HALVINGS:
-                    # Newton stalled: dt is too small to trust the residual.
-                    # Inflate so the plateau/threshold checks can't fire.
-                    res = max(float(res_j), float(steady_thr) * 10)
-                else:
-                    res = float(res_j)
+                    U_jax = U_new
+                    res   = float(res_j)
                 t_phys += dt
                 n      += 1
                 res_hist = res_hist[1:] + [res]
 
-                if halvings > 0:
+                if adaptive_dt and halvings > 0:
                     print(f"  Iter {n:5d}  t={t_phys:.3e}  dt={dt:.3e}  "
                           f"SSR={res:.3e}  [{halvings} halving(s), "
                           f"dp={dp:.2f} dh={dh:.2f} du={du:.2f}]", flush=True)
@@ -2188,7 +2220,34 @@ def fvm_euler_1d(x, t, parameters):
               f"accept_check={_tm['check']/_nit*1e3:7.1f} ms | "
               f"other={_other/_nit*1e3:7.1f} ms", flush=True)
 
-        U_np    = np.asarray(U_jax)
+        # ── Mass-flux conservation diagnostic (Quantity A vs B) ──────────────
+        # A = cell-centre ρuA (NOT conserved pointwise; smears at shocks)
+        # B = face FVS mass flux A_face·F̂_mass (the truly conserved quantity)
+        U_np   = np.asarray(U_jax)
+        st_c   = fluid.get_state(jxp.HmassP_INPUTS, U_jax[:, 2], U_jax[:, 0])
+        rho_c  = np.asarray(st_c["rho"])
+        mdotA  = rho_c * U_np[:, 1] * A_nodes                  # cell-centre (N,)
+        mA_int = mdotA[1:-1]
+        varA   = np.max(np.abs(mA_int - mA_int.mean())) / (abs(mA_int.mean()) + 1e-300)
+
+        mdotB  = np.asarray(_face_mass_flux(U_jax))            # face flux (N-1,)
+        mB_int = mdotB[1:-1]                                   # drop boundary faces
+        meanB  = mB_int.mean()
+        varB   = np.max(np.abs(mB_int - meanB)) / (abs(meanB) + 1e-300)
+        iB     = int(np.argmax(np.abs(mB_int - meanB))) + 1    # face index of worst dev
+        glob   = abs(mdotB[0] - mdotB[-1]) / (abs(mdotB[0]) + 1e-300)
+        print(f"  Mass flux  A (cell-centre, interior): max dev = {varA*100:.3f} %  "
+              f"[smears at shocks — NOT a conservation metric]", flush=True)
+        print(f"  Mass flux  B (face FVS flux, interior): max dev = {varB*100:.3e} %  "
+              f"at face {iB} (x≈{x[iB]:.4f})  |  inlet→outlet global = {glob*100:.3e} %",
+              flush=True)
+        if varB < 1e-6:
+            print("    → B is flat: scheme IS conservative; A's scatter is shock "
+                  "smearing (truncation), not a bug.", flush=True)
+        else:
+            print("    → B is NOT flat: real conservation issue — see "
+                  "mass_flow_diagnostic.md §4.", flush=True)
+
         Q_final = _puh_to_conservative(U_np, fluid)
 
         Q_out = np.zeros((N, Nj, 2))
