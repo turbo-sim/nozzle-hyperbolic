@@ -24,8 +24,8 @@ hyp.set_plot_options(grid=False)
 
 ## Read settings
 # with open("settings_shock_tube.yaml", 'r') as file:
-# with open("settings.yaml", 'r') as file:
-with open("settings_nozzle_validation.yaml", 'r') as file:
+with open("settings.yaml", 'r')    as file:
+# with open("settings_nozzle_validation.yaml", 'r') as file:
 # with open("settings_subsonic_pipe.yaml", 'r') as file:
     case_data = yaml.safe_load(file)
 
@@ -130,6 +130,7 @@ parameters = {
     "newton_iter":     int(case_data["numerical_settings"].get("newton_iter", 20)),
     "jacobian":         case_data["numerical_settings"].get("jacobian", "dense"),
     "jacobian_validate": bool(case_data["numerical_settings"].get("jacobian_validate", False)),
+    "adaptive_dt":      bool(case_data["numerical_settings"].get("adaptive_dt", True)),
     "warmup_cfg":      case_data["numerical_settings"].get("warmup", None),
     "nozzle_type":     nozzle_type,
     "wall_friction":   bool(case_data["numerical_settings"].get("wall_friction", True)),
