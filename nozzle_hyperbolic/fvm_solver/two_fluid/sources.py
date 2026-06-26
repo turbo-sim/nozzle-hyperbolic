@@ -54,6 +54,8 @@ class TwoFluidClosure(NamedTuple):
     h_ex     : jnp.ndarray  # enthalpy of transferred mass [J/kg]
     dlnA_dx  : jnp.ndarray  # (1/A) dA/dx — log area derivative [1/m]
 
+    # TODO: add heat fluxes among the phasees
+
 
 # ---------------------------------------------------------------------------
 # Closure helper
@@ -158,6 +160,8 @@ def two_fluid_closure(
     # Enthalpy of transferred mass: saturation enthalpy of appearing phase
     h_ex   = jnp.where(sigma_Mg >= 0.0, h_sat_g, h_sat_l)
 
+    # TODO: check the source terms implementation and compare it with nozzlex and with thee sources in Stadtke
+
     return TwoFluidClosure(
         sigma_Mg=sigma_Mg,
         sigma_Qg=Qvi,
@@ -249,13 +253,13 @@ def D_s_primitive(U_h, eos_g: PhaseProps, eos_l: PhaseProps,
 
     # ── Row 2: gas velocity (k → k*rho correction applied) ───────────────────
     Ds_2 = (rl / (ag * rh2) * (Fv_g + sigma_Mg * (u_ex - u_g))
-          - sigma_Mg * (k_rho * rg + al * (rl**2 - rg**2)) / (rg * rh2) * du
-          + (F_g * (rl + ag * k_rho) + F_l * ag * k_rho) / (ag * rh2))
+          - sigma_Mg * (k_rho * rg + al * (rl**2 - rg**2)) / (rg * rh2) * du)
+        #   + (F_g * (rl + ag * k_rho) + F_l * ag * k_rho) / (ag * rh2))
 
     # ── Row 3: liquid velocity (k → k*rho correction applied) ────────────────
     Ds_3 = (-rg / (al * rh2) * (Fv_g + sigma_Mg * (u_ex - u_l))
-           - sigma_Mg * (k_rho * rl + ag * (rg**2 - rl**2)) / (rl * rh2) * du
-           + (F_g * al * k_rho + F_l * (rg + al * k_rho)) / (al * rh2))
+           - sigma_Mg * (k_rho * rl + ag * (rg**2 - rl**2)) / (rl * rh2) * du)
+        #    + (F_g * al * k_rho + F_l * (rg + al * k_rho)) / (al * rh2))
 
     # ── Row 4: void fraction ─────────────────────────────────────────────────
     Ds_4 = (al * a0sq / (rho_s * al_sq) * Mg
@@ -293,6 +297,8 @@ def D_VE_conservative(U_h, eos_g: PhaseProps, eos_l: PhaseProps,
 
     rg  = eos_g.rho;  T_g = eos_g.T
     rl  = eos_l.rho;  T_l = eos_l.T
+
+    # TODO: where is D_h being assinged
 
     # Phi^{-1}: identity on rows 0-3; rows 4, 5 mix pressure row (D_s[0]) with entropy rows
     D_h = D_s.at[4].set(D_s[0] / rg + T_g * D_s[4])

@@ -49,6 +49,8 @@ def smoothed_sign(lam, eps):
 # FVS interface flux
 # ---------------------------------------------------------------------------
 
+# TODO: Is the flux calculation correct? 
+
 def fvs_interface_flux(U_h_L, U_h_R, fluid_g, fluid_l, k,
                        delta_factor=0.1):
     """
@@ -165,3 +167,5 @@ def nonconservative_correction(U_h_cell, dF,
     X_mat = X_matrix(U_h_cell, eos_g, eos_l, cq)
     y = jnp.linalg.solve(K_mat, dF)
     return X_mat @ y
+
+    # TODO: There should be the calculation of the invers matrix also in another  point. Recallit and check if the impelemnation is correct

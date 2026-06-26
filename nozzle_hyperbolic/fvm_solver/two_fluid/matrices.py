@@ -18,6 +18,9 @@ Virtual-mass coefficient k controls the magnitude of the non-conservative
 coupling.  Typical value k = 0.5 (added-mass coefficient for spheres).
 """
 
+
+# TODO: check matrixes with the derivation
+
 from typing import NamedTuple
 import jax.numpy as jnp
 import jaxprop as jxp
@@ -593,5 +596,6 @@ def eigenstructure(U_h, eos_g: PhaseProps, eos_l: PhaseProps,
     # D_5 = D_6 = 1 exactly (T_i * 1/T_i cancellation);
     # D_1, D_2 ~ du^2;  D_3, D_4 ~ rh2 * a^2
     D = jnp.diag(L_h @ R_h)
+    # TODO: do we need this matrix D?
 
     return eigvals, R_h, L_h, D
