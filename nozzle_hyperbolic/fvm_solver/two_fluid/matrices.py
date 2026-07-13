@@ -59,6 +59,14 @@ def phase_props(fluid, p, h) -> PhaseProps:
     """
     p_arr = jnp.expand_dims(p, 0)
     h_arr = jnp.expand_dims(h, 0)
+
+    # clip the calls to the limits of the tables.  An analytic EOS (FluidPerfectGas)
+    # carries no p/h bounds → getattr falls back to ±inf and the clip is a no-op.
+    p_arr = jnp.clip(p_arr, getattr(fluid, "p_min", -jnp.inf),
+                            getattr(fluid, "p_max",  jnp.inf))
+    h_arr = jnp.clip(h_arr, getattr(fluid, "h_min", -jnp.inf),
+                            getattr(fluid, "h_max",  jnp.inf))
+
     st    = fluid.get_state(jxp.HmassP_INPUTS, h_arr, p_arr)
     rho   = st["rho"][0]
     a     = st["a"][0]
@@ -352,12 +360,13 @@ def X_matrix(U_h, eos_g: PhaseProps, eos_l: PhaseProps, cq: CommonQty) -> jnp.nd
     k_rho_mix = rg_hat - rg
     X3p = ag * al * (rg - rl) * k_rho_mix / rh2
 
-    # Velocity-column entries of gas momentum row
-    X3g = -ag * al * du * rg * rg_hat / rh2
-    X3l = -ag * al * du * rg * rl_hat / rh2
-    # Liquid momentum row (velocity-column entries differ: rg↔rl)
-    X4g = -ag * al * du * rl * rg_hat / rh2
-    X4l = -ag * al * du * rl * rl_hat / rh2
+    # Velocity-column entries: X[gas_mom, u_i] = ag*rg*(G_uu - u_g),
+    # where G_uu - u_g = -al*du*rl*rg_hat/rh2  (rl comes from both terms in G_uu - u_g).
+    # Mixture momentum conservation forces X[liq_mom,:] = -X[gas_mom,:].
+    X3g = -ag * al * du * rg * rl * rg_hat / rh2
+    X3l = -ag * al * du * rg * rl * rl_hat / rh2
+    X4g = X3g
+    X4l = X3l
 
     # alpha_g column: ±p in momentum rows (derivation §11.2)
     # Void-row entries of G_h (needed for energy rows)

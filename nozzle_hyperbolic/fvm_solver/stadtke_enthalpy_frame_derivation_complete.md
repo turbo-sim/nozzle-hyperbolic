@@ -555,14 +555,15 @@ $\hat\varrho^2=\varrho_g\varrho_l+k\varrho^2$:
 
 $$\begin{aligned}
 X_{3p} &= \frac{\alpha_g\alpha_l k\varrho\,\Delta\varrho}{\hat\varrho^2}, \\[6pt]
-X_{3g} &= \frac{-\alpha_g\alpha_l\Delta u\,\varrho_g\hat\varrho_g}{\hat\varrho^2}, \\[6pt]
-X_{3l} &= \frac{-\alpha_g\alpha_l\Delta u\,\varrho_g\hat\varrho_l}{\hat\varrho^2}, \\[6pt]
-X_{4g} &= \frac{-\alpha_g\alpha_l\Delta u\,\varrho_l\hat\varrho_g}{\hat\varrho^2}, \\[6pt]
-X_{4l} &= \frac{-\alpha_g\alpha_l\Delta u\,\varrho_l\hat\varrho_l}{\hat\varrho^2}.
+X_{3g} &= \frac{-\alpha_g\alpha_l\Delta u\,\varrho_g\varrho_l\hat\varrho_g}{\hat\varrho^2}, \\[6pt]
+X_{3l} &= \frac{-\alpha_g\alpha_l\Delta u\,\varrho_g\varrho_l\hat\varrho_l}{\hat\varrho^2}, \\[6pt]
+X_{4g} &= X_{3g} = \frac{-\alpha_g\alpha_l\Delta u\,\varrho_g\varrho_l\hat\varrho_g}{\hat\varrho^2}, \\[6pt]
+X_{4l} &= X_{3l} = \frac{-\alpha_g\alpha_l\Delta u\,\varrho_g\varrho_l\hat\varrho_l}{\hat\varrho^2}.
 \end{aligned}$$
 
-Note $X_{3g}$ and $X_{4g}$ differ only in $\varrho_g\leftrightarrow\varrho_l$; likewise
-$X_{3l}$ and $X_{4l}$. The $\alpha_g$ column has the exact entries $\pm p$ in the momentum rows
+Note $X_{3g}=X_{4g}$ and $X_{3l}=X_{4l}$ exactly — both momentum rows carry the same
+$\varrho_g\varrho_l$ product, which is the signature of mixture momentum conservation
+(the gas and liquid momentum defects cancel identically). The $\alpha_g$ column has the exact entries $\pm p$ in the momentum rows
 and $\pm p G_{4\alpha}$ in the energy rows, with no further decomposition needed. The $G_{4,j}$
 entries for columns $p, u_g, u_l$ are read directly from row 4 of $G_h$ (§4.4):
 
@@ -576,8 +577,8 @@ G_{4\alpha} &= \alpha_l u_g\frac{\varrho_g}{\varrho_s}\frac{a_0^2}{a_l^2}
 
 Two structural checks are immediate from the matrix:
 
-- **Liquid row = minus gas row** (up to $\varrho_g\leftrightarrow\varrho_l$ in velocity
-  entries): $X_{3p}+X_{4p}=0$, $X_{3,\alpha_g}+X_{4,\alpha_g}=0$. The mixture momentum
+- **Liquid row = minus gas row** exactly: $X_{4p}=-X_{3p}$, $X_{4g}=-X_{3g}$,
+  $X_{4l}=-X_{3l}$, $X_{4,\alpha_g}=-X_{3,\alpha_g}$. The mixture momentum
   has zero non-conservative defect — momentum is conserved overall.
 - **Energy rows cost 4 multiplies each**: once $X_{3p},X_{3g},X_{3l}$ and
   $G_{4p},G_{4g},G_{4l},G_{4\alpha}$ are in registers, each energy row is four

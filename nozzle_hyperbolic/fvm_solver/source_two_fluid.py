@@ -12,7 +12,7 @@ def calculate_mass_transfer_lv(T_l, T_v, T_sat, htc_l, htc_v, A_i, h_sat_l, h_sa
     """
     # Eq. (4): m_dot = -[htc_l * ai * (Tsat - Tl) + htc_v * ai * (Tsat - Tv)] / (h_qs - h_ps)
     # Distribute the minus sign:
-    numerator = -htc_l * A_i * (T_sat - T_l) - htc_v * A_i * (T_sat - T_v)
+    # numerator = -htc_l * A_i * (T_sat - T_l) - htc_v * A_i * (T_sat - T_v)
 
     numerator = - Qvi - Qli
 
@@ -50,7 +50,8 @@ def calculate_drag_force_one_component(
 
     def _Cd_SN(rho_c, mu_c):
         Re = rho_c * u_rel_abs * d / jnp.maximum(mu_c, 1e-30)
-        return (24.0 / jnp.maximum(Re, 1e-12)) * (1.0 + 0.15 * Re**0.687)
+        Re_safe = jnp.maximum(Re, 1e-12)   # avoid 0**0.687 → ∞ gradient under jacfwd
+        return (24.0 / Re_safe) * (1.0 + 0.15 * Re_safe**0.687)
 
     prefactor = (3.0 / 4.0) / d * u_rel_abs * u_rel
 
@@ -220,9 +221,10 @@ def ranz_marshall_htc_two_fluid(
 
     # --- Re and Pr use continuous-phase properties ---
     Re = rho_c * jnp.abs(relative_velocity) * d_dispersed / mu_c
+    Re_safe = jnp.maximum(Re, 1e-12)   # avoid 0**0.5 → ∞ gradient under jacfwd
     Pr = cp_c * mu_c / k_c
 
-    Nu = 2.0 + 0.6 * Re**0.5 * Pr**(1.0 / 3.0)
+    Nu = 2.0 + 0.6 * Re_safe**0.5 * Pr**(1.0 / 3.0)
 
     htc = k_c * Nu / d_dispersed
 
