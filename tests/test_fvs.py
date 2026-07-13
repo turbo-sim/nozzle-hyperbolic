@@ -14,6 +14,8 @@ jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 
 from nozzle_hyperbolic.fvm_solver.fvm import _jax_F_fvs_stadtke, muscl_van_leer_ph
+from nozzle_hyperbolic.fvm_solver.two_fluid.flux import fvs_interface_flux
+from nozzle_hyperbolic.fvm_solver.two_fluid.solver import _apply_ramped_inlet
 
 
 # ---------------------------------------------------------------------------
@@ -217,6 +219,38 @@ def test_partition_unity(p, T, u):
     # atol=1e-9: at high u, K contains entries O(u²·H) which raise floating-point
     # errors in the solve; the identity still holds well within 1e-9.
     np.testing.assert_allclose(R_sum, np.eye(3), atol=1e-9)
+
+
+
+
+
+def test_lowmach_flux_dissipation():
+    """A small low-Mach dissipation blend should change the interface flux."""
+    U_h_L = jnp.array([1.0e5, 10.0, 10.0, 0.3, 3.0e5, 3.0e5], dtype=jnp.float64)
+    U_h_R = U_h_L + jnp.array([0.0, 0.1, -0.1, 0.0, 200.0, -200.0], dtype=jnp.float64)
+
+    F_base = fvs_interface_flux(U_h_L, U_h_R, _FLUID, _FLUID, 0.5, 1e-2, lowmach_diss=0.0)
+    F_stab = fvs_interface_flux(U_h_L, U_h_R, _FLUID, _FLUID, 0.5, 1e-2, lowmach_diss=0.2)
+
+    assert jnp.isfinite(F_stab).all()
+    assert not jnp.allclose(F_stab, F_base)
+
+
+def test_apply_ramped_inlet():
+    """The ramped inlet helper should blend the imposed ghost state into the first cells."""
+    U_h = jnp.array([
+        [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+        [10.0, 20.0, 30.0, 40.0, 50.0, 60.0],
+        [100.0, 200.0, 300.0, 400.0, 500.0, 600.0],
+        [1000.0, 2000.0, 3000.0, 4000.0, 5000.0, 6000.0],
+    ], dtype=jnp.float64)
+    U_h_bc = jnp.array([7.0, 8.0, 9.0, 10.0, 11.0, 12.0], dtype=jnp.float64)
+
+    U_h_new = _apply_ramped_inlet(U_h, U_h_bc, n_cells=3)
+
+    np.testing.assert_allclose(np.array(U_h_new[0]), np.array(U_h_bc))
+    np.testing.assert_allclose(np.array(U_h_new[1]), 0.5 * np.array(U_h[1]) + 0.5 * np.array(U_h_bc))
+    np.testing.assert_allclose(np.array(U_h_new[2]), np.array(U_h[2]))
 
 
 def test_uniform_flow():
