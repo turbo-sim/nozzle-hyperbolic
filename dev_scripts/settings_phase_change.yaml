@@ -1,0 +1,159 @@
+fluid:
+  name: water
+
+# ── EOS look-up tables ───────────────────────────────────────────────────────
+# Ranges match nozzlex demo_two_fluid_pipe.py (case "a", 120 bar flashing pipe):
+#   liquid : h [1.0e6, 1.8e6] J/kg,  p [5e6, 13e6] Pa,  metastable liquid
+#   vapor  : h [2.2e6, 3.4e6] J/kg,  p [5e6, 13e6] Pa,  metastable vapor
+eos:
+  gas:
+    backend: HEOS
+    h_min: 2200000.0    # J/kg  (2.2e6)
+    h_max: 3400000.0    # J/kg  (3.4e6)
+    p_min: 2000000.0    # Pa    (50 bar)
+    p_max: 18000000.0   # Pa    (130 bar)
+    N_h: 80
+    N_p: 80
+    N_p_sat: 150
+    table_dir: fluid_tables
+    metastable_phase: vapor
+    gradient_method: forward
+  liquid:
+    backend: HEOS
+    h_min: 800000.0    # J/kg  (1.0e6)
+    h_max: 1800000.0    # J/kg  (1.8e6)
+    p_min: 2000000.0    # Pa    (50 bar)
+    p_max: 18000000.0   # Pa    (130 bar)
+    N_h: 80
+    N_p: 80
+    N_p_sat: 150
+    table_dir: fluid_tables
+    metastable_phase: liquid   # extends into superheated-liquid (metastable) region
+    gradient_method: forward
+
+# ── Grid ─────────────────────────────────────────────────────────────────────
+grid:
+  Nx: 200
+  x1: 0.0      # m
+  x2: 1.0      # m   (pipe length = 1 m, same as demo)
+  radius: 0.01 # m   (legacy fallback; only used if the `geometry:` block below
+               #      is absent — the geometry block takes precedence)
+
+# ── Geometry ──────────────────────────────────────────────────────────────────
+# Same mechanism as the single-phase solver: `function` names a factory in
+# nozzle_hyperbolic/fvm_solver/geometry.py and the remaining keys are its kwargs.
+# Reuses the SAME geometry file — no new geometry needed for nozzle cases.
+#   get_pipe            : radius
+#   get_symmetric_nozzle: L, A_inlet, A_throat
+#   get_lettieri_nozzle : file_path, sheet_name, nozzle_type, width
+geometry:
+  function: get_pipe
+  roughness: 0.0
+  radius: 0.01
+  # ─ nozzle example (uncomment and comment the pipe keys above to switch) ─
+  # function: get_symmetric_nozzle
+  # roughness: 0.0
+  # L: 1.0
+  # A_inlet: 3.1416e-4    # pi * 0.01^2
+  # A_throat: 1.5708e-4   # half the inlet area
+
+# ── Initial condition ─────────────────────────────────────────────────────────
+# Same inlet state as nozzlex demo_two_fluid_pipe.py case "a":
+#   p        = 120 bar
+#   vapor    : saturated vapour       (h_g = h_sat_vap,  h_g_offset = 0)
+#   liquid   : 100 kJ/kg superheated  (h_l = h_sat_liq + 100 kJ/kg)  -> metastable
+#   alpha_g  = 0.1  (10 % vapour by volume)
+#   u_g,u_l  = 4.0 m/s  (both phases at the same inlet velocity)
+ic:
+  type: uniform          # uniform | riemann | nozzlex (space-marching-seeded)
+
+  uniform:
+    p:          12000000.0  # Pa  (120 bar)
+    alpha_g:    0.1         # 10 % vapour by volume
+    u_g:        100.0         # m/s
+    u_l:        100.0         # m/s
+    h_g_offset: 0.0         # J/kg — gas at saturation
+    h_l_offset: 100000.0    # J/kg — liquid 100 kJ/kg above sat. liquid (superheated)
+
+  # nozzlex-seeded IC: run the space-marching pipe solve (demo_pipe_nozzlex setup)
+  # and interpolate its relaxed profile onto the time-marching grid.  The nozzlex
+  # inlet matches the `uniform` inlet above (p, alpha_g, u_g/u_l, h_g=h_sat,
+  # h_l=h_sat+h_l_offset), so the inlet BC stays valid; only the interior changes.
+  nozzlex:
+    T0_in:  578.95          # inlet stagnation temperature [K] (demo case "a")
+    solver: Kvaerno5   # diffrax solver name, options: Tsit5 | Kvaerno3 | Dopri5 | ImplicitEuler
+    nsteps: 2000            # max IVP steps
+    n_eval: 200             # dense-output samples along the pipe before interp
+    Ma_in:  0.01            # nozzlex continuation Mach parameter
+    rtol:   1.0e-6
+    atol:   1.0e-6
+
+# ── Interphase-structure closure (TA-BD interfacial area) ─────────────────────
+# Match the demo: bubble_number = 1e10, droplet_number = 1e8.
+sources:
+  bubble_number:  1.0e10
+  droplet_number: 1.0e8
+
+# ── Numerical parameters ──────────────────────────────────────────────────────
+numerics:
+  CFL: 5.0
+  newton_iter: 8
+  delta_factor: 1e-6
+  recon: muscl_van_leer # muscl_van_leer | constant
+  k_vm: 0.5
+  jacobian: colored          # dense | colored (banded compression, ~2.3x faster/step)
+  jacobian_validate: false    # startup check: max|J_colored - J_dense| at a gradient state
+  profile: true              # startup per-step cost breakdown + loop dt/step timers
+  linear_solve: normal_eq           # lstsq (SVD) | normal_eq (Cholesky, fast but κ²) | qr (LQ min-norm, ~SVD accuracy, ~3-5x faster than SVD)
+  lowmach_diss: 1.0
+  eps_void: 0.1
+  nc_scale: 1.0
+# ── Boundary conditions ───────────────────────────────────────────────────────
+# Inlet:  total_state | static_state | subsonic_inflow | transmissive
+# Outlet: transmissive | pressure
+#
+# WELL-POSED SUBSONIC PIPE (recommended): inlet=subsonic_inflow + outlet=pressure
+#   subsonic_inflow: impose the 5 incoming characteristics (u_g,u_l,alpha_g,h_g,h_l)
+#                    from the IC inlet row; EXTRAPOLATE p (the 1 outgoing backward
+#                    acoustic).  Does NOT pin pressure — needs the outlet to anchor it.
+#   pressure       : impose back-pressure p_out (1 incoming char), extrapolate the
+#                    5 outgoing fields.  Anchors the pipe pressure level.
+#   Set p_out to the nozzlex OUTLET pressure so the inlet settles to ~120 bar.
+#
+# static_state: fixed static inlet (demo): pins ALL 6 vars incl. p — over-specifies
+#   the subsonic inflow by one characteristic (reflective) but is stable; good for
+#   validating the solver, not for a clean converged profile.
+bc:
+  inlet:  static   # total_state | static_state | subsonic_inflow | transmissive
+  outlet: transmissive          # transmissive | pressure
+  p_out:  11808888.60      # Pa — back-pressure (~120 bar: no friction/area ⇒ p nearly
+                            #      uniform; the small drop is from flashing acceleration).
+  p_out_relax: 1.0          # LODI outlet co-moves u with p (non-reflective), so 1.0 =
+                            # full back-pressure is fine; lower it only to soften the anchor.
+
+# ── Time-step control ─────────────────────────────────────────────────────────
+# Städtke-style automatic time-step control (see solver.py notes):
+#   adaptive_dt=true  -> grow dt toward the CFL cap, then HALVE-and-retry the step
+#                        while any primitive increment exceeds its threshold (or the
+#                        state goes NaN).  Mirrors the single-phase `adaptive_dt`.
+#   adaptive_dt=false -> take the full CFL-capped dt every step, accept
+#                        unconditionally (current fixed time-stepping).
+time_control:
+  adaptive_dt:  true
+  max_halvings: 8       # max halvings per step before accepting anyway
+  dp_max:       0.20    # max |Δp|/p        accepted per step
+  dh_max:       0.01    # max |Δh|/|h|      accepted per step
+  du_max:       0.20    # max |Δu|/(|u|+a)  accepted per step
+  da_max:       0.10    # max |Δα_g|        accepted per step (absolute)
+  dt_grow:      1.20    # dt growth factor after an accepted step
+
+# ── Run control ───────────────────────────────────────────────────────────────
+run:
+  n_steps: 10000           # hard maximum step count
+  print_every: 10         # print every N steps (first 10 always printed)
+  ssr_tol: 1.0e-8         # stop when SSR drops below this
+  t_end: null             # stop when physical time >= t_end (null = no limit)
+  plateau_window: 6000     # rolling-window length for plateau detection
+  plateau_ratio: 1.01     # declare plateau when max/min SSR in window < this
+  visualize_ic: false
+  debug_newton: false
