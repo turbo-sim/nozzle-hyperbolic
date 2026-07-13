@@ -1,0 +1,83 @@
+fluid:
+  name: Water
+
+# ── EOS look-up tables ───────────────────────────────────────────────────────
+# Gas table:    superheated vapor + metastable extension below sat line
+# Liquid table: compressed liquid + metastable extension above sat line
+eos:
+  gas:
+    backend: HEOS
+    h_min: 2000000.0    # J/kg  (2.0e6) - below sat. vapour at p_min
+    h_max: 3500000.0    # J/kg  (3.5e6) - superheated at p_max
+    p_min: 50000.0      # Pa    (0.5 bar)
+    p_max: 6000000.0    # Pa    (60 bar)
+    N_h: 80
+    N_p: 60
+    table_dir: fluid_tables
+    metastable_phase: vapor
+    gradient_method: forward
+  liquid:
+    backend: HEOS
+    h_min: 250000.0     # J/kg  (2.5e5) - subcooled at p_min
+    h_max: 1500000.0    # J/kg  (1.5e6) - above sat. liquid at p_max
+    p_min: 100000.0     # Pa    (1 bar)
+    p_max: 6000000.0    # Pa    (60 bar)
+    N_h: 80
+    N_p: 60
+    table_dir: fluid_tables
+    metastable_phase: liquid
+    gradient_method: forward
+
+# ── Grid ─────────────────────────────────────────────────────────────────────
+grid:
+  Nx: 50
+  x1: 0.0     # m
+  x2: 1.0     # m
+  radius: 0.01  # m
+
+# ── Initial condition ─────────────────────────────────────────────────────────
+# type: riemann  -> left state fully specified; right velocities computed from
+#                   mass-flux continuity (alpha*rho*u = const per phase)
+# type: uniform  -> spatially uniform state
+ic:
+  type: riemann
+
+  uniform:
+    p: 1000000.0    # Pa (10 bar)
+    alpha_g: 0.3
+    u_g: 5.0        # m/s
+    u_l: 2.0        # m/s
+
+  riemann:
+    x_discont: 0.5  # m - discontinuity location
+
+    left:
+      p: 1200000.0  # Pa (12 bar)
+      alpha_g: 0.4
+      u_g: 5.0      # m/s
+      u_l: 2.0      # m/s
+
+    right:
+      p: 800000.0   # Pa (8 bar)
+      alpha_g: 0.6
+      # u_g and u_l are NOT specified - computed in main from left mass fluxes
+      # G_g = alpha_g*rho_g*u_g and G_l = alpha_l*rho_l*u_l (continuity)
+
+# ── Numerical parameters ──────────────────────────────────────────────────────
+numerics:
+  CFL: 0.5
+  newton_iter: 6
+  delta_factor: 1e-6
+  recon: muscl_van_leer
+  k_vm: 0.5
+
+# ── Run control ───────────────────────────────────────────────────────────────
+run:
+  n_steps: 500          # hard maximum step count
+  print_every: 10       # print every N steps (first 10 always printed)
+  ssr_tol: 1.0e-6       # stop when SSR drops below this
+  t_end: null           # stop when physical time >= t_end (null = no limit)
+  plateau_window: 20    # rolling-window length for plateau detection
+  plateau_ratio: 1.5    # declare plateau when max/min SSR in window < this
+  visualize_ic: true
+  debug_newton: true

@@ -1,0 +1,176 @@
+# Two-fluid SINGLE-PHASE nozzle validation.
+#
+# Goal: verify sources.D_VE_area (quasi-1D area source) by driving a genuine
+# two-fluid setup in the single-phase limit and comparing the dominant phase
+# against the single-phase Städtke solver (dev_scripts/main.py).
+#
+#   gas    = Air   (dominant, compressible nozzle flow)   — NO metastable, NO sat props
+#   liquid = water (ghost, alpha≈1e-4, purely SUBCOOLED)  — NO metastable, NO sat props
+#
+# Both phases are ordinary single-phase EOS tables (metastable_phase omitted), so
+# neither has saturation properties — the driver runs the solver with
+# use_saturation=False and SRC_SCALE=0 (no drag/heat/mass), leaving ONLY the area
+# source active.
+#
+# Shared operating point ≈ 100 bar / 480 K so BOTH tables are valid and in-range:
+#   * water at 100 bar, 480 K is SUBCOOLED liquid (Tsat(100 bar) ≈ 584 K)
+#   * Air   at 100 bar, 480 K is supercritical gas
+# Fully subsonic converging–diverging nozzle (inlet M≈0.2) ⇒ existing BCs suffice
+# (subsonic_inflow + pressure); no new boundary conditions required.
+
+# fluid:
+#   name: Air          # global default; each eos section overrides per phase
+
+# eos:
+#   gas:               # ── Air (dominant gas phase), no metastable / no sat props ──
+#     fluid_name: Air
+#     backend: HEOS
+#     h_min: 300000.0    # J/kg
+#     h_max: 700000.0    # J/kg  (Air h ≈ 580 kJ/kg at 480 K)
+#     p_min: 2000000.0   # Pa   (20 bar)
+#     p_max: 15000000.0  # Pa   (150 bar)
+#     N_h: 80
+#     N_p: 80
+#     table_dir: fluid_tables
+#     gradient_method: forward
+#     # metastable_phase: (omitted ⇒ ordinary table, no saturation props)
+#   liquid:            # ── water (ghost phase), purely SUBCOOLED, no sat props ──
+#     fluid_name: water
+#     backend: HEOS
+#     h_min: 400000.0    # J/kg  (~95 °C subcooled liquid)
+#     h_max: 1200000.0   # J/kg  (~270 °C subcooled liquid)
+#     p_min: 2000000.0   # Pa   (20 bar)
+#     p_max: 15000000.0  # Pa   (150 bar)
+#     N_h: 80
+#     N_p: 80
+#     table_dir: fluid_tables
+#     gradient_method: forward
+#     # metastable_phase: (omitted ⇒ ordinary subcooled-liquid table, no sat props)
+
+fluid:
+  name: Air          # global default; each eos section overrides per phase
+
+eos:
+  gas:               # ── Air (dominant gas phase), no metastable / no sat props ──
+    fluid_name: Air
+    backend:   HEOS
+    h_min:     150000.0   # J/kg  →  covers exit at M≈2.2, T≈152 K
+    h_max:     500000.0   # J/kg  →  well above stagnation h≈400 kJ/kg at T0=300 K
+    p_min:     5000.0     # Pa    (below p_out)
+    p_max:     500000.0   # Pa    (above p0)
+    N_h:       100
+    N_p:       80
+    table_dir: fluid_tables
+    gradient_method: forward
+    # metastable_phase: (omitted ⇒ ordinary table, no saturation props)
+  liquid:            # ── water (ghost phase), purely SUBCOOLED, no sat props ──
+    fluid_name: water
+    backend:   HEOS
+    h_min:     150000.0   # J/kg  →  covers exit at M≈2.2, T≈152 K
+    h_max:     500000.0   # J/kg  →  well above stagnation h≈400 kJ/kg at T0=300 K
+    p_min:     5000.0     # Pa    (below p_out)
+    p_max:     500000.0   # Pa    (above p0)
+    N_h:       100
+    N_p:       80
+    table_dir: fluid_tables
+    gradient_method: forward
+    # metastable_phase: (omitted ⇒ ordinary subcooled-liquid table, no sat props)
+
+# ── Grid ─────────────────────────────────────────────────────────────────────
+grid:
+  Nx: 100
+  x1: 0.0
+  x2: 0.2
+  radius: 0.01        # legacy fallback (geometry block wins)
+
+# ── Geometry (same symmetric nozzle as settings_nozzle_validation.yaml) ────────
+geometry:
+  function: get_symmetric_nozzle
+  roughness: 0.0
+  L:        0.2       # nozzle length [m]
+  A_inlet:  0.30      # inlet/outlet area [m^2]  (A_inlet/A_throat = 2)
+  A_throat: 0.15      # throat area [m^2]
+
+# ── Interphase closure ────────────────────────────────────────────────────────
+sources:
+  bubble_number:  1.0e10
+  droplet_number: 1.0e8
+  # mass_transfer: false → two-component (Air gas + water ghost), NO phase change:
+  #   the closure gives drag + mutual heat only, assembled by D_VE_algebric_two_component
+  #   (no saturation needed).  Here it also slaves the ghost so its h_l can't blow up.
+  # Set true for a single-component case with phase change (needs saturation props).
+  mass_transfer: false
+
+# ── Numerics ──────────────────────────────────────────────────────────────────
+numerics:
+  CFL: 5.0
+  newton_iter: 7
+  delta_factor: 1e-6
+  recon: muscl_van_leer
+  k_vm: 0.5
+  jacobian: colored
+  jacobian_validate: false
+  profile: false
+  linear_solve: normal_eq
+
+# ── Initial / inlet condition ─────────────────────────────────────────────────
+# Inlet is specified by (p, T, u); the driver builds each phase's enthalpy from
+# (p, T) via the EOS (PT_INPUTS) — NOT a saturation offset.
+ic:
+  type: simple
+  uniform:
+    p:          200000.0   # Pa  — 100 bar (shared by both phases)
+    T_in:       300.0        # K   — subcooled water / supercritical air
+    alpha_g:    0.9999       # overridden by the driver's GHOST knob
+    u_g:        20.0         # m/s — inlet velocity (M≈0.2, a≈439 m/s)
+    u_l:        20.0         # m/s — ghost phase co-flows
+    h_g_offset: 0.0
+    h_l_offset: 0.0
+
+# ── Boundary conditions ───────────────────────────────────────────────────────
+# TESTING the new BCs on the known SUBSONIC case (they must reduce to the working
+# subsonic_inflow + pressure behaviour before we push to transonic):
+#   inlet  = stagnation    : extrapolate u_mix, impose quality+slip+H_g0/H_l0/s_g0,
+#                            derive alpha + velocity split, p from gas isentrope.
+#   outlet = characteristic: tanh(mixture Mach) blend; here M<1 everywhere so it
+#                            behaves as the LODI back-pressure (w≈1).
+# Stagnation p0 (from static 100 bar + M≈0.2) ≈ 102.8 bar, so p_out=100 bar drives
+# the same ~M0.2 subsonic flow (symmetric ⇒ exit ≈ inlet).
+bc:
+  inlet:  stagnation        # total-state reservoir inlet (stagnation-driven)
+  outlet: characteristic    # auto-switch subsonic(LODI p_out) <-> supersonic(extrap)
+
+  # ── Stagnation (reservoir) state — like the single-phase boundary_conditions,
+  #    extended for two phases.  The inlet imposes these + composition + slip and
+  #    lets the velocity/mass-flux emerge (so the nozzle can choke). ──
+  p0:            200000.0 # Pa — stagnation pressure (shared by both phases)
+  T_g0:          300.0       # K  — gas    stagnation temperature
+  T_l0:          300.0       # K  — liquid stagnation temperature
+  void_fraction: 0.9999    # alpha_g at inlet (ghost liquid);  OR set `quality:`
+  # quality:     0.9999882   #   gas mass fraction (overrides void_fraction if set)
+  slip:          1.0         # S = u_g/u_l  (free ratio; 1 = no-slip)
+
+  # ── Outlet ──
+  p_out:         18450.0 # 18560.0  # Pa — back-pressure (subsonic); ignored once supersonic
+  p_out_relax:   1.0
+
+# ── Time-step control ─────────────────────────────────────────────────────────
+time_control:
+  adaptive_dt:  true
+  max_halvings: 8
+  dp_max:       0.20
+  dh_max:       0.05
+  du_max:       0.20
+  da_max:       0.10
+  dt_grow:      1.20
+
+# ── Run control ───────────────────────────────────────────────────────────────
+run:
+  n_steps: 5000
+  print_every: 50
+  ssr_tol: 1.0e-8
+  t_end: null
+  plateau_window: 4000
+  plateau_ratio: 1.01
+  visualize_ic: true
+  debug_newton: false

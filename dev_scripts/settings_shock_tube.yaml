@@ -41,11 +41,11 @@ geometry:
 
 shock_tube:
   x_diaphragm: 0.5
-  p_L: 1.0e5            # Pa
-  T_L: 348.0            # K   → rho_L ≈ 1.0 kg/m³ for Air
+  p_L: 5.0e5            # Pa
+  T_L: 400.0            # K   → rho_L ≈ 1.0 kg/m³ for Air
   u_L: 0.1              # m/s — small nonzero (FVS singular at u=0); u_R computed as u_L*rho_L/rho_R
-  p_R: 1.0e4            # Pa
-  T_R: 278.0            # K   → rho_R ≈ 0.125 kg/m³ for Air
+  p_R: 1.0e5            # Pa
+  T_R: 300.0            # K   → rho_R ≈ 0.125 kg/m³ for Air
   # u_R is computed automatically for mass-flux continuity: rho_L*u_L = rho_R*u_R → u_R ≈ 0.8 m/s
 
 fluid:

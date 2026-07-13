@@ -1,0 +1,116 @@
+# Two-fluid SINGLE-PHASE-LIMIT nozzle test (Air), mirroring the single-phase
+# settings_nozzle_validation.yaml so the ghost-phase two-fluid result can be
+# overlaid against dev_scripts/main.py.
+#
+# Thermodynamics note: Air at ~300 K / 2 bar is a SUPERCRITICAL single gas (no
+# real liquid), so BOTH phases use an identical Air *vapor* table.  The ghost
+# phase is then just Air-gas at alpha=1e-4 — well defined — while the dominant
+# phase reproduces ordinary single-phase Air nozzle flow.
+#
+# Subsonic converging–diverging nozzle (NOT choked): inlet M≈0.2, throat M≈0.44,
+# exit M≈0.2 (symmetric).  Purpose: verify sources.D_VE_area (the quasi-1D
+# area-change source) in the single-phase limit.
+
+fluid:
+  name: Air
+
+eos:
+  gas:
+    backend: HEOS
+    h_min: 150000.0     # J/kg  (covers throat/exit static enthalpy)
+    h_max: 500000.0     # J/kg  (above stagnation h≈400 kJ/kg at T0=300 K)
+    p_min: 5000.0       # Pa
+    p_max: 500000.0     # Pa
+    N_h: 100
+    N_p: 80
+    N_p_sat: 120
+    table_dir: fluid_tables
+    metastable_phase: vapor
+    gradient_method: forward
+  liquid:                # identical Air-vapor table (ghost phase)
+    backend: HEOS
+    h_min: 150000.0
+    h_max: 500000.0
+    p_min: 5000.0
+    p_max: 500000.0
+    N_h: 100
+    N_p: 80
+    N_p_sat: 120
+    table_dir: fluid_tables
+    metastable_phase: vapor
+    gradient_method: forward
+
+# ── Grid ─────────────────────────────────────────────────────────────────────
+grid:
+  Nx: 150
+  x1: 0.0
+  x2: 0.2
+  radius: 0.01          # legacy fallback (unused: geometry block below wins)
+
+# ── Geometry (same symmetric nozzle as settings_nozzle_validation.yaml) ────────
+geometry:
+  function: get_symmetric_nozzle
+  roughness: 0.0
+  L:        0.2         # nozzle length [m]
+  A_inlet:  0.30        # inlet/outlet area [m^2]  (A_inlet/A_throat = 2)
+  A_throat: 0.15        # throat area [m^2]
+
+# ── Interphase closure (unused here: SRC_SCALE=0 in the driver) ────────────────
+sources:
+  bubble_number:  1.0e10
+  droplet_number: 1.0e8
+
+# ── Numerics ──────────────────────────────────────────────────────────────────
+numerics:
+  CFL: 5.0
+  newton_iter: 5
+  delta_factor: 1e-6
+  recon: muscl_van_leer
+  k_vm: 0.5
+  jacobian: colored
+  jacobian_validate: false
+  profile: false
+  linear_solve: normal_eq
+
+# ── Initial / inlet condition ─────────────────────────────────────────────────
+# Nozzle inlet is specified by (p, T, u) — the driver builds h from (p, T) via
+# the EOS (PT_INPUTS), NOT via a saturation offset.  T_in / u_g / u_l below are
+# read by the single-phase-limit driver directly.
+ic:
+  type: uniform
+  uniform:
+    p:          194400.0   # Pa  — inlet static pressure (≈2 bar stagnation, M≈0.2)
+    T_in:       297.6      # K   — inlet static temperature (driver builds h from p,T)
+    alpha_g:    0.9999     # overridden by the driver's GHOST knob
+    u_g:        69.2       # m/s — inlet velocity (M≈0.2, a≈346 m/s)
+    u_l:        69.2       # m/s — ghost phase co-flows
+    h_g_offset: 0.0
+    h_l_offset: 0.0
+
+# ── Boundary conditions ───────────────────────────────────────────────────────
+bc:
+  inlet:  subsonic_inflow   # impose u_g,u_l,alpha,h_g,h_l; extrapolate p
+  outlet: pressure          # anchor exit pressure (symmetric ⇒ ≈ inlet p)
+  p_out:  194400.0          # Pa  — subsonic exit (no shock, fully subsonic)
+  p_out_relax: 1.0
+
+# ── Time-step control ─────────────────────────────────────────────────────────
+time_control:
+  adaptive_dt:  true
+  max_halvings: 8
+  dp_max:       0.20
+  dh_max:       0.05
+  du_max:       0.20
+  da_max:       0.10
+  dt_grow:      1.20
+
+# ── Run control ───────────────────────────────────────────────────────────────
+run:
+  n_steps: 20000
+  print_every: 50
+  ssr_tol: 1.0e-8
+  t_end: null
+  plateau_window: 4000
+  plateau_ratio: 1.01
+  visualize_ic: false
+  debug_newton: false

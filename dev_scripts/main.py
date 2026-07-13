@@ -19,17 +19,21 @@ import numpy as np
 import matplotlib.pyplot as plt
 import nozzle_hyperbolic as hyp
 import jaxprop as jxp
+import shutil
 
 hyp.set_plot_options(grid=False)
 
+SETTINGS_YAML = "settings_nozzle_validation.yaml"
+
 ## Read settings
 # with open("settings_shock_tube.yaml", 'r') as file:
-with open("settings.yaml", 'r')    as file:
-# with open("settings_nozzle_validation.yaml", 'r') as file:
+# with open("settings.yaml", 'r')    as file:
+with open(SETTINGS_YAML, 'r') as file:
 # with open("settings_subsonic_pipe.yaml", 'r') as file:
     case_data = yaml.safe_load(file)
 
 hyp.print_dict(case_data)
+
 
 ## Output directory
 _geo_fn   = case_data.get('geometry', {}).get('function', 'nozzle')
@@ -38,6 +42,13 @@ run_name = (
     f"{case_data['numerical_settings']['flux_method']}_"
     f"N{case_data['numerical_settings']['Nx']}"
 )
+_here = pathlib.Path(__file__).parent
+out_dir   = _here / "results" / run_name
+out_dir.mkdir(parents=True, exist_ok=True)
+shutil.copy(_here / SETTINGS_YAML, out_dir / SETTINGS_YAML)
+print(f"Output directory: {out_dir.resolve()}")
+
+
 out_dir  = pathlib.Path(run_name)
 out_dir.mkdir(parents=True, exist_ok=True)
 print(f"Output directory: {out_dir.resolve()}")

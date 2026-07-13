@@ -1,0 +1,138 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# LIQUID-DOMINANT low-speed validation: two-fluid solver vs analytic Bernoulli.
+#
+# Goal
+# ----
+# Validate the two-fluid Städtke FVS solver in the LOW-SPEED LIQUID (flashing-inlet)
+# regime by collapsing it to the single-phase incompressible limit and comparing to
+# the ANALYTIC Bernoulli profile:
+#     u_l(x) = u_in·A_in/A(x)   (mass),   p(x) = p0 − ½ρ_l u_l²   (Bernoulli).
+# The ghost-limit solution must reproduce this to O(Ma²).
+#
+#   liquid = water  (DOMINANT, alpha_l ≈ 1 − 1e-4, subcooled)   — FluidBicubic table
+#   gas    = Air    (GHOST,    alpha_g ≈ 1e-4)                  — PERFECT GAS (analytic)
+#
+# Why a perfect-gas ghost: it is analytic and UNBOUNDED — no EOS table to
+# extrapolate off of → the startup overshoot / dt-collapse failure mode is
+# structurally impossible.  At alpha_g ≈ 1e-4 the ghost EOS is thermodynamically
+# irrelevant to the water answer, so its accuracy does not matter — only robustness.
+# (No saturation props → only usable with mass_transfer=False, which is this case.)
+#
+# ►►► DRIVER KNOB (not in this YAML): for the CLEAN ghost-limit test set
+#     SRC_SCALE = 0.0  at the top of main_two_fluid_single_phase.py so ONLY the
+#     area source acts (no interphase drag/heat).  Single-phase has no interphase
+#     closure, so sources-OFF is the only apples-to-apples comparison.  AREA_SRC
+#     stays True (the quasi-1D wall-pressure term under test).
+# ─────────────────────────────────────────────────────────────────────────────
+
+fluid:
+  name: water        # global default; each eos section overrides per phase
+
+eos:
+  # ── GHOST gas: analytic perfect gas (no table, no bounds, explosion-proof) ──
+  gas:
+    fluid_name: Air
+    backend: perfect_gas        # → jxp.FluidPerfectGas (config_loader dispatches)
+    T_ref: 300.0                # constants fit at this reference state …
+    p_ref: 2000000.0            # … near the operating point (2 MPa, 300 K)
+  # ── DOMINANT liquid: real subcooled water table ──
+  liquid:
+    fluid_name: water
+    backend: HEOS
+    h_min: 1000.0     # J/kg   (water at ~2 MPa, 295 K subcooled → h ≈ 90 kJ/kg)
+    h_max: 140000.0   # J/kg
+    p_min: 10000.0    # Pa
+    p_max: 6000000.0  # Pa  (60 bar — well above the tiny Bernoulli dip)
+    N_h: 145
+    N_p: 200
+    table_dir: fluid_tables
+    gradient_method: forward
+    # metastable_phase omitted ⇒ ordinary subcooled-liquid table, no sat props.
+
+# ── Grid ─────────────────────────────────────────────────────────────────────
+grid:
+  Nx: 300
+  x1: 0.0
+  x2: 0.31
+  radius: 0.01        # legacy fallback (geometry block wins)
+
+# ── Geometry (same symmetric Elliot nozzle) ──────────────────────────────────
+geometry:
+  function: get_nozzle_elliot
+  roughness: 0.0
+
+# ── Interphase closure ────────────────────────────────────────────────────────
+sources:
+  bubble_number:  1.0e13
+  droplet_number: 1.0e11
+  mass_transfer: false          # two-component, NO phase change (perfect-gas ghost)
+
+# ── Numerics ──────────────────────────────────────────────────────────────────
+numerics:
+  CFL: 5.0
+  newton_iter: 5
+  delta_factor: 1e-6
+  recon: muscl_van_leer
+  k_vm: 0.5
+  jacobian: colored
+  jacobian_validate: true
+  profile: false
+  # LIQUID-DOMINANT ⇒ nearly incompressible ⇒ ρa² ~ 2e9 (vs gas ~3e6).  normal_eq
+  # forms J·Jᵀ (squares κ) and OVERFLOWS here — MUST use lstsq (SVD min-norm) or qr.
+  linear_solve: normal_eq
+  # First-baseline choice: full acoustic dissipation (checkerboard-free but over-
+  # dissipative at low Ma).  The Bernoulli target is SMOOTH, so consistent
+  # dissipation vanishes at steady state → the converged profile is still exact.
+  # Drop toward 0.0 later (with eps_void) to test the low-Mach checkerboard.
+  lowmach_diss: 1.0
+  nc_scale: 1.0
+  # 4th-order JST void filter (velocity-gated).  Everything here is low-velocity
+  # (u ~ 1–few m/s) so the gate is effectively fully ON — fine for a first run.
+  eps_void: 0.02
+  eps_void_ucut:   40.0
+  eps_void_uwidth: 12.0
+  eps_void_scale:  frozen
+
+# ── Initial / inlet condition ─────────────────────────────────────────────────
+ic:
+  type: bernoulli               # analytic incompressible cold-start (bernoulli_ic.py)
+  u_in: 1.0                     # m/s — dominant (liquid) inlet velocity (Ma ~ 7e-4)
+
+# ── Boundary conditions ───────────────────────────────────────────────────────
+# Reservoir inlet + back-pressure outlet.  For the symmetric Elliot nozzle the
+# exit area ≈ inlet area ⇒ u_exit ≈ u_in, so the consistent back-pressure is
+# p_out = p0 − ½ρ_l u_in²  (≈ 2 MPa − 500 Pa).  The IC and BCs then agree and the
+# transient should merely relax onto the analytic Bernoulli profile.
+bc:
+  inlet: stagnation
+  outlet: characteristic
+
+  p0:            2000000.0      # Pa — reservoir (stagnation) pressure
+  T_g0:          300.0          # K  — gas    stagnation temperature
+  T_l0:          300.0          # K  — liquid stagnation temperature
+  void_fraction: 1.0e-4         # alpha_g ≈ 1e-4 ⇒ LIQUID dominant (dom='liquid')
+  slip:          1.0            # S = u_g/u_l = 1 (no slip)
+
+  p_out:         1999500.0      # Pa ≈ p0 − ½ρ_l u_in² (ρ_l≈998, u_in=1 → ~500 Pa dip)
+  p_out_relax:   1.0
+
+# ── Time-step control ─────────────────────────────────────────────────────────
+time_control:
+  adaptive_dt:  true
+  max_halvings: 8
+  dp_max:       0.20
+  dh_max:       0.05
+  du_max:       0.20
+  da_max:       0.10
+  dt_grow:      1.20
+
+# ── Run control ───────────────────────────────────────────────────────────────
+run:
+  n_steps: 5000
+  print_every: 50
+  ssr_tol: 1.0e-6
+  t_end: null
+  plateau_window: 4000
+  plateau_ratio: 1.01
+  visualize_ic: false           # set true to eyeball the Bernoulli IC before solving
+  debug_newton: false

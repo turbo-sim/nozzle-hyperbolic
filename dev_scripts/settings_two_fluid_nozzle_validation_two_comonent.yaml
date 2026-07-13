@@ -1,0 +1,199 @@
+# Two-fluid two-component nozzle validation.
+#
+# Goal: Goal here is to simulate cases with water (liquid) - nitrogen (gas) to test cases
+# that has no mass transfer but only heat transfer and friction across the phases. Important
+# write new source terms witout mass transfer and without 
+#
+#   gas    = Air   (dominant, compressible nozzle flow)   — NO metastable, NO sat props
+#   liquid = water (ghost, alpha≈1e-4, purely SUBCOOLED)  — NO metastable, NO sat props
+#
+# Both phases are ordinary single-phase EOS tables (metastable_phase omitted), so
+# neither has saturation properties — the driver runs the solver with
+# use_saturation=False and SRC_SCALE=0 (no drag/heat/mass), leaving ONLY the area
+# source active.
+#
+# Shared operating point ≈ 100 bar / 480 K so BOTH tables are valid and in-range:
+#   * water at 100 bar, 480 K is SUBCOOLED liquid (Tsat(100 bar) ≈ 584 K)
+#   * Air   at 100 bar, 480 K is supercritical gas
+# Fully subsonic converging–diverging nozzle (inlet M≈0.2) ⇒ existing BCs suffice
+# (subsonic_inflow + pressure); no new boundary conditions required.
+
+fluid:
+  name: Air          # global default; each eos section overrides per phase
+
+eos:
+  gas:               
+    fluid_name: nitrogen
+    backend: HEOS
+    # Bounds WIDENED (2026-07-09): startup overshot to ~37.7 bar > old p_max=30 bar
+    # → EOS extrapolation → projection non-finite → runaway p → dt collapse. p_max
+    # 30→60 bar (3× p0); h widened (gas cools while expanding) so transients stay in-table.
+    h_min: 50000.0    # J/kg
+    h_max: 400000.0   # J/kg
+    p_min: 10000.0   # Pa
+    p_max: 6000000.0  # Pa  (60 bar, was 30)
+    N_h: 145
+    N_p: 200
+    table_dir: fluid_tables
+    gradient_method: forward
+    # metastable_phase: (omitted ⇒ ordinary table, no saturation props)
+  liquid:
+    fluid_name: water
+    backend: HEOS
+    # p_max widened 30→60 bar to match the gas (shared p); liquid h barely moves.
+    h_min: 1000.0    # J/kg
+    h_max: 140000.0   # J/kg
+    p_min: 10000.0   # Pa
+    p_max: 6000000.0  # Pa  (60 bar, was 30)
+    N_h: 145
+    N_p: 200
+    table_dir: fluid_tables
+    gradient_method: forward
+    # metastable_phase: (omitted ⇒ ordinary subcooled-liquid table, no sat props)
+
+# ── Grid ─────────────────────────────────────────────────────────────────────
+grid:
+  Nx: 100
+  x1: 0.0
+  x2: 0.31
+  radius: 0.01        # legacy fallback (geometry block wins)
+
+# ── Geometry (same symmetric nozzle as settings_nozzle_validation.yaml) ────────
+geometry:
+  function: get_nozzle_elliot
+  roughness: 0.0
+
+# ── Interphase closure ────────────────────────────────────────────────────────
+sources:
+  bubble_number:  1.0e13
+  droplet_number: 1.0e11
+  # mass_transfer: false → two-component (Air gas + water ghost), NO phase change:
+  #   the closure gives drag + mutual heat only, assembled by D_VE_algebric_two_component
+  #   (no saturation needed).  Here it also slaves the ghost so its h_l can't blow up.
+  # Set true for a single-component case with phase change (needs saturation props).
+  mass_transfer: false
+
+# ── Numerics ──────────────────────────────────────────────────────────────────
+numerics:
+  CFL: 5.0
+  newton_iter: 5
+  delta_factor: 1e-6
+  recon: muscl_van_leer
+  k_vm: 0.5
+  jacobian: colored
+  jacobian_validate: false   # confirm colored==dense with the widened ±2 filter stencil
+  profile: false
+  # normal_eq forms J·Jᵀ → squares κ(J); fine for a soft gas-dominant block but
+  # blows up here (water dominant, nearly incompressible → ρa²~2e9 vs gas ~3e6,
+  # κ² overflows → NaN, dt-independent).  lstsq (SVD min-norm) does NOT square κ.
+  # Try 'qr' for same accuracy at ~3-5× the speed once it runs.
+  linear_solve: normal_eq
+  # Low-Mach acoustic-dissipation floor:  z_ac = clip(Ma_face, lowmach_diss, 1).
+  #   1.0 = full standard dissipation (checkerboard-free test / baseline)
+  #   0.0 = z_ac=Ma (reduces pressure diffusion at low Ma → checkerboard grows)
+  lowmach_diss: 0.5
+  # DIAGNOSTIC: non-conservative H^nc correction scale. 1.0 = physical (on),
+  # 0.0 = OFF → tests whether the NC coupling is pumping the alpha checkerboard.
+  nc_scale: 1.0
+  # 4th-order (JST) background filter on the void/alpha 2Δx checkerboard.
+  # 0.0 = off.  Conservative flux, scaled by spectral radius (non-vanishing at
+  # low Ma).  4th-order → smooth solution perturbed only at O(eps_void·dx^3):
+  # sweep 0.05→0.5 and confirm the profile is ε-independent (only noise changes).
+  # NOTE: with eps_void_scale='frozen' the scale is ~12× larger than 'wood', so this
+  # 0.017 ≈ 0.2 × (a_s/max(a_g,a_l)) matches the AVERAGE strength of the wood-0.2 run
+  # → a fair A/B (any improvement = the non-dip, not just more dissipation).  Sweep up
+  # from here (0.017→0.03→0.05) if the du/h_g checkerboard needs more.
+  eps_void: 0.05
+  # LOW-VELOCITY GATE for the void filter: phase-velocity cutoff u0 [m/s]
+  # (null → ungated / uniform, as before).  The filter is weighted by
+  # ½(1+tanh((u0−u_mat)/Δu)) with u_mat=min(|u_g|,|u_l|), so it acts ONLY in the
+  # low-velocity inlet region (where the material-wave dissipation vanishes) and is
+  # OFF at the throat (full high-order accuracy there).  Gates on VELOCITY, not Mach
+  # (a_mix is the α-dependent Wood speed → bad denominator).  For this case u_mat
+  # runs ~3 m/s (inlet) → ~93 m/s (throat); u0=15, Δu=5 covers the inlet noise and
+  # is fully off by x~0.1.  eps_void_uwidth null → solver uses u0/3.
+  eps_void_ucut:   40.0
+  eps_void_uwidth: 12.0
+  # FILTER-STRENGTH scale.  'wood' (default): scale = model mixture eigenvalue
+  # |u_mix|+a_s, which DIPS at α≈0.5 → the filter self-weakens where the slip/void
+  # checkerboard peaks.  'frozen': non-dipping |u_mix|+max(a_g,a_l) from the single-
+  # phase sound speeds → damping magnitude ~constant in α (fluxes/CFL unchanged).
+  # Switching to 'frozen' makes the scale ~10-30× larger, so RETUNE eps_void DOWN
+  # (start ~0.2 × a_s/max(a_g,a_l) ≈ a few e-3 .. 1e-2) when you flip it.
+  eps_void_scale:  wood
+  # ZERO-SLIP FLUX BLEND window [m/s].  The full-branch flux inverts a matrix whose
+  # void-wave columns go PARALLEL as du→0 (κ~1/du) → NOISY in a ring around every slip
+  # sign-change → the 2Δx checkerboard localized at du zero-crossings (clean between).
+  # Blend: zero-slip branch for |du|<lo, accurate full branch for |du|>hi, C¹ cosine
+  # in between.  This is the ROOT-CAUSE fix (the old hard switch was |du|<1e-4, far too
+  # tight).  Widen [lo,hi] on coarser meshes (du changes more per cell) so the blend
+  # still spans a few cells; shrink toward the physical slip on fine meshes.
+  du_blend_lo: 0.01
+  du_blend_hi: 0.10
+
+# ── Initial / inlet condition ─────────────────────────────────────────────────
+# Inlet is specified by (p, T, u); the driver builds each phase's enthalpy from
+# (p, T) via the EOS (PT_INPUTS) — NOT a saturation offset.
+# ic:
+#   type: nozzlex
+#   pickle: results/solution_elliot_subsonic_20.0bar_mr68_nb1.00e+13_nd1.00e+11_u1_1.0.pkl
+ic:
+  type: nozzlex
+  pickle: results/smoothed_restart.pkl
+
+  # uniform:
+  #   p:          200000.0   # Pa  — 100 bar (shared by both phases)
+  #   T_in:       300.0        # K   — subcooled water / supercritical air
+  #   alpha_g:    0.9999       # overridden by the driver's GHOST knob
+  #   u_g:        20.0         # m/s — inlet velocity (M≈0.2, a≈439 m/s)
+  #   u_l:        20.0         # m/s — ghost phase co-flows
+  #   h_g_offset: 0.0
+  #   h_l_offset: 0.0
+
+# ── Boundary conditions ───────────────────────────────────────────────────────
+# TESTING the new BCs on the known SUBSONIC case (they must reduce to the working
+# subsonic_inflow + pressure behaviour before we push to transonic):
+#   inlet  = stagnation    : extrapolate u_mix, impose quality+slip+H_g0/H_l0/s_g0,
+#                            derive alpha + velocity split, p from gas isentrope.
+#   outlet = characteristic: tanh(mixture Mach) blend; here M<1 everywhere so it
+#                            behaves as the LODI back-pressure (w≈1).
+# Stagnation p0 (from static 100 bar + M≈0.2) ≈ 102.8 bar, so p_out=100 bar drives
+# the same ~M0.2 subsonic flow (symmetric ⇒ exit ≈ inlet).
+bc:
+  inlet: stagnation        # total-state reservoir inlet (stagnation-driven)
+  outlet: characteristic    # auto-switch subsonic(LODI p_out) <-> supersonic(extrap)
+
+  # ── Stagnation (reservoir) state — like the single-phase boundary_conditions,
+  #    extended for two phases.  The inlet imposes these + composition + slip and
+  #    lets the velocity/mass-flux emerge (so the nozzle can choke). ──
+  p0:            2000000.0 # Pa — stagnation pressure (shared by both phases)
+  T_g0:          295.15      # K  — gas    stagnation temperature
+  T_l0:          295.15       # K  — liquid stagnation temperature
+  # void_fraction: 0.9999    # alpha_g at inlet (ghost liquid);  OR set `quality:`
+  quality:       0.01449275   #   gas mass fraction (overrides void_fraction if set)
+  slip:          1.0         # S = u_g/u_l  (free ratio; 1 = no-slip)
+
+  # ── Outlet ──
+  p_out:         1980000.0 # 1980000  98600.0 # 18560.0  # Pa — back-pressure (subsonic); ignored once supersonic
+  p_out_relax:   1.0
+
+# ── Time-step control ─────────────────────────────────────────────────────────
+time_control:
+  adaptive_dt:  true
+  max_halvings: 8
+  dp_max:       0.20
+  dh_max:       0.05
+  du_max:       0.20
+  da_max:       0.10
+  dt_grow:      1.20
+
+# ── Run control ───────────────────────────────────────────────────────────────
+run:
+  n_steps: 10000
+  print_every: 50
+  ssr_tol: 1.0e-6
+  t_end: null
+  plateau_window: 4000
+  plateau_ratio: 1.01
+  visualize_ic: false
+  debug_newton: false
