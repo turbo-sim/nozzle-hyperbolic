@@ -40,4 +40,12 @@ Thumbs.db
 *.sh
 
 # Config files
-*.yaml
+# *.yaml
+
+# debugging files
+debug_*
+check_*
+
+# results folders
+results/
+results_old/
