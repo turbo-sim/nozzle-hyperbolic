@@ -32,7 +32,7 @@ from .matrices import (
     flux_vector,
 )
 from .flux import fvs_interface_flux, nonconservative_correction
-from .sources import D_s_primitive, D_VE_conservative
+from .sources import D_s_primitive, D_VE_conservative, D_VE_algebric
 from .solver import (
     make_two_fluid_step,
     V_from_W, U_h_from_W, U_h_from_W_batch,
@@ -46,7 +46,7 @@ __all__ = [
     "G_h_matrix", "Phi_inv_matrix", "J_matrix", "K_matrix", "X_matrix",
     "eigenstructure", "flux_vector",
     "fvs_interface_flux", "nonconservative_correction",
-    "D_s_primitive", "D_VE_conservative",
+    "D_s_primitive", "D_VE_conservative", "D_VE_algebric",
     "make_two_fluid_step",
     "V_from_W", "U_h_from_W", "U_h_from_W_batch", "W_from_U_h_batch",
 ]
