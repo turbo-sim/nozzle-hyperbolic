@@ -64,6 +64,53 @@ class TwoFluidClosure(NamedTuple):
 # Closure helper
 # ---------------------------------------------------------------------------
 
+def evaporation_weight(h_l, T_l, h_sat_l, T_sat, ag, gate_dT=0.5, gate_dh=2.0e3,
+                       dh_gate=1.0, dT_gate=0.001):
+    """Evaporation-gate weight in [0, 1] — liquid superheat OR appreciable α.
+
+    w → 1 where the liquid is superheated (h AND T criteria), w → 0 where
+    subcooled.  Single source of truth shared by the mass-transfer closure
+    (σ gate) and the solver's ghost-vapor ENERGY pin (pin weight = 1 − w): the
+    pin releases exactly where evaporation switches on, so the gate can never
+    prevent flashing from starting.
+
+    α-AVAILABILITY CLAUSE (`| ag > 5e-2`): w is ALSO forced to 1 once the vapor
+    is physically real (α > 5%), regardless of liquid superheat.  This
+    deliberately breaks the older "liquid quantities only" rule, and it is the
+    fix for the shock-condensation case flagged in TODO_two_phase.md: with a
+    pure superheat gate, a recompression shock re-subcools the liquid at α~0.5
+    and would RE-PIN genuinely real vapor to h_sat — i.e. force equilibrium
+    condensation.  Keyed on α, a real phase is never pinned.
+
+    Safe w.r.t. the solver's NO-DEADLOCK invariant: the clause only WIDENS the
+    w=1 (evaporation-on / pin-off) region, never narrows it, so nothing in the
+    α-growth chain can be gated off by it.
+
+    SIDE EFFECT to be aware of: σ_Mg is likewise ungated wherever α > 5%, so in
+    a subcooled region with real vapor the closure now returns σ < 0 — the
+    CONDENSATION branch is active there (intended for shocks; it was previously
+    suppressed by the evaporation-only choice).
+    """
+    # BINARY on/off gate (2026-07-21 A/B, nozzlex parity): hard switch on the
+    # same h-AND-T criterion.  Flips BOTH the σ gate and the ghost pin weight
+    # (1−w) together — pre-onset: σ=0 & fully pinned; post-onset: σ on & free.
+    # Watch for: (a) per-cell flicker in time at the moving front (add
+    # hysteresis if seen, don't go back to the blend silently), (b) Newton
+    # Jacobian sees zero derivative across the switch (pin removes the fragile
+    # h_g dof, expected harmless).
+    # NOTE the parentheses around (ag > ...): in Python `&`/`|` bind TIGHTER than
+    # `>`, so `A & B | ag > 5e-2` parses as `((A & B) | ag) > 5e-2` → bitwise-OR
+    # of a bool array with the float64 α (TypeError under JAX).
+    return jnp.where((h_l > h_sat_l + dh_gate) & (T_l > T_sat + dT_gate)
+                     | (ag > 5e-2),
+                     1.0, 0.0)
+    # SMOOTH C¹ version (WORKING baseline 2026-07-21 — full-physics steady
+    # state, SSR 3.4e-6; kept for revert if the binary gate flickers):
+    # _sig = lambda z: 0.5 * (1.0 + jnp.tanh(z))
+    # return _sig(jnp.minimum((h_l - h_sat_l - dh_gate) / gate_dh,
+    #                         (T_l - T_sat   - dT_gate) / gate_dT))
+
+
 def two_fluid_closure(
     U_h,
     eos_g: PhaseProps,
@@ -83,6 +130,12 @@ def two_fluid_closure(
     alpha_b=0.3,           # TA-BD transition void fractions
     alpha_d=0.7,
     mass_transfer=True,
+    gate_dT= 1e-3, # 0.5,           # smooth-gate temperature width [K].  NOTE 2026-07-21:
+                           # widening to 2.0 K (onset spread ~4-8 cells) was
+                           # PROBED and is NEGATIVE — died EARLIER (step 292 vs
+                           # 386, dt collapse at t=5.9e-4 vs 1.55e-3 s).  The
+                           # front-cell blow-up is not a σ(x) sharpness problem.
+    gate_dh= 0.5 #2.0e3,         # smooth-gate enthalpy width [J/kg]  (~cp_l·gate_dT)
 ) -> TwoFluidClosure:
     """
     Assemble a TwoFluidClosure from state + saturation properties.
@@ -131,20 +184,50 @@ def two_fluid_closure(
     # Replaces the old `is_two_phase = True` override, which forced mass transfer
     # even at saturation and let a superheated VAPOUR spuriously drive evaporation.
     if mass_transfer == True:
-        dh_gate       = 1.0e0   # J/kg
-        dT_gate       = 0.001    # K
-        can_evaporate = (h_l > h_sat_l + dh_gate) & (T_l > T_sat + dT_gate)
-        can_condense  = (h_g < h_sat_g - dh_gate) & (T_g < T_sat - dT_gate)
-        is_two_phase  = can_evaporate | can_condense
+        # SMOOTH C¹ gate (2026-07-21) — replaces the binary lax.cond gate.
+        # The binary gate is a checkerboard PUMP at the flashing front: with
+        # mK/J-scale deadbands, neighbouring cells straddle the threshold and
+        # σ_Mg flips full-on/off (even evap/cond) cell-to-cell — measured 76%
+        # 2Δx oscillation in σ_Mg itself at the blow-up.  Worse, lax.cond has
+        # ZERO derivative across the branch switch, so the implicit Newton's
+        # Jacobian cannot see the source activating and overshoots into the
+        # flip every step.  Same physics and the same h-AND-T conservatism,
+        # expressed as sigmoid weights over the LEAST-activated of the two
+        # criteria (smooth AND); the two directions combine as a smooth OR.
+        # Widths gate_dT/gate_dh set the transition scale; the old deadbands
+        # (dh_gate, dT_gate) remain as the sigmoid centres, covering the
+        # table/saturation inconsistency (test_T0).  As widths → 0 this
+        # recovers the binary gate exactly.
+        # OLD binary gate (kept for reference / quick revert):
+        # can_evaporate = (h_l > h_sat_l + dh_gate) & (T_l > T_sat + dT_gate)
+        # can_condense  = (h_g < h_sat_g - dh_gate) & (T_g < T_sat - dT_gate)
+        # is_two_phase  = can_evaporate | can_condense
+        # Shared helper — SAME weight the solver's ghost-vapor pin uses as 1−w.
+        w_evap  = evaporation_weight(h_l, T_l, h_sat_l, T_sat, ag, 
+                                     gate_dT=gate_dT, gate_dh=gate_dh)
+        # EVAPORATION-ONLY (2026-07-21, nozzlex parity) — nozzlex gates with
+        # is_two_phase = (hl >= h_sat_l) & (Tl >= Tsat): NO condensation branch.
+        # Our condensation weight half-opens AT the saturation line, so the
+        # subcooled pre-flashing ghost (h_g ≈ h_sat_g, T_g ≈ T_sat) was DRAINED
+        # by σ<0 onto the α clip floor; the non-conservative clip then fights
+        # the source every step — measured as the u_g/h_g 2Δx pump pinned on
+        # the floor plateau cells at flashing onset (x≈0.08, α=1e-3 exactly,
+        # u_g=-5.7 m/s between +199 m/s neighbours).  nozzlex's implied σ in
+        # that region is EXACTLY 0; ours was −100..−470 kg/(m³s).
+        # w_cond = _sig(jnp.minimum((h_sat_g - h_g - dh_gate) / gate_dh,
+        #                           (T_sat   - T_g - dT_gate) / gate_dT))
+        # w_mt   = 1.0 - (1.0 - w_evap) * (1.0 - w_cond)   # smooth OR
+        w_mt    = w_evap
         # ── Extended EOS for transport properties (mu, k, cp) ───────────────────
         p_arr  = jnp.expand_dims(p, 0)
 
-        # getattr(..., ±inf) → an analytic EOS (FluidPerfectGas) has no bounds → no clip.
-        p_arr = jnp.clip(p_arr, getattr(fluid_l, "p_min", -jnp.inf), getattr(fluid_l, "p_max", jnp.inf))
-        p_arr = jnp.clip(p_arr, getattr(fluid_g, "p_min", -jnp.inf), getattr(fluid_g, "p_max", jnp.inf))
+        # analytic EOS (FluidPerfectGas) has no bounds → PHYSICAL floors, not ±inf
+        # (p<0 → rho<0 → sqrt NaN; observed 2026-07-14 Bernoulli ghost case).
+        p_arr = jnp.clip(p_arr, getattr(fluid_l, "p_min", 1e2), getattr(fluid_l, "p_max", 1e9))
+        p_arr = jnp.clip(p_arr, getattr(fluid_g, "p_min", 1e2), getattr(fluid_g, "p_max", 1e9))
 
-        h_g = jnp.clip(jnp.expand_dims(h_g, 0), getattr(fluid_g, "h_min", -jnp.inf), getattr(fluid_g, "h_max", jnp.inf))
-        h_l = jnp.clip(jnp.expand_dims(h_l, 0), getattr(fluid_l, "h_min", -jnp.inf), getattr(fluid_l, "h_max", jnp.inf))
+        h_g = jnp.clip(jnp.expand_dims(h_g, 0), getattr(fluid_g, "h_min", 1e3), getattr(fluid_g, "h_max", 5e6))
+        h_l = jnp.clip(jnp.expand_dims(h_l, 0), getattr(fluid_l, "h_min", 1e3), getattr(fluid_l, "h_max", 5e6))
 
         stg_ex = fluid_g.get_state(jxp.HmassP_INPUTS, h_g, p_arr)
         stl_ex = fluid_l.get_state(jxp.HmassP_INPUTS, h_l, p_arr)
@@ -174,7 +257,7 @@ def two_fluid_closure(
         #     du_abs, d,
         # )
 
-        Nu_g = 12
+        Nu_g = 120
         htc_g = (k_g * Nu_g) / d
 
         htc_l = ranz_marshall_htc_two_fluid(
@@ -197,37 +280,50 @@ def two_fluid_closure(
         #     h_sat_l, h_sat_g, h_l, h_g, Qvi, Qli,
         # )
 
-        def _source_terms_two_phase(_args):
-            _Tl, _Tv, _Tsat, _ht_l, _ht_v, _Ai, _h_sat_l, _h_sat_v, _hl, _hv = _args
-            _Qvi = _ht_v * _Ai * (_Tsat - _Tv)
-            _Qli = _ht_l * _Ai * (_Tsat - _Tl)
-            _m_dot_lv = calculate_mass_transfer_lv(
-                _Tl, _Tv, _Tsat, _ht_l, _ht_v, _Ai, _h_sat_l, _h_sat_v, _hl, _hv, _Qvi, _Qli,
-            )
+        # ── OLD binary dispatch (kept for reference / quick revert) ──────────
+        # def _source_terms_two_phase(_args):
+        #     _Tl, _Tv, _Tsat, _ht_l, _ht_v, _Ai, _h_sat_l, _h_sat_v, _hl, _hv = _args
+        #     _Qvi = _ht_v * _Ai * (_Tsat - _Tv)
+        #     _Qli = _ht_l * _Ai * (_Tsat - _Tl)
+        #     _m_dot_lv = calculate_mass_transfer_lv(
+        #         _Tl, _Tv, _Tsat, _ht_l, _ht_v, _Ai, _h_sat_l, _h_sat_v, _hl, _hv, _Qvi, _Qli,
+        #     )
+        #     return _Qvi, _Qli, _m_dot_lv
+        #
+        # def _source_terms_single_phase(_args):
+        #     return (0.0, 0.0, 0.0)
+        #
+        # Qvi, Qli, sigma_Mg = jax.lax.cond(
+        #     is_two_phase,
+        #     _source_terms_two_phase,
+        #     _source_terms_single_phase,
+        #     (T_l, T_g, T_sat, htc_l, htc_g, ai, h_sat_l, h_sat_g, h_l, h_g),
+        # )
 
-
-            return _Qvi, _Qli, _m_dot_lv 
-
-        def _source_terms_single_phase(_args):
-            return (0.0, 0.0, 0.0)
-
-        Qvi, Qli, sigma_Mg = jax.lax.cond(
-            is_two_phase,
-            _source_terms_two_phase,
-            _source_terms_single_phase,
-            (T_l, T_g, T_sat, htc_l, htc_g, ai, h_sat_l, h_sat_g, h_l, h_g),
+        # Always evaluate, then scale ALL THREE interfacial exchanges by the
+        # SAME smooth weight — this keeps the interface energy balance
+        # σ_Mg = -(Qvi+Qli)/(h_sat_g - h_sat_l) exact at every gate level
+        # (scaling σ alone would create/destroy interfacial energy).
+        _Qvi = htc_g * ai * (T_sat - T_g)
+        _Qli = htc_l * ai * (T_sat - T_l)
+        _sMg = calculate_mass_transfer_lv(
+            T_l, T_g, T_sat, htc_l, htc_g, ai, h_sat_l, h_sat_g, h_l, h_g, _Qvi, _Qli,
         )
+        Qvi      = w_mt * _Qvi
+        Qli      = w_mt * _Qli
+        sigma_Mg = w_mt * _sMg
     else:     # No mass transfer, just heat and drag
 
         # ── Extended EOS for transport properties (mu, k, cp) ───────────────────
         p_arr  = jnp.expand_dims(p, 0)
 
-        # getattr(..., ±inf) → an analytic EOS (FluidPerfectGas) has no bounds → no clip.
-        p_arr = jnp.clip(p_arr, getattr(fluid_l, "p_min", -jnp.inf), getattr(fluid_l, "p_max", jnp.inf))
-        p_arr = jnp.clip(p_arr, getattr(fluid_g, "p_min", -jnp.inf), getattr(fluid_g, "p_max", jnp.inf))
+        # analytic EOS (FluidPerfectGas) has no bounds → PHYSICAL floors, not ±inf
+        # (p<0 → rho<0 → sqrt NaN; observed 2026-07-14 Bernoulli ghost case).
+        p_arr = jnp.clip(p_arr, getattr(fluid_l, "p_min", 1e2), getattr(fluid_l, "p_max", 1e9))
+        p_arr = jnp.clip(p_arr, getattr(fluid_g, "p_min", 1e2), getattr(fluid_g, "p_max", 1e9))
 
-        h_g = jnp.clip(jnp.expand_dims(h_g, 0), getattr(fluid_g, "h_min", -jnp.inf), getattr(fluid_g, "h_max", jnp.inf))
-        h_l = jnp.clip(jnp.expand_dims(h_l, 0), getattr(fluid_l, "h_min", -jnp.inf), getattr(fluid_l, "h_max", jnp.inf))
+        h_g = jnp.clip(jnp.expand_dims(h_g, 0), getattr(fluid_g, "h_min", 1e3), getattr(fluid_g, "h_max", 5e6))
+        h_l = jnp.clip(jnp.expand_dims(h_l, 0), getattr(fluid_l, "h_min", 1e3), getattr(fluid_l, "h_max", 5e6))
 
         stg_ex = fluid_g.get_state(jxp.HmassP_INPUTS, h_g, p_arr)
         stl_ex = fluid_l.get_state(jxp.HmassP_INPUTS, h_l, p_arr)

@@ -61,11 +61,13 @@ def phase_props(fluid, p, h) -> PhaseProps:
     h_arr = jnp.expand_dims(h, 0)
 
     # clip the calls to the limits of the tables.  An analytic EOS (FluidPerfectGas)
-    # carries no p/h bounds → getattr falls back to ±inf and the clip is a no-op.
-    p_arr = jnp.clip(p_arr, getattr(fluid, "p_min", -jnp.inf),
-                            getattr(fluid, "p_max",  jnp.inf))
-    h_arr = jnp.clip(h_arr, getattr(fluid, "h_min", -jnp.inf),
-                            getattr(fluid, "h_max",  jnp.inf))
+    # carries no p/h bounds → fall back to PHYSICAL floors, not ±inf: a Newton
+    # overshoot to p<0 gives rho=p/RT<0 → sqrt(Wood compliance) = NaN and kills
+    # the run (observed 2026-07-14, Bernoulli ghost case).
+    p_arr = jnp.clip(p_arr, getattr(fluid, "p_min", 1e2),
+                            getattr(fluid, "p_max", 1e9))
+    h_arr = jnp.clip(h_arr, getattr(fluid, "h_min", 1e3),
+                            getattr(fluid, "h_max", 5e6))
 
     st    = fluid.get_state(jxp.HmassP_INPUTS, h_arr, p_arr)
     rho   = st["rho"][0]

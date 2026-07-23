@@ -1613,7 +1613,8 @@ def _puh_to_conservative(U, fluid):
 def make_jax_stadtke_step(fluid, A, A_face, dAdx, D_h, roughness, dx, CFL, p_out, h0, s0,
                            delta_factor=0.05, newton_iter=20, wall_friction=True,
                            transmissive_bc=False, recon='muscl_van_leer',
-                           jacobian_mode='dense'):
+                           jacobian_mode='dense',
+                           eps_filter=0.0, eps_filter_ucut=None, eps_filter_uwidth=None):
     """
     Build a @jax.jit step function implementing the Städtke Newton implicit scheme.
 
@@ -1842,6 +1843,31 @@ def make_jax_stadtke_step(fluid, A, A_face, dAdx, D_h, roughness, dx, CFL, p_out
 
         # Source: area variation + wall friction — momentum only (theory §7.3)
         st_U  = fluid.get_state(jxp.HmassP_INPUTS, U[:, 2], U[:, 0])
+
+        # ── 4th-order (JST-type) background filter — port of the two-fluid
+        #    eps_void filter (two_fluid/solver.py), 2026-07-14 ─────────────────
+        # Cures the low-Mach PRESSURE odd-even (2Δx) decoupling: at Ma ≪ 1 the
+        # FVS leaves a p-checkerboard mode undamped (proven by the two-fluid
+        # eigen-analysis: raw operator has unstable p-2Δx modes, the 4th-order
+        # filter takes them to 0 unstable).  Conservative flux (telescopes →
+        # mass/momentum/energy exactly conserved), scaled by the local spectral
+        # radius |u|+a; 4th-order ⇒ perturbs the smooth solution only at
+        # O(eps·Δx³) — verify ε-independence.  eps_filter=0 → identically OFF
+        # (default; behaviour unchanged).  Optional velocity gate as in the
+        # two-fluid filter: w = ½(1+tanh((u0−|u|)/Δu)) turns it off above
+        # eps_filter_ucut [m/s] (None → ungated/uniform).
+        if eps_filter > 0.0:
+            lam_c  = jnp.abs(U[:, 1]) + st_U["a"]              # (N,) |u| + a
+            r_face = 0.5 * (lam_c[:-1] + lam_c[1:])            # (N-1,)
+            if eps_filter_ucut is not None:
+                _u0 = jnp.float64(eps_filter_ucut)
+                _du = jnp.float64(eps_filter_uwidth if eps_filter_uwidth is not None
+                                  else eps_filter_ucut / 3.0)
+                w_c    = 0.5 * (1.0 + jnp.tanh((_u0 - jnp.abs(U[:, 1])) / _du))
+                r_face = r_face * 0.5 * (w_c[:-1] + w_c[1:])
+            third  = (V_new[3:] - 3.0 * V_new[2:-1]
+                      + 3.0 * V_new[1:-2] - V_new[:-3])        # (N-3,3): faces 1..N-3
+            F_hat  = F_hat.at[1:-1].add(eps_filter * r_face[1:-1, None] * third)
         rho_U = st_U["rho"]
         mu_U  = st_U["mu"]
         Re    = rho_U * jnp.abs(U[:, 1]) * D_h_j / jnp.maximum(mu_U, 1e-12)
@@ -1872,7 +1898,9 @@ def make_jax_stadtke_step(fluid, A, A_face, dAdx, D_h, roughness, dx, CFL, p_out
     # cells (local BCs, local stencil).  Any non-local term (global constraint,
     # wider stencil, BC reading far cells) breaks it → wrong Jacobian.  The
     # startup `jacobian_validate` check (max|J_colored - J_dense|) is the guard.
-    _stencil_width = 1 if recon == 'constant' else 2
+    # eps_filter>0 adds a ±2-cell 4th-order stencil → widen the band even for
+    # constant recon so the colored Jacobian stays exact (guard: jacobian_validate).
+    _stencil_width = 1 if (recon == 'constant' and eps_filter == 0.0) else 2
     _cell_stride   = 2 * _stencil_width + 1          # cells between same-color columns
     _stride        = 3 * _cell_stride                # DOF stride (3 vars/cell)
     _m_dof         = 3 * (N - 2)                      # total interior DOFs
@@ -2062,15 +2090,40 @@ def fvm_euler_1d(x, t, parameters):
 
         A_face = 0.5 * (A_nodes[:-1] + A_nodes[1:])
 
+        # ── WELL-BALANCED area gradient (2026-07-13, same fix as two-fluid) ────
+        # The flux divergence uses FACE areas Δ(A_face·F̂); the wall-pressure
+        # source p·dAdx/A used the ANALYTIC geo.dAdx.  Discretely dAdx_i·dx ≠
+        # (A_{i+1/2}−A_{i-1/2}) wherever A(x) is curved, so a SMOOTH state cannot
+        # zero the steady residual → the solver absorbs the mismatch as a 2Δx
+        # wiggle near the steepest area change (the low-Ma near-throat sawtooth /
+        # SSR plateau).  Face-consistent gradient → the source cancels the
+        # smooth-flow flux divergence EXACTLY (still 2nd-order accurate).
+        # Invariant to preserve: dAdx·dx ≡ ΔA_face with the SAME A_face the
+        # flux uses.  (Root cause + probes: memory nozzle_hyperbolic_slip_
+        # crossing_instability.md; two-fluid fix in main_two_fluid_single_phase.py.)
+        dAdx_nodes = np.asarray(dAdx_nodes, dtype=float).copy()
+        dAdx_nodes[1:-1] = (A_face[1:] - A_face[:-1]) / dx
+
         jacobian_mode = parameters.get('jacobian', 'dense')
+        # 4th-order JST filter for the low-Mach p-checkerboard (0.0 = OFF,
+        # identical to previous behaviour).  eps_filter ~0.05 typical; optional
+        # velocity gate eps_filter_ucut/uwidth [m/s] as in the two-fluid solver.
+        _eps_filter = float(parameters.get('eps_filter', 0.0))
+        _ef_ucut    = parameters.get('eps_filter_ucut', None)
+        _ef_uwidth  = parameters.get('eps_filter_uwidth', None)
         _stadtke_step, _compute_dt, _jac_diff, _face_mass_flux = make_jax_stadtke_step(
             fluid, A_nodes, A_face, dAdx_nodes, D_hydraulic, roughness,
             dx, CFL, p_out, h0, s0, wall_friction=wall_friction,
             transmissive_bc=transmissive_bc, recon=recon,
             delta_factor=parameters.get('delta_factor', 0.1),
             newton_iter=parameters.get('newton_iter', 20),
-            jacobian_mode=jacobian_mode)
-        print(f"  Jacobian mode: {jacobian_mode}", flush=True)
+            jacobian_mode=jacobian_mode,
+            eps_filter=_eps_filter,
+            eps_filter_ucut=None if _ef_ucut in (None, "", "none") else float(_ef_ucut),
+            eps_filter_uwidth=None if _ef_uwidth in (None, "", "none") else float(_ef_uwidth))
+        print(f"  Jacobian mode: {jacobian_mode}   eps_filter={_eps_filter}"
+              + (f" (ucut={_ef_ucut})" if _ef_ucut not in (None, "", "none") else ""),
+              flush=True)
 
         U_jax = jnp.asarray(U0, dtype=jnp.float64)
 

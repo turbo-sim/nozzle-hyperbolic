@@ -47,7 +47,8 @@ from .matrices import (
     K_matrix, X_matrix, eigenstructure,
 )
 from .flux import fvs_interface_flux, nonconservative_correction
-from .sources import TwoFluidClosure, D_VE_conservative, D_VE_algebric_two_component
+from .sources import (TwoFluidClosure, D_VE_conservative,
+                      D_VE_algebric_two_component, evaporation_weight)
 
 # Void-fraction floor: α_g is hard-clipped to (ε, 1-ε) in the projection and after
 # each Newton update to guard the EOS lookups and keep both phases realizable.
@@ -130,11 +131,17 @@ def make_two_fluid_step(
     recon='muscl_van_leer',
     sources_fn=None,
     lowmach_diss=0.0,
+    lowmach_diss_bc=None,
     nc_scale=1.0,
     eps_void=0.0,
     eps_void_ucut=None,
     eps_void_uwidth=None,
     eps_void_scale='wood',
+    eps_ghost=0.0,
+    eps_ghost_acut=3e-3,
+    eps_ghost_awidth=0.25,
+    eps_ghost_k2=0.0,
+    eps_ghost_alo=1e-5,
     du_blend_lo=1e-2,
     du_blend_hi=1e-1,
     debug_newton=False,
@@ -147,14 +154,28 @@ def make_two_fluid_step(
     H_l0=None,
     alpha_g0=None,
     s_g0=None,
+    s_l0=None,
+    dom_phase='gas',
+    iso_h=None,
+    iso_p=None,
     quality=None,
     slip=None,
     U_h_inlet=None,
     p_out=None,
     p_out_relax=1.0,
     eos_project=True,
+    proj_s_ref=2e-2,
+    eos_rows=False,
+    eos_rows_banded=False,
+    jac_lag=1,
+    nc_form='cell',
     use_saturation=True,
+    w_char=None,
+    ssr_mode='all',
     return_debug=False,
+    alpha_eps=_ALPHA_EPS,
+    pin_ghost=False,
+    pin_ghost_momentum=False,
 ):
     """
     Build @jax.jit step and compute_dt functions for Städtke's two-fluid system.
@@ -170,7 +191,9 @@ def make_two_fluid_step(
     k       : virtual-mass coefficient
     delta_factor : Harten entropy-fix fraction
     newton_iter  : Newton iterations (unrolled inside @jax.jit)
-    recon   : 'muscl_van_leer' or 'constant'
+    recon   : 'muscl_van_leer' | 'muscl_van_albada' (smooth C¹, no slope flicker
+              on ghost-scale noise — use for ghost-limit cases) | 'muscl_minmod'
+              | 'mc' | 'constant'
     sources_fn : optional callable with signature
     lowmach_diss : small blend factor for a Rusanov/LF stabilization term,
                    used to damp the low-Mach checkerboard mode at the interface flux
@@ -195,6 +218,13 @@ def make_two_fluid_step(
     Initial condition: W_n = W_from_U_h_batch(U_h_0, fluid_g, fluid_l)
     Post-processing:   U_h = U_h_from_W_batch(W_new)
     """
+    # Per-run void-fraction floor.  Default 1e-6 (gas tier); flashing runs with
+    # a thin liquid-side ghost should set ~1e-4..1e-3 so the solver cannot
+    # re-thin α below the IC floor mid-march (h_g = E/(αρ) amplifier guard).
+    alpha_eps = float(alpha_eps)
+    if pin_ghost and not use_saturation:
+        raise ValueError("pin_ghost=True requires use_saturation=True "
+                         "(the pin reads h_sat_g(p) from the saturation table)")
     N       = len(A)
     A_j     = jnp.asarray(A,      dtype=jnp.float64)
     Af_j    = jnp.asarray(A_face, dtype=jnp.float64)
@@ -217,14 +247,32 @@ def make_two_fluid_step(
     # (setup): fixed p grid → h via the reliable forward-ish PSmass call, giving a
     # monotone h_iso→p_iso lookup.  The inlet then does p_s = interp(h_g, h_iso,
     # p_iso): exact on-isentrope pressure, always finite, no runtime reverse solve.
-    # jnp.interp CLAMPS below the range (h_g < h_iso[0] → p_min) so the runaway
-    # regime is bounded instead of crashing.  Only built when s_g0 is given (the
-    # stagnation inlets); other BCs never reference _h_iso/_p_iso.
-    if s_g0 is not None:
+    # jnp.interp CLAMPS below the range (h_dom < h_iso[0] → p_min) so the runaway
+    # regime is bounded instead of crashing.  Only built when the closing entropy
+    # is given (the stagnation inlets); other BCs never reference _h_iso/_p_iso.
+    #
+    # The reservoir→inlet acceleration pins ONE shared p on ONE phase's isentrope
+    # (imposing both h_g,h_l AND both s_g0,s_l0 over-determines a single p).  We
+    # close on the DOMINANT phase — the mass-weighted mixture entropy s_mix =
+    # x·s_g + (1−x)·s_l is, to O(x), the dominant phase's entropy, and the trace
+    # (ghost) phase's isentrope is compressible/ill-conditioned in its metastable
+    # corner.  dom_phase='gas' → close on s_g0/h_g (gas-dominant tier, unchanged);
+    # 'liquid' → close on s_l0/h_l (liquid-dominant flashing).
+    _dom_gas = (dom_phase == 'gas')
+    _s_dom0  = s_g0 if _dom_gas else s_l0
+    _fl_dom  = fluid_g if _dom_gas else fluid_l
+    if iso_h is not None and iso_p is not None:
+        # Isentrope precomputed by the caller (robust FluidJAX/CoolProp reverse
+        # solve): the DOMINANT-phase bicubic PSmass root-find has no root at low p
+        # for the LIQUID isentrope (s_l0 lands two-phase there) and diverges — the
+        # caller's equilibrium reverse call returns a finite, monotone h(p) instead.
+        _p_iso = jnp.asarray(iso_p, dtype=jnp.float64)
+        _h_iso = jnp.asarray(iso_h, dtype=jnp.float64)
+    elif _s_dom0 is not None:
         _N_ISO = 400
         _p_iso = jnp.linspace(p_lo, p_hi, _N_ISO)
-        _h_iso = fluid_g.get_state(jxp.PSmass_INPUTS, _p_iso,
-                                   jnp.full(_N_ISO, jnp.float64(s_g0)))["h"]
+        _h_iso = _fl_dom.get_state(jxp.PSmass_INPUTS, _p_iso,
+                                   jnp.full(_N_ISO, jnp.float64(_s_dom0)))["h"]
 
     # ── BC in U_h space ───────────────────────────────────────────────────────
     # BCs are applied to U_h = (p, u_g, u_l, α_g, h_g, h_l) — purely algebraic,
@@ -314,10 +362,13 @@ def make_two_fluid_step(
                 u_g, u_l = _split(u_mix, ag, rg, rl)
                 h_g = jnp.clip(_H_g0 - 0.5 * u_g**2, hg_lo, hg_hi)
                 h_l = jnp.clip(_H_l0 - 0.5 * u_l**2, hl_lo, hl_hi)
-                # p ON the reservoir isentrope at h_g — PRECOMPUTED isentrope lookup
-                # (interp), NOT a per-step reverse (h,s)→p solve.  Exact on-isentrope
-                # pressure, always finite, clamps below-range instead of crashing.
-                p_s = jnp.clip(jnp.interp(h_g, _h_iso, _p_iso), p_lo, p_hi)
+                # p ON the reservoir isentrope at the DOMINANT phase's static h —
+                # PRECOMPUTED isentrope lookup (interp), NOT a per-step reverse
+                # (h,s)→p solve.  Exact on-isentrope pressure, always finite, clamps
+                # below-range instead of crashing.  h_dom = h_g (gas-dominant) or
+                # h_l (liquid-dominant flashing) — matches the _h_iso/_p_iso table.
+                h_dom = h_g if _dom_gas else h_l
+                p_s = jnp.clip(jnp.interp(h_dom, _h_iso, _p_iso), p_lo, p_hi)
             rg = phase_props(fluid_g, p_s, h_g).rho
             rl = phase_props(fluid_l, p_s, h_l).rho
             ag = 1.0 / (1.0 + _rx * (rg / rl) * _S0)
@@ -593,6 +644,32 @@ def make_two_fluid_step(
 
     def _muscl(U_h):
         dU = U_h[1:] - U_h[:-1]
+        if recon == 'muscl_van_albada':
+            # SMOOTH limiter (2026-07-14): ab(a+b)/(a²+b²+ε²), gated at ab<0.
+            # van Leer/minmod SWITCH slopes cell-by-cell; on the ghost-scale 2Δx
+            # noise of the ghost-limit case that flicker slowly pumps the state
+            # (same pathology class as the du_blend branch alternation).  The ε²
+            # floor makes the slope response to sub-ε noise O(noise³/ε²) → no
+            # flicker; smooth-gradient slopes (≫ε) are untouched.  ε is RELATIVE
+            # per cell/variable (fields span 1e-4 .. 1e6 in magnitude), with a
+            # domain-mean fallback so u through 0 keeps a finite floor.
+            _va_rel = 1e-3
+            eps  = _va_rel * (jnp.abs(U_h[1:-1])
+                              + 0.1 * jnp.mean(jnp.abs(U_h), axis=0)[None, :])
+            a, b = dU[:-1], dU[1:]
+            s    = jnp.where(a * b > 0.0,
+                             a * b * (a + b) / (a*a + b*b + eps*eps), 0.0)
+            sigma = jnp.zeros_like(U_h).at[1:-1].set(s)
+            U_L_m  = U_h[:-1] + 0.5 * sigma[:-1]
+            U_R_m  = U_h[1:]  - 0.5 * sigma[1:]
+            bad_L  = ((U_L_m[:, 0] < p_lo)  | (U_L_m[:, 0] > p_hi)  |
+                      (U_L_m[:, 4] < hg_lo) | (U_L_m[:, 4] > hg_hi) |
+                      (U_L_m[:, 5] < hl_lo) | (U_L_m[:, 5] > hl_hi))
+            bad_R  = ((U_R_m[:, 0] < p_lo)  | (U_R_m[:, 0] > p_hi)  |
+                      (U_R_m[:, 4] < hg_lo) | (U_R_m[:, 4] > hg_hi) |
+                      (U_R_m[:, 5] < hl_lo) | (U_R_m[:, 5] > hl_hi))
+            bad    = (bad_L | bad_R)[:, None]
+            return jnp.where(bad, U_h[:-1], U_L_m), jnp.where(bad, U_h[1:], U_R_m)
         if recon == 'muscl_van_leer':
             lim = lambda a, b: jnp.where(
                 a * b > 0, 2.0 * a * b / (a + b + 1e-300), 0.0)
@@ -619,22 +696,68 @@ def make_two_fluid_step(
 
     # ── FVS fluxes at all N-1 faces ───────────────────────────────────────────
 
+    # BOUNDARY-FACE low-Mach exemption (2026-07-17): the back-pressure (and the
+    # reservoir state) reach the interior ONLY through the acoustic jump terms
+    # of the first/last face flux — the very terms scaled by z_ac=clip(Ma,
+    # lowmach_diss,1).  With lowmach_diss=0 at Ma~0.007 the BC coupling is
+    # ~150× weakened: the imposed p_out parks as a STANDING JUMP at the outlet
+    # face and the mass flow only creeps toward the BC-consistent value
+    # (diagnosed on the 2026-07-16 overnight runs: grid-dependent settled
+    # inlet u, slow outlet-tail drain).  `lowmach_diss_bc` (default None =
+    # inherit lowmach_diss, no behavior change) sets the z_ac FLOOR on the two
+    # boundary faces only; 1.0 = full upwind dissipation there = stiff BC
+    # enforcement.  Regime-safe: at supersonic outlets z_ac=1 already (no-op)
+    # and the characteristic BC extrapolates (no jump); at high subsonic it
+    # moves ≤×2 toward the standard full-upwind scheme.
+    _lm_face = jnp.full(N - 1, jnp.float64(lowmach_diss))
+    if lowmach_diss_bc is not None:
+        _lm_face = (_lm_face.at[0].set(jnp.float64(lowmach_diss_bc))
+                            .at[-1].set(jnp.float64(lowmach_diss_bc)))
+
     def _fvs_all_faces(U_h):
         if recon != 'constant':
             U_L, U_R = _muscl(U_h)
         else:
             U_L, U_R = U_h[:-1], U_h[1:]
         return jax.vmap(
-            lambda ul, ur: fvs_interface_flux(
-                ul, ur, fluid_g, fluid_l, k, delta_factor, lowmach_diss=lowmach_diss,
+            lambda ul, ur, lm: fvs_interface_flux(
+                ul, ur, fluid_g, fluid_l, k, delta_factor, lowmach_diss=lm,
                 du_blend_lo=du_blend_lo, du_blend_hi=du_blend_hi,
             )
-        )(U_L, U_R)
+        )(U_L, U_R, _lm_face)
 
     # ── Non-conservative correction at interior cells ─────────────────────────
 
     def _nc_all_interior(U_h, F_hat):
-        dF = F_hat[1:] - F_hat[:-1]
+        # nc_form — WHERE the NC-geometric term H·F̄·ΔA lives (2026-07-15):
+        #   'cell'     (ours): H^nc·(F̂₊−F̂₋), all geometry in D_VE_area.
+        #   'staedtke' (book eq. 8.38): H^nc·(A₊F̂₊−A₋F̂₋)/A_i — geometry
+        #              partially inside the NC face sum.
+        # The two differ by H^nc·F̄·(dA/dx)·Δx/A; correctness is a PAIRING
+        # property with the area-source content — discriminated by the
+        # α-contact step-map probe (debug_nc_contact.py).
+        if nc_form == 'staedtke':
+            dF = (Af_j[1:, None] * F_hat[1:]
+                  - Af_j[:-1, None] * F_hat[:-1]) / A_j[1:-1, None]
+        elif nc_form == 'wb':
+            # WELL-BALANCED form (2026-07-15): face-area-weighted one-sided
+            # differences around the CELL flux.  The conservative+source pact
+            # leaves the remainder p/2·[A₊Δα₊ + A₋Δα₋]; the plain central
+            # 'cell' form supplies p·A_i·(Δα₊+Δα₋)/2 instead — mismatch
+            # ~(p/4)·ΔA·Δα, convicted by the α-contact-on-throat probe
+            # (kick ×1.5/step at u≈0).  'wb' reduces to 'cell' on uniform A,
+            # vanishes identically on uniform states (F̂ = F(U_i)), and
+            # supplies exactly the area-weighted difference the pact needs.
+            F_c = jax.vmap(
+                lambda u: fvs_interface_flux(
+                    u, u, fluid_g, fluid_l, k, delta_factor,
+                    lowmach_diss=lowmach_diss,
+                    du_blend_lo=du_blend_lo, du_blend_hi=du_blend_hi)
+            )(U_h[1:-1])
+            dF = (Af_j[1:, None] * (F_hat[1:] - F_c)
+                  + Af_j[:-1, None] * (F_c - F_hat[:-1])) / A_j[1:-1, None]
+        else:
+            dF = F_hat[1:] - F_hat[:-1]
 
         def _nc_one(u_h, df):
             eos_g_c = phase_props(fluid_g, u_h[0], u_h[4])
@@ -732,7 +855,7 @@ def make_two_fluid_step(
         # u0=eps_void_ucut [m/s], Δu=eps_void_uwidth [m/s] (defaults to u0/3 if None).
         # eps_void_ucut=None ⇒ ungated (uniform, the original behaviour).  Reads the
         # velocities from the SAME ±2-stencil cells ⇒ does NOT widen the band.
-        if eps_void > 0.0:
+        if eps_void > 0.0 or eps_ghost > 0.0:
             def _lam_umat_cell(u_h):
                 eg_ = phase_props(fluid_g, u_h[0], u_h[4])
                 el_ = phase_props(fluid_l, u_h[0], u_h[5])
@@ -758,7 +881,11 @@ def make_two_fluid_step(
                     lam = jnp.max(jnp.abs(ev))
                 return lam, u_mat
             lam_c, umat_c = jax.vmap(_lam_umat_cell)(U_h)        # (N,) each
-            r_face = 0.5 * (lam_c[:-1] + lam_c[1:])              # (N-1,) face scale
+            r_face_raw = 0.5 * (lam_c[:-1] + lam_c[1:])          # (N-1,) face scale (ungated)
+            third  = (V_new[3:] - 3.0 * V_new[2:-1]
+                      + 3.0 * V_new[1:-2] - V_new[:-3])          # (N-3,6): faces 1..N-3
+        if eps_void > 0.0:
+            r_face = r_face_raw
             if eps_void_ucut is not None:
                 u0 = jnp.float64(eps_void_ucut)
                 du = jnp.float64(eps_void_uwidth if eps_void_uwidth is not None
@@ -766,11 +893,85 @@ def make_two_fluid_step(
                 w_c    = 0.5 * (1.0 + jnp.tanh((u0 - umat_c) / du))  # 1 slow → 0 fast
                 w_face = 0.5 * (w_c[:-1] + w_c[1:])              # (N-1,)
                 r_face = r_face * w_face                         # gate the filter scale
-            third  = (V_new[3:] - 3.0 * V_new[2:-1]
-                      + 3.0 * V_new[1:-2] - V_new[:-3])          # (N-3,6): faces 1..N-3
             d_face = jnp.zeros_like(F_hat).at[1:-1].set(
                 eps_void * r_face[1:-1, None] * third)           # +sign DAMPS (verified); 0 at bdry
             F_hat  = F_hat + d_face
+
+        # ── GHOST-phase 4th-order filter (eps_ghost) ──────────────────────────
+        # The eps_void channel above is VELOCITY-gated (checkerboards ride the
+        # material waves as u→0) — so it is fully OFF in fast regions (e.g. the
+        # shock layer at u≥100 m/s), which is exactly where a near-massless
+        # GHOST phase limit-cycles (its rows carry ~α of the mass ⇒ the FVS
+        # dissipation that stabilises the dominant phase is ~α-weak for it, and
+        # nothing else damps its 2Δx content: h/u_ghost pumping, shock-cell
+        # flicker, stagnation h_g checkerboard).  This channel applies the SAME
+        # conservative 4th-order flux, but gated per ROW by the phase's own
+        # smallness in log-α:
+        #     w_k = ½(1 − tanh((log10 α_k − log10 acut)/awidth))   (per face)
+        # → 1 while phase k is a ghost (α_k ≪ acut), → 0 once it carries real
+        # mass (never contaminates a physical phase; flashing-safe: the filter
+        # hands off smoothly as a phase grows through acut).  Row order of V:
+        # [mass_g, mass_l, mom_g, mom_l, E_g, E_l] → gas rows (0,2,4) weighted
+        # by w_gas, liquid rows (1,3,5) by w_liq.  NOT velocity-gated: a ghost
+        # needs damping at any speed.  eps_ghost=0 → identically off.
+        if eps_ghost > 0.0:
+            ag_c  = U_h[:, 3]
+            c0    = jnp.log10(jnp.float64(eps_ghost_acut))
+            aw    = jnp.float64(eps_ghost_awidth)
+            lg    = jnp.log10(jnp.clip(ag_c,       1e-14, 1.0))
+            ll    = jnp.log10(jnp.clip(1.0 - ag_c, 1e-14, 1.0))
+            wg_c  = 0.5 * (1.0 - jnp.tanh((lg - c0) / aw))   # 1 ⇔ gas   is ghost
+            wl_c  = 0.5 * (1.0 - jnp.tanh((ll - c0) / aw))   # 1 ⇔ liquid is ghost
+            # BAND GATE (2026-07-18): disengage BELOW eps_ghost_alo.  The
+            # shock-settling transient transiently squeezes the ghost to the α
+            # clip floor (measured α_l 1e-4→1e-6 at shock+3, WITH OR WITHOUT
+            # the filter — baseline control heals by drag within ~100 steps).
+            # Inside that hole the ghost fields are garbage (u_l ±2000 m/s,
+            # h_l ±1e7) and the filter's Δ³V of garbage is a huge random
+            # forcing that LOCKS the hole open (all v1-v5 deaths).  So: help a
+            # thin-but-HEALTHY ghost (α ∈ [alo, acut]), hands off in a hole
+            # (α < alo — drag heals it untouched).
+            c1    = jnp.log10(jnp.float64(eps_ghost_alo))
+            wg_c  = wg_c * 0.5 * (1.0 + jnp.tanh((lg - c1) / aw))
+            wl_c  = wl_c * 0.5 * (1.0 + jnp.tanh((ll - c1) / aw))
+            wg_f  = 0.5 * (wg_c[:-1] + wg_c[1:])             # (N-1,)
+            wl_f  = 0.5 * (wl_c[:-1] + wl_c[1:])
+            # MASS ROWS EXCLUDED (2026-07-18): filtering the ghost MASS row
+            # digs an α-hole at a shock — the 2nd-order term transports mass
+            # out of the jump's corner cells, and the α-gate then AMPLIFIES
+            # (thinner α → w→1 → stronger filter → thinner): measured α_l
+            # 1e-4 → 1e-8 over 6 cells, ghost u_l ±2263 m/s, drag feeding
+            # garbage back into the GAS (H0 excursion ×3, RH gate FAIL).
+            # The limit cycle we target lives in ghost MOMENTUM/ENERGY
+            # (99.98% mom_l by row-SSR); mass never needed filtering — α
+            # checkerboards are eps_void's (all-row, velocity-gated) job.
+            zero  = jnp.zeros_like(wg_f)
+            row_w = jnp.stack([zero, zero, wg_f, wl_f, wg_f, wl_f], axis=1)  # (N-1,6)
+            # JST SHOCK SENSOR: a pure 4th-order filter is ANTI-diffusive in the
+            # two cells flanking a discontinuity (Gibbs kicks — certified fatal
+            # on the analytic shock IC: dhl≈123 K at step 4, global checkerboard,
+            # blow-up).  Classic JST remedy: sense the shock with the normalized
+            # pressure second difference and CROSS-FADE the ghost filter from
+            # 4th-order (smooth regions: damps the 2Δx checkerboard) to 2nd-order
+            # (shock zone: monotone Laplacian damping — kills the ghost shock-cell
+            # limit cycle WITHOUT ringing).  σ≈0 smooth (d2p/4p ~ O(Δx²)),
+            # σ→1 at a captured shock (d2p/4p ~ 0.2-0.4 with the ×10 sharpening).
+            p_c   = U_h[:, 0]
+            d2p   = jnp.abs(p_c[2:] - 2.0 * p_c[1:-1] + p_c[:-2]) \
+                    / (p_c[2:] + 2.0 * p_c[1:-1] + p_c[:-2])
+            sig_c = jnp.zeros(N).at[1:-1].set(jnp.minimum(1.0, 10.0 * d2p))
+            sig_f = jnp.maximum(sig_c[:-1], sig_c[1:])       # (N-1,) face sensor
+            diff1 = V_new[1:] - V_new[:-1]                   # (N-1,6): ΔV at faces
+            d_gh  = jnp.zeros_like(F_hat).at[1:-1].set(
+                eps_ghost * r_face_raw[1:-1, None] * row_w[1:-1]
+                * ((1.0 - sig_f[1:-1, None]) * third          # 4th-order, smooth
+                   # 2nd-order at the shock.  k2 (default 4): for a 2Δx mode the
+                   # 4th difference is 4× the 1st difference, so eps2 = k2·eps4
+                   # keeps the checkerboard damping rate CONSTANT through the
+                   # sensor cross-fade (k2=1 was ×4 weaker in the shock zone —
+                   # held the N600 cycle at ~14% instead of draining it).
+                   - jnp.float64(eps_ghost_k2) * sig_f[1:-1, None] * diff1[1:-1]))
+            F_hat = F_hat + d_gh
 
         Vc      = V_cell[1:-1, None]
         dV      = V_new[1:-1] - V_old[1:-1]
@@ -778,6 +979,81 @@ def make_two_fluid_step(
         nc_term = nc_scale * A_j[1:-1, None] * nc   # nc_scale=0 → NC coupling OFF (diagnostic)
 
         R = Vc * dV + dt * fdiv + dt * nc_term - dt * Vc * src
+
+        # ── GHOST-VAPOR SATURATION PIN (2026-07-21, nozzlex parity) ───────────
+        # Pre-flashing the vapor is a numerical ghost: its dynamic h_g carries
+        # no physical information but rings the E/(αρ_g) 2Δx amplifier — every
+        # flashing blow-up localized to floor-pinned front cells (probe ladder
+        # 65→74→116→220 healthy steps; σ-sharpness probe NEGATIVE).  nozzlex
+        # slaves the ghost to the saturation curve (dh_v/dx = dh_sat_v/dp·dp/dx,
+        # nozzle_model_core.py:1777) gated by the SAME evaporation flag.  Here:
+        # BLEND the gas-ENERGY residual row with the algebraic pin
+        #     R_Eg ← w·R_Eg + (1−w)·Vc·m_g·(h_g − h_sat_g(p)),
+        # w = evaporation_weight (LIQUID superheat only — shared with the σ
+        # gate, so pin and evaporation are complementary by construction).
+        # ρ_g consistency follows FREE via the existing gas EOS row
+        # (m_g = α_g·ρ_g(p, h_g) with h_g = h_sat_g(p) ⇒ ρ_g = ρ_sat_g(p)).
+        #
+        # NO-DEADLOCK INVARIANT (do not break): w may only ever be WIDENED toward
+        # 1 — nothing in the α-growth chain may be gated OFF by it — and the pin
+        # must touch ONLY row 4 (gas energy).  (Originally stated as "w must
+        # depend only on liquid quantities, never on α"; that was stricter than
+        # necessary.  evaporation_weight now also forces w=1 for α>5% — see the
+        # α-availability clause in sources.py — which only ADDS activation and so
+        # preserves the invariant while un-pinning genuinely real vapor.)  The liquid then
+        # superheats freely as p drops, w opens, σ>0 (liquid-side heat; pinned
+        # T_g = T_sat makes Qvi = 0), gas CONTINUITY (row 0, untouched) grows
+        # α, and the pin releases.  Nothing in the α-growth chain is gated.
+        #
+        # Limitation: needs p < p_crit (saturation curve exists) — tables end
+        # at 130 bar << 220.6 bar for water, fine for this tier.
+        #
+        # α-availability gate (shock-wave cases, see TODO_two_phase.md): pure
+        # superheat gating re-pins REAL vapor after a recompression shock (liquid
+        # re-subcooled at α~0.5) = forced equilibrium condensation.  IMPLEMENTED
+        # 2026-07-22 as a binary `| (ag > 5e-2)` clause inside evaporation_weight
+        # (sources.py), so w_ev below already carries it — a real phase is never
+        # pinned.  Smooth variant, if the binary α threshold ever flickers:
+        #   w_ghost = 0.5*(1+tanh((jnp.log(ag_c/(10.0*alpha_eps)))/0.5))
+        #   w_pin   = jnp.maximum(w_ev, w_ghost)   # use in place of w_ev below
+        if pin_ghost:
+            def _pin_one(u_h, m_g_c):
+                eos_l_c = phase_props(fluid_l, u_h[0], u_h[5])
+                sat_g_c = fluid_g.get_state_saturation(u_h[0])
+                sat_l_c = fluid_l.get_state_saturation(u_h[0])
+                w_ev = evaporation_weight(u_h[5], eos_l_c.T,
+                                          sat_l_c["enthalpy"],
+                                          sat_l_c["temperature"], u_h[3])
+                pin  = m_g_c * (u_h[4] - sat_g_c["enthalpy"])
+                return w_ev, pin
+            w_ev, pin = jax.vmap(_pin_one)(U_h[1:-1], W_int[:, 2])
+            R = R.at[:, 4].set(w_ev * R[:, 4] + (1.0 - w_ev) * Vc[:, 0] * pin)
+
+        # ── Ghost-GAS MOMENTUM pin (nozzlex constraint 2, u_v → u_l) ──────────
+        # The thin ghost gas carries a velocity dof with ~α·ρ_g of inertia — on a
+        # grid with fixed dt this is a 2Δx resonator (every 1e-6-floor crash has
+        # u_g at 97–98% odd-even).  A space-march (nozzlex) has no such mode, so it
+        # left u_v free (its constraint 2 stayed commented); on our grid it must be
+        # slaved.  BLEND the gas-MOMENTUM residual row with u_g → u_l:
+        #     R_mom_g ← (1−w)·R_mom_g + w·Vc·m_g·(u_g − u_l).
+        #
+        # WEIGHT is α-GATED (not the evaporation weight): the momentum dof owns its
+        # velocity only once α has physically grown, so the pin must release on α,
+        # not on liquid superheat.  This also makes it SATURATION-FREE (reads only
+        # α_g) → it serves the Bernoulli ghost-gas case (no mass transfer) with the
+        # same code path, and is independent of / composable with the energy pin.
+        #   w = 1 for α_g ≲ 10·alpha_eps (ghost), → 0 by ~100·alpha_eps (real gas).
+        # NO-DEADLOCK: touches ONLY row 2 (gas momentum); continuity rows 0/1 and
+        # the α-growth chain are untouched, so α grows through the tier and the pin
+        # releases BECAUSE α grew.
+        if pin_ghost_momentum:
+            ag_c  = U_h[1:-1, 3]                                   # α_g interior
+            w_mom = 0.5 * (1.0 - jnp.tanh(
+                jnp.log(ag_c / (10.0 * alpha_eps)) / 0.5))
+            pin_u = W_int[:, 2] * (U_h[1:-1, 1] - U_h[1:-1, 2])    # m_g·(u_g − u_l)
+            R = R.at[:, 2].set((1.0 - w_mom) * R[:, 2]
+                               + w_mom * Vc[:, 0] * pin_u)
+
         return R.flatten()   # (6*(N-2),)
 
     # ── Jacobian: dense (exact AD) or colored (banded compression) ────────────
@@ -794,7 +1070,8 @@ def make_two_fluid_step(
     # 40 MUSCL), INDEPENDENT of N → O(N) instead of O(N²) Jacobian cost.
     # eps_void>0 adds a ±2-stencil 4th-order filter → widen the band to sw=2 even
     # for constant recon so the colored Jacobian stays exact (verify via jac_diff).
-    _sw          = 2 if (recon != 'constant' or eps_void > 0.0) else 1
+    _sw          = 2 if (recon != 'constant' or eps_void > 0.0
+                         or eps_ghost > 0.0) else 1
     _col_stride  = 8 * (2 * _sw + 1)             # DOF stride (8 vars/cell): 24 | 40
     _m_cols      = 8 * (N - 2)                     # total W DOFs
     _n_rows      = 6 * (N - 2)                     # total residual rows
@@ -828,6 +1105,70 @@ def make_two_fluid_step(
 
     _jac_fn = _jac_colored if jacobian_mode == 'colored' else _jac_dense
 
+    # ── E3-AUGMENTED residual rows (prototype, 2026-07-15) ────────────────────
+    # Append the two EOS closures per cell as RESIDUAL ROWS:
+    #     R7 = α ρ_g(p,h_g) − m_g ,   R8 = (1−α) ρ_l(p,h_l) − m_l
+    # giving an 8-row × 8-col per-cell system solved by the SAME least-squares
+    # min-norm machinery (rank deficiency in degenerate limits stays harmless —
+    # the E3 objection to a hard square solve is respected; we ADD information,
+    # never demand invertibility).  This closes the per-cell null space that
+    # lets the min-norm park flux-residual adjustments in (m_g, m_l): measured
+    # 2026-07-15 as a SECULAR liquid-mass drain (−1.5e-4/step at the throat,
+    # p/h_l/α standing still) that kills ghost-limit runs at ~4700 steps.
+    # Unlike the post-hoc projection (which holds m frozen and pumps p), the
+    # joint solve may correct m_l itself — ∂R8/∂m_l = −1 — negotiated in least
+    # squares against the m_l flux row: the missing feedback loop.
+    # Dense path is the certified default; eos_rows_banded=True switches to the
+    # O(N) block-banded twin (_e3_banded_solve below) — same numbers.
+    def _eos_res_cell(Wc):
+        p, ag, m_g, u_g, m_l, u_l, mg_eg, ml_el = Wc
+        h_g  = (mg_eg + p * ag) / m_g
+        h_l  = (ml_el + p * (1.0 - ag)) / m_l
+        p_c  = jnp.clip(p,   p_lo,  p_hi)
+        h_gc = jnp.clip(h_g, hg_lo, hg_hi)
+        h_lc = jnp.clip(h_l, hl_lo, hl_hi)
+        rg = fluid_g.get_state(jxp.HmassP_INPUTS,
+                               jnp.atleast_1d(h_gc), jnp.atleast_1d(p_c))["density"][0]
+        rl = fluid_l.get_state(jxp.HmassP_INPUTS,
+                               jnp.atleast_1d(h_lc), jnp.atleast_1d(p_c))["density"][0]
+        return jnp.array([ag * rg - m_g, (1.0 - ag) * rl - m_l])
+
+    _eos_jac_cells = jax.vmap(jax.jacfwd(_eos_res_cell))     # (Nc, 2, 8)
+
+    def _eos_residual(W_int_flat):
+        return jax.vmap(_eos_res_cell)(W_int_flat.reshape(N - 2, 8)).reshape(-1)
+
+    def _eos_jac_dense(W_int_flat):
+        Nc = N - 2
+        Jc = _eos_jac_cells(W_int_flat.reshape(Nc, 8))       # (Nc, 2, 8)
+        rows = 2 * jnp.arange(Nc)[:, None, None] + jnp.arange(2)[None, :, None]
+        cols = 8 * jnp.arange(Nc)[:, None, None] + jnp.arange(8)[None, None, :]
+        return jnp.zeros((2 * Nc, 8 * Nc)).at[rows, cols].set(Jc)
+
+    # ── E1b: block-banded Jacobian storage (for linear_solve='normal_eq_banded')
+    # The de-interleave above already computes exactly the in-band block entries
+    # J[cell i → cell i+d-sw]; this variant returns them as (N-2, 2sw+1, 6, 8)
+    # blocks instead of scattering into a dense (6(N-2))×(8(N-2)) matrix.  Same
+    # coloring, same JVPs, IDENTICAL numbers — only the storage differs.
+    _Nc   = N - 2
+    _Dtot = 2 * _sw + 1
+
+    def _jac_colored_blocks(W_int_flat, W_n_flat, dt):
+        _, jvp_fn = jax.linearize(lambda w: _residual(w, W_n_flat, dt), W_int_flat)
+        cols_idx  = jnp.arange(_m_cols)
+        color_ids = jnp.arange(_n_colors)
+        S  = (cols_idx[None, :] % _col_stride == color_ids[:, None]).astype(W_int_flat.dtype)
+        Jc = jax.vmap(jvp_fn)(S)                                 # (n_colors, 6(N-2))
+        i_c   = jnp.arange(_Nc)
+        dc    = jnp.arange(-_sw, _sw + 1)
+        lc    = i_c[:, None] + dc[None, :]                       # (Nc, Dtot) column cell
+        # colour of column c = lc*8+vc is c % col_stride = 8*(lc mod Dtot) + vc
+        color = 8 * jnp.mod(lc, _Dtot)[:, :, None] + jnp.arange(8)[None, None, :]
+        rows  = i_c[:, None] * 6 + jnp.arange(6)[None, :]        # (Nc, 6)
+        J_blk = Jc[color[:, :, None, :], rows[:, None, :, None]]  # (Nc, Dtot, 6, 8)
+        valid = (lc >= 0) & (lc <= _Nc - 1)
+        return jnp.where(valid[:, :, None, None], J_blk, 0.0)
+
     # ── Newton inner linear solve ─────────────────────────────────────────────
     # The Newton system is underdetermined: J is 6(N-2) × 8(N-2) (fewer equations
     # than unknowns), so we take the minimum-norm solution dW = Jᵀ(J Jᵀ)⁻¹(−R).
@@ -838,6 +1179,10 @@ def make_two_fluid_step(
     #               ~15× faster than SVD, but FORMS J Jᵀ → squares the condition
     #               number (κ(JJᵀ)=κ(J)²), losing ~half the digits on the stiff
     #               source-coupled Jacobian.  Tiny Tikhonov for rank-deficiency.
+    # 'normal_eq_banded' (E1b): SAME numbers as 'normal_eq', but J/JJᵀ stay in
+    #               block-banded storage and the SPD solve is a block-tridiagonal
+    #               Thomas sweep → O(N) memory and flops instead of O(N²)/O(N³).
+    #               Speed/memory only — κ² conditioning unchanged.  See below.
     # 'qr'        : min-norm via the LQ factorization (QR of Jᵀ).  With Jᵀ = Q R
     #               (economic), J Jᵀ = RᵀR, so the min-norm solution is
     #                   dW = Jᵀ(JJᵀ)⁻¹(−R) = Q R⁻ᵀ(−R)
@@ -847,7 +1192,23 @@ def make_two_fluid_step(
     #               Tikhonov or fall back to 'lstsq'.
     _I_rows = jnp.eye(6 * (N - 2), dtype=jnp.float64)
 
-    if linear_solve == 'normal_eq':
+    if eos_rows:
+        # E3-augmented prototype: rhs is (8Nc,).  Least-squares NORMAL
+        # equations (JᵀJ, Cholesky) — ~10× faster than SVD lstsq at N=300
+        # (measured 15-20 s/step vs ~2 s/step).  The tiny Tikhonov floor
+        # regularizes the genuinely degenerate ghost columns (u_g, h_g rows
+        # all scale with α) — there it acts like the min-norm's small-step
+        # selection; everywhere else it is ~roundoff.
+        _I_cols = jnp.eye(8 * (N - 2), dtype=jnp.float64)
+
+        def _lin_solve(J_sc, rhs):
+            JtJ = J_sc.T @ J_sc
+            reg = 1e-10 * jnp.mean(jnp.diagonal(JtJ))
+            return jsl.solve(JtJ + reg * _I_cols, J_sc.T @ rhs, assume_a='pos')
+    elif linear_solve in ('normal_eq', 'normal_eq_banded'):
+        # Dense normal equations.  For 'normal_eq_banded' this dense version is
+        # only the debug_newton fallback — the production Newton body uses
+        # _min_norm_banded below (same numbers, O(N) storage and flops).
         def _lin_solve(J_sc, rhs):                     # rhs = -R
             JJt = J_sc @ J_sc.T
             # With row equilibration cond(J)~1e3 → JJt is well-conditioned, so
@@ -866,6 +1227,274 @@ def make_two_fluid_step(
     else:
         def _lin_solve(J_sc, rhs):
             return jnp.linalg.lstsq(J_sc, rhs, rcond=None)[0]
+
+    # ── E1b: banded normal-equations min-norm solve ───────────────────────────
+    # Same min-norm solution as 'normal_eq' — J is block-banded (residual cell i
+    # touches only cells i±sw), so J, JJᵀ (block half-bandwidth 2sw cells) and
+    # the SPD solve never need dense storage:
+    #   dense:  form JJᵀ O(N²·band) + Cholesky O(N³)      memory O(N²)
+    #   banded: form JJᵀ O(N·band²) + block-Thomas O(N)   memory O(N)
+    # The solve re-blocks JJᵀ into a block-TRIDIAGONAL system with super-blocks
+    # of s=2sw cells (S=12sw scalars: 24×24 for MUSCL/filter) and runs a block
+    # Thomas forward/backward sweep via lax.scan.  In exact arithmetic the
+    # result is IDENTICAL to the dense path; only the rounding order differs
+    # (block elimination vs dense Cholesky) → dW agrees to ~κ·eps ≈ 1e-10 rel.
+    # Conditioning is unchanged (still the normal equations, κ(JJᵀ)=κ(J)²) —
+    # this is a speed/memory upgrade only, certified by debug_banded_solve.py.
+    _use_banded = (linear_solve == 'normal_eq_banded') and not eos_rows
+
+    _q_bw   = 2 * _sw                       # JJᵀ block half-bandwidth [cells]
+    _s_blk  = 2 * _sw                       # cells per super-block
+    _M_blk  = -(-_Nc // _s_blk)             # ceil(Nc / s)
+    _Nc_pad = _M_blk * _s_blk               # padded cells: identity rows, rhs 0
+    _S_blk  = 6 * _s_blk                    # scalar super-block size
+    if _use_banded and _m_cols < _col_stride:
+        raise ValueError("normal_eq_banded needs N large enough for full coloring "
+                         f"(8*(N-2)={_m_cols} < col_stride={_col_stride})")
+
+    # static index maps for super-block assembly (baked into the jit)
+    _a_loc  = jnp.arange(_s_blk)
+    _off_dd = _a_loc[None, :] - _a_loc[:, None]            # col cell − row cell (s,s)
+    _msk_dd = jnp.abs(_off_dd) <= _q_bw
+    _q_dd   = jnp.clip(_off_dd + _q_bw, 0, 2 * _q_bw)
+    _off_uu = _s_blk + _a_loc[None, :] - _a_loc[:, None]   # cols in next super-block
+    _msk_uu = jnp.abs(_off_uu) <= _q_bw
+    _q_uu   = jnp.clip(_off_uu + _q_bw, 0, 2 * _q_bw)
+
+    def _min_norm_banded(J_blk, R_k, w_ref):
+        """Min-norm dW_sc = J_scᵀ(J_sc J_scᵀ)⁻¹(−R_sc) in block-banded storage.
+        Mirrors the dense path exactly: column scaling (w_ref) → row
+        equilibration → JJᵀ + Tikhonov → SPD solve → Jᵀy."""
+        # column scaling: block (i,d) holds columns of cell i+d-sw
+        w     = w_ref.reshape(_Nc, 8)
+        w_pad = jnp.pad(w, ((_sw, _sw), (0, 0)))
+        w_sh  = jnp.stack([w_pad[d:d + _Nc] for d in range(_Dtot)], axis=1)  # (Nc,Dtot,8)
+        J_sc  = J_blk * w_sh[:, :, None, :]
+        # row equilibration (max over all in-band entries of each residual row)
+        r_sc  = 1.0 / (jnp.max(jnp.abs(J_sc), axis=(1, 3)) + 1e-300)          # (Nc,6)
+        J_sc  = J_sc * r_sc[:, None, :, None]
+        rhs   = (-R_k).reshape(_Nc, 6) * r_sc
+
+        # JJᵀ upper block diagonals: JJt_up[e][i] = Σ_d J_i,d · J_{i+e},{d-e}ᵀ
+        Jp = jnp.pad(J_sc, ((0, _q_bw), (0, 0), (0, 0), (0, 0)))
+        JJt_up = []
+        for e in range(_q_bw + 1):
+            acc = jnp.zeros((_Nc, 6, 6), dtype=J_sc.dtype)
+            for d in range(e, _Dtot):
+                acc = acc + jnp.einsum('iab,icb->iac', J_sc[:, d], Jp[e:e + _Nc, d - e])
+            JJt_up.append(acc)
+
+        # Tikhonov identical to dense: reg = linear_reg · mean(diag JJᵀ)
+        reg = linear_reg * jnp.mean(jnp.diagonal(JJt_up[0], axis1=1, axis2=2))
+        JJt_up[0] = JJt_up[0] + reg * jnp.eye(6, dtype=J_sc.dtype)
+
+        # full banded storage (Nc_pad, 2q+1, 6, 6); lower diags by symmetry,
+        # padded cells get identity diagonal (decoupled, rhs 0 → solution 0)
+        JJt_all = jnp.zeros((_Nc_pad, 2 * _q_bw + 1, 6, 6), dtype=J_sc.dtype)
+        for e in range(_q_bw + 1):
+            up = jnp.pad(JJt_up[e], ((0, _Nc_pad - _Nc), (0, 0), (0, 0)))
+            JJt_all = JJt_all.at[:, _q_bw + e].set(up)
+            if e > 0:   # block (i, i-e) = block (i-e, i)ᵀ
+                lo = jnp.pad(jnp.swapaxes(JJt_up[e], 1, 2),
+                             ((e, _q_bw), (0, 0), (0, 0)))[:_Nc_pad]
+                JJt_all = JJt_all.at[:, _q_bw - e].set(lo)
+        if _Nc_pad > _Nc:
+            JJt_all = JJt_all.at[_Nc:, _q_bw].set(jnp.eye(6, dtype=J_sc.dtype))
+
+        # assemble block-tridiagonal super-blocks D (M,S,S), U (M-1,S,S); L = Uᵀ
+        i_sb    = jnp.arange(_M_blk)
+        cell_dd = i_sb[:, None, None] * _s_blk + _a_loc[None, :, None]   # (M,s,s)
+        Dm = JJt_all[cell_dd, _q_dd[None]]                                # (M,s,s,6,6)
+        Dm = jnp.where(_msk_dd[None, :, :, None, None], Dm, 0.0)
+        Dm = Dm.transpose(0, 1, 3, 2, 4).reshape(_M_blk, _S_blk, _S_blk)
+        if _M_blk > 1:
+            i_su    = jnp.arange(_M_blk - 1)
+            cell_uu = i_su[:, None, None] * _s_blk + _a_loc[None, :, None]
+            Um = JJt_all[cell_uu, _q_uu[None]]
+            Um = jnp.where(_msk_uu[None, :, :, None, None], Um, 0.0)
+            Um = Um.transpose(0, 1, 3, 2, 4).reshape(_M_blk - 1, _S_blk, _S_blk)
+
+        b_sb = jnp.pad(rhs, ((0, _Nc_pad - _Nc), (0, 0))).reshape(_M_blk, _S_blk)
+
+        # block-tridiagonal Thomas (symmetric: lower block = upper blockᵀ)
+        def _fwd(carry, inp):
+            Dp_prev, yp_prev = carry
+            D_i, U_prev, b_i = inp
+            G  = jnp.linalg.solve(Dp_prev, U_prev)
+            g  = jnp.linalg.solve(Dp_prev, yp_prev)
+            Lt = U_prev.T
+            Dp = D_i - Lt @ G
+            yp = b_i - Lt @ g
+            return (Dp, yp), (Dp, yp)
+
+        if _M_blk > 1:
+            _, (Dps, yps) = jax.lax.scan(_fwd, (Dm[0], b_sb[0]),
+                                         (Dm[1:], Um, b_sb[1:]))
+            Dps = jnp.concatenate([Dm[:1], Dps], axis=0)
+            yps = jnp.concatenate([b_sb[:1], yps], axis=0)
+        else:
+            Dps, yps = Dm, b_sb
+
+        x_last = jnp.linalg.solve(Dps[-1], yps[-1])
+
+        def _bwd(x_next, inp):
+            Dp_i, yp_i, U_i = inp
+            x_i = jnp.linalg.solve(Dp_i, yp_i - U_i @ x_next)
+            return x_i, x_i
+
+        if _M_blk > 1:
+            _, xs = jax.lax.scan(_bwd, x_last, (Dps[:-1], yps[:-1], Um),
+                                 reverse=True)
+            y_all = jnp.concatenate([xs, x_last[None]], axis=0)
+        else:
+            y_all = x_last[None]
+
+        y_c = y_all.reshape(_Nc_pad, 6)[:_Nc]
+
+        # dW_sc = J_scᵀ y — block-banded transpose multiply
+        dW = jnp.zeros((_Nc, 8), dtype=J_sc.dtype)
+        for d in range(_Dtot):
+            sh  = d - _sw                                   # row cell i → col cell i+sh
+            src = jnp.einsum('iav,ia->iv', J_sc[:, d], y_c)
+            if sh >= 0:
+                dW = dW.at[sh:].add(src[:_Nc - sh] if sh > 0 else src)
+            else:
+                dW = dW.at[:_Nc + sh].add(src[-sh:])
+        return dW.reshape(-1)
+
+    # ── E3-BANDED: block-banded solve for the eos_rows-augmented system ───────
+    # NEW OPTION (eos_rows_banded, 2026-07-16) — the certified dense eos_rows
+    # path above stays the default; this reproduces ITS numbers in O(N).
+    # Rows per cell = 6 flux residuals + 2 EOS closures.  The EOS rows are
+    # CELL-LOCAL, so they live in the diagonal block (d = sw) only — stencil,
+    # coloring and n_colors are unchanged.  The augmented system is square
+    # (8×8 per cell) but may be rank-deficient in the ghost limit (u_g/h_g
+    # columns scale with α), so we keep EXACTLY the dense path's least-squares
+    # normal equations, JᵀJ + 1e-10·mean(diag) Tikhonov.  JᵀJ is SPD and
+    # block-banded (half-bandwidth 2sw cells) → solved by the same super-block
+    # Thomas sweep as E1b, with 8×8 blocks.  In exact arithmetic the result
+    # equals the dense eos_rows path; only rounding order differs (~1e-10 rel).
+    # Certify with debug_banded_e3.py before switching production YAMLs.
+    _use_banded_e3 = bool(eos_rows and eos_rows_banded)
+    if _use_banded_e3 and _m_cols < _col_stride:
+        raise ValueError("eos_rows_banded needs N large enough for full coloring "
+                         f"(8*(N-2)={_m_cols} < col_stride={_col_stride})")
+    _S8 = 8 * _s_blk                     # scalar super-block size (32 for sw=2)
+
+    def _jac_blocks_e3(W_int_flat, W_n_flat, dt):
+        """(Nc, Dtot, 8, 8) blocks: flux rows 0..5 from the colored JVPs, EOS
+        rows 6..7 (cell-local, vmapped exact jacfwd) in the diagonal block."""
+        Jf = _jac_colored_blocks(W_int_flat, W_n_flat, dt)      # (Nc,Dtot,6,8)
+        Je = _eos_jac_cells(W_int_flat.reshape(_Nc, 8))         # (Nc,2,8)
+        J8 = jnp.zeros((_Nc, _Dtot, 8, 8), dtype=Jf.dtype)
+        J8 = J8.at[:, :, :6, :].set(Jf)
+        return J8.at[:, _sw, 6:, :].set(Je)
+
+    def _e3_banded_solve(J_blk, R8, w_ref):
+        """dW_sc = (J_scᵀJ_sc + reg)⁻¹ J_scᵀ(−R_sc) in block-banded storage.
+        Mirrors the dense eos_rows path exactly: column scaling (w_ref) → row
+        equilibration → JᵀJ + Tikhonov → SPD block-Thomas.  R8 is (Nc, 8) with
+        per-cell row order [6 flux | 2 EOS]; row scaling is per-row and JᵀJ /
+        Jᵀrhs sum over rows in any order, so the interleaved layout yields the
+        same numbers as the dense path's [all-flux; all-EOS] stacking.
+        Unlike the min-norm path there is NO trailing Jᵀy multiply — the
+        normal-equations solution IS the (scaled) Newton step."""
+        # column scaling: block (i,d) holds columns of cell i+d-sw
+        w     = w_ref.reshape(_Nc, 8)
+        w_pad = jnp.pad(w, ((_sw, _sw), (0, 0)))
+        w_sh  = jnp.stack([w_pad[d:d + _Nc] for d in range(_Dtot)], axis=1)
+        J_sc  = J_blk * w_sh[:, :, None, :]
+        # row equilibration (max over all in-band entries of each residual row)
+        r_sc  = 1.0 / (jnp.max(jnp.abs(J_sc), axis=(1, 3)) + 1e-300)   # (Nc,8)
+        J_sc  = J_sc * r_sc[:, None, :, None]
+        rhs   = -R8 * r_sc                                              # (Nc,8)
+
+        # JᵀJ upper block diagonals + Jᵀ·rhs.  Column cell i is touched by row
+        # cells k = i+sw-d (d = its block offset); padding J by sw cells makes
+        # J_blk[i+sw-d] = Jp[i+2sw-d] → contiguous slice starting at 2sw-d.
+        Jp  = jnp.pad(J_sc, ((_sw, _sw), (0, 0), (0, 0), (0, 0)))
+        rp  = jnp.pad(rhs,  ((_sw, _sw), (0, 0)))
+        Jtr = jnp.zeros((_Nc, 8), dtype=J_sc.dtype)
+        for d in range(_Dtot):
+            s0  = 2 * _sw - d
+            Jtr = Jtr + jnp.einsum('iba,ib->ia',
+                                   Jp[s0:s0 + _Nc, d], rp[s0:s0 + _Nc])
+        JtJ_up = []
+        for e in range(_q_bw + 1):
+            acc = jnp.zeros((_Nc, 8, 8), dtype=J_sc.dtype)
+            for d in range(_Dtot - e):
+                s0  = 2 * _sw - d
+                blk = Jp[s0:s0 + _Nc]
+                acc = acc + jnp.einsum('iba,ibc->iac', blk[:, d], blk[:, d + e])
+            JtJ_up.append(acc)
+
+        # Tikhonov identical to the dense eos_rows path (ghost-limit rank guard)
+        reg = 1e-10 * jnp.mean(jnp.diagonal(JtJ_up[0], axis1=1, axis2=2))
+        JtJ_up[0] = JtJ_up[0] + reg * jnp.eye(8, dtype=J_sc.dtype)
+
+        # full banded storage; lower diags by symmetry (JᵀJ symmetric),
+        # padded cells get identity diagonal (decoupled, rhs 0 → solution 0)
+        JtJ_all = jnp.zeros((_Nc_pad, 2 * _q_bw + 1, 8, 8), dtype=J_sc.dtype)
+        for e in range(_q_bw + 1):
+            up = jnp.pad(JtJ_up[e], ((0, _Nc_pad - _Nc), (0, 0), (0, 0)))
+            JtJ_all = JtJ_all.at[:, _q_bw + e].set(up)
+            if e > 0:   # block (i, i-e) = block (i-e, i)ᵀ
+                lo = jnp.pad(jnp.swapaxes(JtJ_up[e], 1, 2),
+                             ((e, _q_bw), (0, 0), (0, 0)))[:_Nc_pad]
+                JtJ_all = JtJ_all.at[:, _q_bw - e].set(lo)
+        if _Nc_pad > _Nc:
+            JtJ_all = JtJ_all.at[_Nc:, _q_bw].set(jnp.eye(8, dtype=J_sc.dtype))
+
+        # super-block tridiagonal assembly (same cell-index maps as E1b)
+        i_sb    = jnp.arange(_M_blk)
+        cell_dd = i_sb[:, None, None] * _s_blk + _a_loc[None, :, None]
+        Dm = JtJ_all[cell_dd, _q_dd[None]]
+        Dm = jnp.where(_msk_dd[None, :, :, None, None], Dm, 0.0)
+        Dm = Dm.transpose(0, 1, 3, 2, 4).reshape(_M_blk, _S8, _S8)
+        if _M_blk > 1:
+            i_su    = jnp.arange(_M_blk - 1)
+            cell_uu = i_su[:, None, None] * _s_blk + _a_loc[None, :, None]
+            Um = JtJ_all[cell_uu, _q_uu[None]]
+            Um = jnp.where(_msk_uu[None, :, :, None, None], Um, 0.0)
+            Um = Um.transpose(0, 1, 3, 2, 4).reshape(_M_blk - 1, _S8, _S8)
+
+        b_sb = jnp.pad(Jtr, ((0, _Nc_pad - _Nc), (0, 0))).reshape(_M_blk, _S8)
+
+        # block-tridiagonal Thomas (symmetric: lower block = upper blockᵀ)
+        def _fwd(carry, inp):
+            Dp_prev, yp_prev = carry
+            D_i, U_prev, b_i = inp
+            G  = jnp.linalg.solve(Dp_prev, U_prev)
+            g  = jnp.linalg.solve(Dp_prev, yp_prev)
+            Lt = U_prev.T
+            Dp = D_i - Lt @ G
+            yp = b_i - Lt @ g
+            return (Dp, yp), (Dp, yp)
+
+        if _M_blk > 1:
+            _, (Dps, yps) = jax.lax.scan(_fwd, (Dm[0], b_sb[0]),
+                                         (Dm[1:], Um, b_sb[1:]))
+            Dps = jnp.concatenate([Dm[:1], Dps], axis=0)
+            yps = jnp.concatenate([b_sb[:1], yps], axis=0)
+        else:
+            Dps, yps = Dm, b_sb
+
+        x_last = jnp.linalg.solve(Dps[-1], yps[-1])
+
+        def _bwd(x_next, inp):
+            Dp_i, yp_i, U_i = inp
+            x_i = jnp.linalg.solve(Dp_i, yp_i - U_i @ x_next)
+            return x_i, x_i
+
+        if _M_blk > 1:
+            _, xs = jax.lax.scan(_bwd, x_last, (Dps[:-1], yps[:-1], Um),
+                                 reverse=True)
+            x_all = jnp.concatenate([xs, x_last[None]], axis=0)
+        else:
+            x_all = x_last[None]
+
+        # normal-equations solution IS dW_sc (square system, no Jᵀy step)
+        return x_all.reshape(_Nc_pad, 8)[:_Nc].reshape(-1)
 
     def jac_diff(W_n, dt):
         """max|J_colored - J_dense| at state W_n — sparsity validation guard.
@@ -908,10 +1537,55 @@ def make_two_fluid_step(
     # J by w_ref before solving — and unscaling dW afterward — makes lstsq
     # minimise ||dW / w_ref||² instead, i.e. relative changes, which keeps α_g
     # safely inside (0, 1).
+    # DEFAULT floors are calibrated for TWO-COMPONENT states (alpha ~ 0.1-0.9).
+    # In the GHOST LIMIT (alpha ~ 1e-4) they exceed the ghost's actual W values
+    # by x20-500 (alpha 0.05 vs 1e-4, m_g 0.1 vs 2e-3, mg_eg 1e4 vs ~500), so
+    # the min-norm sees ghost DOFs as nearly FREE directions and dumps the
+    # residual into them → h_g/alpha thrash while the liquid stays clean
+    # (diagnosed 2026-07-14, Bernoulli ghost case).  Pass `w_char` (8 floors,
+    # W order: p, α_g, m_g, u_g, m_l, u_l, mg_eg, ml_el) to override, or
+    # w_char='auto' for state-derived floors (below).
+    #
+    # 'auto' (2026-07-17, certified by debug_wref_sensitivity.py on the ghost
+    # state): the ideal column scale is |W| itself — a floor only acts where
+    # it EXCEEDS the local |W|, and any floor at-or-below the field scale
+    # reproduces the hand-tuned floors BIT-IDENTICALLY (both leave w_ref=|W|
+    # a.e.).  Floors far ABOVE the field scale (the two-comp defaults on a
+    # ghost state) inflate the reachable SSR floor ×180 via the Tikhonov
+    # metric on the near-singular ghost columns; all-ones floors degrade it
+    # to 1.7e-2 (no explosion under E3 — the old min-norm catastrophe is
+    # gone).  'auto' therefore sets, per variable, 0.05 × max_cells|W_v|,
+    # recomputed from the CURRENT Newton iterate — guards only genuinely
+    # zero DOFs (u at rest, α at a flashing inlet) and adapts as the field
+    # evolves (α traversing 1e-4 → 0.9).  No per-case tuning.
+    _w_auto = isinstance(w_char, str) and w_char == 'auto'
     _w_char = jnp.tile(
-        jnp.array([1e5, 0.05, 0.1, 0.5, 10.0, 0.5, 1e4, 1e6]),
+        jnp.array([1e5, 0.05, 0.1, 0.5, 10.0, 0.5, 1e4, 1e6]
+                  if (w_char is None or _w_auto)
+                  else [float(v) for v in w_char]),
         N - 2,
     )   # (8*(N-2),) — floor values; actual w_ref = max(|W_k|, _w_char)
+
+    def _w_ref_fn(W_k):
+        """Column scales w_ref for the Newton solve (see block comment).
+
+        'auto' uses a LOCAL field scale: rolling max of |W| over ±_W_WIN
+        cells (edge-clamped), not the global max.  In a FLASHING case the α
+        field spans decades (1e-4 inlet → 0.9 outlet); a global-max floor
+        would over-floor the inlet ghost cells ×~500 — the measured
+        SSR-inflation regime.  The local window tracks the ghost scale at the
+        inlet and the dominant scale downstream, transitioning over a few
+        cells at the front.  Where the field is uniform to within the window
+        it reduces to the (certified) global behavior: the floor shrinks or
+        stays, and any floor at/below local |W| is inert."""
+        if _w_auto:
+            loc = jnp.abs(W_k.reshape(N - 2, 8))
+            for _ in range(4):                       # ±4-cell window
+                up  = jnp.concatenate([loc[1:], loc[-1:]], axis=0)
+                dn  = jnp.concatenate([loc[:1], loc[:-1]], axis=0)
+                loc = jnp.maximum(loc, jnp.maximum(up, dn))
+            return jnp.maximum(jnp.abs(W_k), (0.05 * loc).reshape(-1))
+        return jnp.maximum(jnp.abs(W_k), _w_char)
 
     # ── EOS-manifold projection ────────────────────────────────────────────────
     # The Newton system is underdetermined (6 conservation eqs, 8 unknowns/cell),
@@ -955,7 +1629,7 @@ def make_two_fluid_step(
             dpa = dpa.at[0].set(jnp.clip(dpa[0], -0.5 * jnp.abs(pa[0]), 0.5 * jnp.abs(pa[0])))
             dpa = dpa.at[1].set(jnp.clip(dpa[1], -0.2, 0.2))
             pa  = pa + dpa
-            return pa.at[1].set(jnp.clip(pa[1], _ALPHA_EPS, 1.0 - _ALPHA_EPS))
+            return pa.at[1].set(jnp.clip(pa[1], alpha_eps, 1.0 - alpha_eps))
 
         pa = jax.lax.fori_loop(0, _PROJ_ITER, _body, jnp.array([p0, ag0]))
         # Safety net: a failed projection must never be worse than not projecting —
@@ -963,8 +1637,151 @@ def make_two_fluid_step(
         pa = jnp.where(jnp.all(jnp.isfinite(pa)), pa, jnp.array([p0, ag0]))
         return W.at[0].set(pa[0]).at[1].set(pa[1])
 
+    # ── GHOST-SAFE variant: TRIANGULAR (Gauss-Seidel) projection ──────────────
+    # The exact 2×2 (p,α) root above has intrinsic gain dp/dm_g = ρ_l/|det| ≈
+    # 1e8 Pa per unit gas mass in the ghost limit (both constraint rows nearly
+    # parallel to the α axis), so ghost-mass noise becomes bar-scale p noise —
+    # the pump convicted 2026-07-14.  Triangular split with the SAME manifold
+    # and fixed points, but m_g noise never routes into p:
+    #   1. p from the TOTAL-mass closure  αρ_g(p)+(1−α)ρ_l(p) = m_g+m_l
+    #      (scalar Newton; d/dp = αρg_p+(1−α)ρl_p = mixture compressibility —
+    #       NEVER degenerate at either α extreme),
+    #   2. α = m_g / ρ_g(p, h_g)  directly (well-behaved at both ends),
+    #   iterated _PROJ_ITER times (Gauss-Seidel).  On consistent states both
+    #   formulations return the identical (p, α): same no-op property.
+    def _project_cell_tri(W):
+        p0, ag0, m_g, u_g, m_l, u_l, mg_eg, ml_el = W
+        m_tot = m_g + m_l
+
+        def _rho_gl(p, ag):
+            al  = 1.0 - ag
+            h_g = (mg_eg + p * ag) / m_g
+            h_l = (ml_el + p * al) / m_l
+            p_c  = jnp.clip(p,   p_lo,  p_hi)
+            h_gc = jnp.clip(h_g, hg_lo, hg_hi)
+            h_lc = jnp.clip(h_l, hl_lo, hl_hi)
+            rg = fluid_g.get_state(jxp.HmassP_INPUTS,
+                                   jnp.atleast_1d(h_gc), jnp.atleast_1d(p_c))["density"][0]
+            rl = fluid_l.get_state(jxp.HmassP_INPUTS,
+                                   jnp.atleast_1d(h_lc), jnp.atleast_1d(p_c))["density"][0]
+            return rg, rl
+
+        def _F_tot(p, ag):
+            rg, rl = _rho_gl(p, ag)
+            return ag * rg + (1.0 - ag) * rl - m_tot
+
+        _dF = jax.grad(_F_tot, argnums=0)
+
+        def _body(_, pa):
+            p, ag = pa[0], pa[1]
+            # 1) scalar Newton on p (α frozen): total-mass closure
+            F  = _F_tot(p, ag)
+            dF = _dF(p, ag)
+            dp = jnp.where(jnp.abs(dF) > 1e-300, -F / dF, 0.0)
+            dp = jnp.where(jnp.isfinite(dp), dp, 0.0)
+            dp = jnp.clip(dp, -0.5 * jnp.abs(p), 0.5 * jnp.abs(p))
+            p  = p + dp
+            # 2) α from the trace-phase mass at the new p (direct, no inversion)
+            rg, _ = _rho_gl(p, ag)
+            ag = jnp.clip(m_g / (rg + 1e-300), alpha_eps, 1.0 - alpha_eps)
+            return jnp.array([p, ag])
+
+        pa = jax.lax.fori_loop(0, _PROJ_ITER, _body, jnp.array([p0, ag0]))
+        pa = jnp.where(jnp.all(jnp.isfinite(pa)), pa, jnp.array([p0, ag0]))
+        return W.at[0].set(pa[0]).at[1].set(pa[1])
+
+    # ── GHOST-SAFE variant 2: DAMPED pair projection ──────────────────────────
+    # Same manifold and 2×2 Newton as _project_cell, but every update is scaled
+    # by a per-cell, per-pass damping factor λ computed from the projection
+    # Jacobian's OWN conditioning:
+    #     s = |det J_sc| / (‖row₀‖·‖row₁‖),   J_sc = J·diag(|p|, 1)
+    # s is the sine of the angle between the two constraint gradients in the
+    # column-scaled (p, α) plane: O(1) where the gas phase is real/compressible,
+    # → 0 in the ghost / stiff-liquid limit where the EXACT root has intrinsic
+    # gain dp/dm ≈ ρ_l/|det| ≈ 1e8 (the p-noise pump convicted 2026-07-14;
+    # note the triangular GS variant above FAILED certification — any method
+    # converging to the exact root inherits that gain).  λ = s²/(s²+s_ref²)
+    # blends continuously between the two CERTIFIED endpoint behaviours:
+    #     λ → 1 : identical to the classic pair projection   (two-component)
+    #     λ → 0 : identical to eos_project=False              (ghost limit)
+    # so a flashing run (α traversing 1e-4 → 0.9 in one domain) gets full
+    # manifold pinning where it is well-posed and none where it would pump.
+    # The δp trust cap (λ·1% of p per pass) bounds the worst-case per-step
+    # pressure impact QUADRATICALLY in λ.  s_ref via `proj_s_ref`, calibrated
+    # by debug_projection_damped.py check 0 (two-comp s≈0.36, ghost s≈9e-4 →
+    # s_ref=2e-2 mid-gap gives λ=0.997 / 2e-3).
+    def _project_cell_damped(W):
+        p0, ag0, m_g, u_g, m_l, u_l, mg_eg, ml_el = W
+
+        def _res(pa):
+            p, ag = pa
+            al  = 1.0 - ag
+            h_g = (mg_eg + p * ag) / m_g
+            h_l = (ml_el + p * al) / m_l
+            p_c  = jnp.clip(p,   p_lo,  p_hi)
+            h_gc = jnp.clip(h_g, hg_lo, hg_hi)
+            h_lc = jnp.clip(h_l, hl_lo, hl_hi)
+            rg  = fluid_g.get_state(jxp.HmassP_INPUTS,
+                                    jnp.atleast_1d(h_gc), jnp.atleast_1d(p_c))["density"][0]
+            rl  = fluid_l.get_state(jxp.HmassP_INPUTS,
+                                    jnp.atleast_1d(h_lc), jnp.atleast_1d(p_c))["density"][0]
+            return jnp.array([ag * rg - m_g, al * rl - m_l])
+
+        _jac = jax.jacfwd(_res)
+
+        def _body(_, pa):
+            J    = _jac(pa)
+            J_sc = J * jnp.array([jnp.abs(pa[0]) + 1e-300, 1.0])[None, :]
+            det  = J_sc[0, 0] * J_sc[1, 1] - J_sc[0, 1] * J_sc[1, 0]
+            n0   = jnp.sqrt(J_sc[0, 0] ** 2 + J_sc[0, 1] ** 2)
+            n1   = jnp.sqrt(J_sc[1, 0] ** 2 + J_sc[1, 1] ** 2)
+            s    = jnp.abs(det) / (n0 * n1 + 1e-300)
+            # QUADRATIC gate (probe-calibrated 2026-07-15: two-comp s≈0.36,
+            # ghost s≈9e-4, ×400 apart — the linear gate left the ghost at
+            # λ≈0.5, a half-engaged pump).  δp cap is ALSO λ-scaled: with a
+            # fixed cap a small λ still walks 1%·p per pass toward the
+            # far-away ill-conditioned root (measured 7.7% p drift at α=1e-4).
+            s2   = s * s
+            lam  = s2 / (s2 + proj_s_ref * proj_s_ref)
+            dpa  = jnp.linalg.solve(J, -_res(pa))
+            dpa  = jnp.where(jnp.all(jnp.isfinite(dpa)), dpa, 0.0)   # singular → no move
+            dpa  = lam * dpa
+            # DIRECTIONAL trust cap: shrink the WHOLE step by one factor β so
+            # |δp| ≤ λ²·1%·p and |δα| ≤ 0.2.  Capping the components
+            # independently breaks the Newton direction (α moves as if p had
+            # followed) and WORSENS consistency — probe round 2 measured
+            # inc ×12 at α=1e-4 with p nearly frozen.  The cap must be λ²:
+            # in the ill-conditioned limit the Newton direction is pure-p and
+            # noise-following, so the cap IS the per-pass push — with λ¹ the
+            # ghost march accumulated it systematically (round 3: p-osc ×10
+            # control over 400 steps at 40 Pa/pass).  λ² makes it 0.08 Pa.
+            beta = jnp.minimum(1.0, jnp.minimum(
+                lam * lam * 0.01 * jnp.abs(pa[0]) / (jnp.abs(dpa[0]) + 1e-300),
+                0.2 / (jnp.abs(dpa[1]) + 1e-300)))
+            pa   = pa + beta * dpa
+            return pa.at[1].set(jnp.clip(pa[1], alpha_eps, 1.0 - alpha_eps))
+
+        pa = jax.lax.fori_loop(0, _PROJ_ITER, _body, jnp.array([p0, ag0]))
+        pa = jnp.where(jnp.all(jnp.isfinite(pa)), pa, jnp.array([p0, ag0]))
+        return W.at[0].set(pa[0]).at[1].set(pa[1])
+        # NOTE 2026-07-15: a "ghost-slave" third stage (α from the liquid
+        # constraint + m_g re-slaved, weight 1−λ) was tried here to absorb the
+        # secular e_l drift and FAILED at step 1: the α correction the liquid
+        # constraint demands is ABSOLUTE (~e_l·(1−α)), i.e. of order α itself
+        # at the ghost limit, and infeasible outright when m_l > ρ_l.  The
+        # drift has NO legitimate absorber in W (p = pump, α = saturates,
+        # m_l/ml_el = real conserved) — it must be fixed at its production
+        # site in the scheme, not projected away.
+
+    # eos_project: True (classic 2×2 pair) | 'damped' (conditioning-gated
+    # pair, ghost-safe and α-uniform — use for flashing) | 'triangular'
+    # (FAILED certification, kept for reference — do not use) | False.
+    _project_one = (_project_cell_damped if eos_project == 'damped'
+                    else _project_cell_tri if eos_project == 'triangular'
+                    else _project_cell)
+
     def _project_interior(W_int_flat):
-        Wp = jax.vmap(_project_cell)(W_int_flat.reshape(N - 2, 8))
+        Wp = jax.vmap(_project_one)(W_int_flat.reshape(N - 2, 8))
         return Wp.reshape(-1)
 
     def step(W_n, dt):
@@ -995,6 +1812,13 @@ def make_two_fluid_step(
                 _inf_R = bool(jnp.any(jnp.isinf(R_k)))
                 print(f"    it {_it:2d}  max|R|={float(jnp.nanmax(jnp.abs(R_k))):.3e}"
                       f"  NaN={_nan_R}  Inf={_inf_R}")
+                # Per-equation-block max|R| + its cell (H1 localization, 2026-07-21):
+                # names WHICH equation family and WHICH cell stops contracting.
+                # Cell index is GLOBAL (interior i → cell i+1).
+                _R_abs = _np.abs(_np.array(R_k)).reshape(N - 2, 6)
+                print("           per-eq max|R|: " + "  ".join(
+                    f"{_eq[_q]}={_R_abs[:, _q].max():.2e}@c{int(_R_abs[:, _q].argmax()) + 1}"
+                    for _q in range(6)))
                 if _nan_R or _inf_R:
                     _R_mat = _np.array(R_k).reshape(N - 2, 6)
                     _W_mat = _np.array(W_k).reshape(N - 2, 8)
@@ -1018,7 +1842,7 @@ def make_two_fluid_step(
                     print(f"           bad J cols: {_bad_c[:8]}  → cells {_bad_c[:8]//8}  vars {[_var[c%8] for c in _bad_c[:8]]}")
                     break
 
-                _w_ref = jnp.maximum(jnp.abs(W_k), _w_char)
+                _w_ref = _w_ref_fn(W_k)
                 _J_sc  = J_k * _w_ref[None, :]
                 _r_sc  = 1.0 / (jnp.max(jnp.abs(_J_sc), axis=1) + 1e-300)  # row equilibration
                 _dW_sc = _lin_solve(_J_sc * _r_sc[:, None], -R_k * _r_sc)
@@ -1027,9 +1851,15 @@ def make_two_fluid_step(
                 print(f"           max|dW_rel|={float(jnp.nanmax(jnp.abs(_dW_sc))):.3e}"
                       f"  max|dW|={float(jnp.nanmax(jnp.abs(dW))):.3e}"
                       f"  NaN={_nan_dW}")
+                # Per-variable max scaled step + its cell: names WHICH W column
+                # (soft subspace) takes the overshoot.  Cell index GLOBAL (i+1).
+                _dW_abs = _np.abs(_np.array(_dW_sc)).reshape(N - 2, 8)
+                print("           per-var max|dW_rel|: " + "  ".join(
+                    f"{_var[_q]}={_dW_abs[:, _q].max():.2e}@c{int(_dW_abs[:, _q].argmax()) + 1}"
+                    for _q in range(8)))
                 W_k = W_k + dW
                 # Hard clip α_g to (ε, 1-ε): physically required, guards EOS
-                W_k = W_k.at[1::8].set(jnp.clip(W_k[1::8], _ALPHA_EPS, 1.0 - _ALPHA_EPS))
+                W_k = W_k.at[1::8].set(jnp.clip(W_k[1::8], alpha_eps, 1.0 - alpha_eps))
                 _Wm = _np.array(W_k).reshape(N - 2, 8)
                 print(f"           p=[{_Wm[:,0].min():.3e},{_Wm[:,0].max():.3e}]"
                       f"  ag=[{_Wm[:,1].min():.3f},{_Wm[:,1].max():.3f}]"
@@ -1040,18 +1870,41 @@ def make_two_fluid_step(
         else:
             def _newton_body(_, W_k):
                 R_k   = _residual(W_k, W_n_flat, dt)        # (6*(N-2),)
-                J_k   = _jac_fn(W_k, W_n_flat, dt)          # (6*(N-2), 8*(N-2))
-                w_ref = jnp.maximum(jnp.abs(W_k), _w_char)
-                J_sc  = J_k * w_ref[None, :]                # column scaling (relative dW)
-                # Row equilibration: scale each residual row to O(1).  For the
-                # underdetermined min-norm this is EXACTLY invariant (same solution
-                # set) — it only fixes conditioning (cond ~1e8 → ~1e3 from the
-                # mass/energy row-magnitude spread), not the answer.
-                r_sc  = 1.0 / (jnp.max(jnp.abs(J_sc), axis=1) + 1e-300)
-                dW_sc = _lin_solve(J_sc * r_sc[:, None], -R_k * r_sc)
+                w_ref = _w_ref_fn(W_k)
+                if _use_banded:
+                    # E1b: block-banded Jacobian + banded normal equations —
+                    # same scaling/solve as below, O(N) instead of O(N³).
+                    J_blk = _jac_colored_blocks(W_k, W_n_flat, dt)
+                    dW_sc = _min_norm_banded(J_blk, R_k, w_ref)
+                elif _use_banded_e3:
+                    # E3-BANDED (new option 2026-07-16): same JᵀJ + Tikhonov
+                    # numbers as the dense eos_rows branch below, O(N) storage
+                    # and flops.  Per-cell row order [6 flux | 2 EOS].
+                    R8    = jnp.concatenate(
+                        [R_k.reshape(_Nc, 6),
+                         jax.vmap(_eos_res_cell)(W_k.reshape(_Nc, 8))], axis=1)
+                    dW_sc = _e3_banded_solve(
+                        _jac_blocks_e3(W_k, W_n_flat, dt), R8, w_ref)
+                elif eos_rows:
+                    # E3-augmented prototype: 8 rows/cell, same scaling + lstsq
+                    R_k   = jnp.concatenate([R_k, _eos_residual(W_k)])
+                    J_k   = jnp.concatenate(
+                        [_jac_fn(W_k, W_n_flat, dt), _eos_jac_dense(W_k)], axis=0)
+                    J_sc  = J_k * w_ref[None, :]
+                    r_sc  = 1.0 / (jnp.max(jnp.abs(J_sc), axis=1) + 1e-300)
+                    dW_sc = _lin_solve(J_sc * r_sc[:, None], -R_k * r_sc)
+                else:
+                    J_k   = _jac_fn(W_k, W_n_flat, dt)      # (6*(N-2), 8*(N-2))
+                    J_sc  = J_k * w_ref[None, :]            # column scaling (relative dW)
+                    # Row equilibration: scale each residual row to O(1).  For the
+                    # underdetermined min-norm this is EXACTLY invariant (same solution
+                    # set) — it only fixes conditioning (cond ~1e8 → ~1e3 from the
+                    # mass/energy row-magnitude spread), not the answer.
+                    r_sc  = 1.0 / (jnp.max(jnp.abs(J_sc), axis=1) + 1e-300)
+                    dW_sc = _lin_solve(J_sc * r_sc[:, None], -R_k * r_sc)
                 W_new = W_k + dW_sc * w_ref
                 # Hard clip α_g to (ε, 1-ε): physically required, guards EOS
-                W_new = W_new.at[1::8].set(jnp.clip(W_new[1::8], _ALPHA_EPS, 1.0 - _ALPHA_EPS))
+                W_new = W_new.at[1::8].set(jnp.clip(W_new[1::8], alpha_eps, 1.0 - alpha_eps))
                 # Project each iterate onto the EOS manifold, INSIDE the loop, so
                 # the Newton evaluates its next residual on an EOS-consistent state
                 # and co-converges to a jointly conservation+EOS-consistent W.
@@ -1061,7 +1914,51 @@ def make_two_fluid_step(
                     W_new = _project_interior(W_new)
                 return W_new
 
-            W_k = jax.lax.fori_loop(0, newton_iter, _newton_body, W_k)
+            if _use_banded_e3 and jac_lag > 1:
+                # ── JACOBIAN LAGGING (modified Newton, new option 2026-07-16) ──
+                # Recompute J only every jac_lag-th iteration; the residual is
+                # STILL evaluated every iteration, so a converged answer is
+                # unchanged — only the Newton DIRECTION uses a stale J (local
+                # convergence drops from quadratic to linear, harmless for the
+                # small per-step corrections of a CFL-limited implicit march).
+                # jac_lag >= newton_iter → one Jacobian per step: the ~40
+                # colored JVPs (the dominant cost) are paid once instead of
+                # newton_iter times.  E3-banded path only; jac_lag=1 keeps the
+                # certified per-iteration body below, bit for bit.
+                # RESIDUAL-GROWTH GUARD (2026-07-16 evening): a purely
+                # scheduled lag DIVERGES on strong transients (restart-pickle
+                # startup: the state moves far within one step, the
+                # start-of-step J stops contracting → three identical
+                # production explosions).  Refresh J additionally whenever
+                # ‖R‖ failed to decrease since the previous iteration: on
+                # transients this self-reverts to per-iteration Newton, near
+                # steady state (‖R‖ contracting) the schedule rules and the
+                # full speedup is realized.  Cost of the guard: one norm.
+                def _newton_body_lag(it, carry):
+                    W_k, J_blk, r_prev = carry
+                    R_k   = _residual(W_k, W_n_flat, dt)
+                    w_ref = _w_ref_fn(W_k)
+                    R8    = jnp.concatenate(
+                        [R_k.reshape(_Nc, 6),
+                         jax.vmap(_eos_res_cell)(W_k.reshape(_Nc, 8))], axis=1)
+                    r_now = jnp.linalg.norm(R8)
+                    J_blk = jax.lax.cond(
+                        (it % jac_lag == 0) | (r_now > r_prev),
+                        lambda W: _jac_blocks_e3(W, W_n_flat, dt),
+                        lambda W: J_blk, W_k)
+                    dW_sc = _e3_banded_solve(J_blk, R8, w_ref)
+                    W_new = W_k + dW_sc * w_ref
+                    W_new = W_new.at[1::8].set(
+                        jnp.clip(W_new[1::8], alpha_eps, 1.0 - alpha_eps))
+                    if eos_project:
+                        W_new = _project_interior(W_new)
+                    return (W_new, J_blk, r_now)
+
+                _J0 = jnp.zeros((_Nc, _Dtot, 8, 8), dtype=jnp.float64)
+                W_k, _, _ = jax.lax.fori_loop(0, newton_iter, _newton_body_lag,
+                                              (W_k, _J0, jnp.float64(jnp.inf)))
+            else:
+                W_k = jax.lax.fori_loop(0, newton_iter, _newton_body, W_k)
 
         # Re-pin (p, α_g) to the conserved V — removes the min-norm EOS drift
         # (applies to both the debug and production Newton paths).
@@ -1079,10 +1976,25 @@ def make_two_fluid_step(
         lam_max = _max_wave_speed_cells(U_h_new)   # Städtke mixture wave speed
         t_char  = dx / (jnp.max(lam_max) + 1e-300)
         V_new   = jax.vmap(V_from_W)(W_new)
-        ssr     = jnp.sqrt(jnp.mean(
-            (t_char * R_ss
-             / (V_cell[1:-1, None] * jnp.abs(V_new[1:-1]) + 1e-300)) ** 2
-        ))
+        S_ss    = (t_char * R_ss
+                   / (V_cell[1:-1, None] * jnp.abs(V_new[1:-1]) + 1e-300))
+        if ssr_mode == 'mass':
+            # MASS-WEIGHTED SSR: each phase-equation row votes with its phase's
+            # LOCAL mass fraction m_k/(m_g+m_l), per cell.  A near-massless
+            # ghost (m~1e-4 of the mixture) then cannot hold the stop criterion
+            # hostage with its shock-layer limit cycle (measured: ghost rows
+            # owned 99.98% of the plain SSR² on a converged N600 shock run,
+            # ghost/dominant ratio 7553×), while in a flashing nozzle both
+            # phases vote fully wherever both carry mass — no dominant-phase
+            # switch, smooth in α.  Row order: [mass_g,mass_l,mom_g,mom_l,E_g,E_l].
+            m_g  = W_new[1:-1, 2]
+            m_l  = W_new[1:-1, 4]
+            w_g  = m_g / (m_g + m_l + 1e-300)
+            w_l  = 1.0 - w_g
+            w_r  = jnp.stack([w_g, w_l, w_g, w_l, w_g, w_l], axis=1)
+            ssr  = jnp.sqrt(jnp.sum(w_r * S_ss ** 2) / jnp.sum(w_r))
+        else:                                       # 'all' (legacy, equal votes)
+            ssr = jnp.sqrt(jnp.mean(S_ss ** 2))
 
         # Write the BC-consistent ghost cells back into W so post-processing sees
         # the actual boundary state (transmissive outlet copy / fixed inlet), not
@@ -1101,7 +2013,17 @@ def make_two_fluid_step(
     # Diagnostics hook (Jacobian coloring / benchmarking): expose the raw
     # residual and its dense AD Jacobian.  Backward compatible — default off.
     if return_debug:
-        return step, compute_dt, _residual, _jac_fn, jac_diff
+        return step, compute_dt, _residual, _jac_fn, jac_diff, {
+            'jac_colored':        _jac_colored,
+            'jac_colored_blocks': _jac_colored_blocks,
+            'min_norm_banded':    _min_norm_banded,
+            'jac_blocks_e3':      _jac_blocks_e3,
+            'e3_banded_solve':    _e3_banded_solve,
+            'eos_jac_dense':      _eos_jac_dense,
+            'eos_residual':       _eos_residual,
+            'lin_solve':          _lin_solve,
+            'sw': _sw, 'Nc': _Nc, 'w_char': _w_char,
+        }
 
     return step, compute_dt
 
