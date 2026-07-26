@@ -1,0 +1,54 @@
+Auto-Transcript Start Time:  15:43:17, 20 Jul 2026 Romance Daylight Time 
+Current Directory: "C:\Users\ancio\OneDrive - Danmarks Tekniske Universitet\Documents\python_scripts\nozzle-hyperbolic"
+
+              Welcome to ANSYS Fluent 2024 R2
+
+              Copyright 1987-2024 ANSYS, Inc. All Rights Reserved.
+              Unauthorized use, distribution or duplication is prohibited.
+              This product is subject to U.S. laws governing export and re-export.
+              For full Legal Notice, see documentation.
+
+Build Time: May 13 2024 11:28:30 EST  Build Id: 10192  
+ 
+Connected License Server List:	1055@ansys-ls.mbar.dtu.dk
+
+*********************************************
+Info: Your license enables 4-way parallel execution.
+For faster simulations, please start the application with the appropriate parallel options.
+*********************************************
+
+
+     --------------------------------------------------------------
+     This is an academic version of ANSYS FLUENT. Usage of this product
+     license is limited to the terms and conditions specified in your ANSYS
+     license form, additional terms section.
+     --------------------------------------------------------------
+Host spawning Node 0 on machine "CME-EL-ANCIO1" (win64).
+
+-----------------------------------------------------------------------------------------
+ID    Hostname       Core  O.S.         PID    Vendor                                   
+-----------------------------------------------------------------------------------------
+n1    CME-EL-ANCIO1  2/32  Windows-x64  43820  13th Gen Intel(R) Core(TM) i9-13950HX    
+n0*   CME-EL-ANCIO1  1/32  Windows-x64  21252  13th Gen Intel(R) Core(TM) i9-13950HX    
+host  CME-EL-ANCIO1        Windows-x64  45996  13th Gen Intel(R) Core(TM) i9-13950HX    
+
+MPI Option Selected: intel
+Selected system interconnect: default
+-----------------------------------------------------------------------------------------
+
+Cleanup script file is C:\\Users\\ancio\\OneDrive - Danmarks Tekniske Universitet\\Documents\\python_scripts\\nozzle-hyperbolic\\cleanup-fluent-CME-EL-ANCIO1-45996.bat
+
+Posting ANSYS Product Improvement Program startup data
+Done.
+Information: The server has started and is running.
+
+> 
+Posting ANSYS Product Improvement Program performance data 
+Done.
+Shutting down Server...
+Services Shutdown...Done.
+Server Shutdown...Done.
+Queue Cleared...Done.
+Shutdown Complete.
+Auto-Transcript Stop Time:  15:43:25, 20 Jul 2026 Romance Daylight Time 
+Total Transcript Time: 0 Minute 8 Second.
