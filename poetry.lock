@@ -1636,37 +1636,6 @@ testing = ["beautifulsoup4", "coverage[toml]", "defusedxml", "pygments (<2.19)",
 testing-docutils = ["pygments", "pytest (>=8,<9)", "pytest-param-files (>=0.6.0,<0.7.0)"]
 
 [[package]]
-name = "nozzlex"
-version = "0.0.1"
-description = "JAX-compatible one-dimensional code for modeling two-phase supersonic nozzles."
-optional = false
-python-versions = ">=3.11,<3.14"
-groups = ["main"]
-files = []
-develop = true
-
-[package.dependencies]
-CoolProp = "^7.0.0"
-diffrax = "^0.7.0"
-equinox = "^0.12.0"
-jax = "^0.6.0"
-jaxlib = "^0.6.0"
-jaxprop = {path = "../jaxprop", develop = true}
-matplotlib = "^3.10.6"
-numpy = "^2.3.0"
-nurbspy = "^1.2.3"
-optimistix = "^0.0.10"
-parse = "^1.22.0"
-pysolver_view = "^0.6.8"
-scipy = "^1.16.1"
-snakeviz = "^2.2.2"
-tqdm = "^4.67.1"
-
-[package.source]
-type = "directory"
-url = "../nozzlex"
-
-[[package]]
 name = "numba"
 version = "0.62.1"
 description = "compiling Python code using LLVM"
@@ -3554,4 +3523,4 @@ test = ["pytest (>=6.0.0)", "setuptools (>=65)"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.11,<3.14"
-content-hash = "96f39fe74e9a5c34062441d177ce3d103349387534f8d38a6bbbd5a7900d7b71"
+content-hash = "e9219086cbd54b5c4e7db32eda760cc7479d7fe4ed705e75c915aa7cca879eee"
