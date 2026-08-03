@@ -206,6 +206,16 @@ def make_two_fluid_step(
                  'stagnation_ramped', 'static_state', or 'subsonic_inflow'.
                  'total_state' mirrors _bc_inlet_real from the single-phase solver:
                    extrapolate p, u_g, u_l from interior; impose H_g0, H_l0, alpha_g0.
+    bc_outlet  : 'transmissive' (default), 'pressure', 'characteristic', or
+                 'characteristic_old'.
+                 'characteristic' auto-switches subsonic ↔ supersonic on the
+                   Städtke mixture Mach and builds the subsonic ghost by
+                   projecting the imposed back-pressure onto the INCOMING acoustic
+                   right eigenvector r₄ (λ₄ = û − a), so no reflection is emitted.
+                 'characteristic_old' is the legacy form of the same BC: identical
+                   switch, but a shared Δu on both phases through the homogeneous
+                   (Wood) impedance, with α_g and h_k frozen.  Kept as an A/B
+                   reference; the two agree to ~0.06% at steady state.
     H_g0       : total gas enthalpy at inlet [J/kg]  (required when bc_inlet='total_state')
     H_l0       : total liquid enthalpy at inlet [J/kg]
     alpha_g0   : void fraction at inlet [-]
@@ -582,7 +592,19 @@ def make_two_fluid_step(
             du   = (p98 - p_gh) / imped                # co-move u along outgoing char
             U_hN = jnp.array([p_gh, uh[1] + du, uh[2] + du, ag, uh[4], uh[5]])
             return U_h.at[-1].set(U_hN)
-    elif bc_outlet == 'characteristic':
+    elif bc_outlet == 'characteristic_old':
+        # LEGACY (pre-2026-07-28) version of 'characteristic', kept verbatim as a
+        # fallback / A-B reference.  Identical regime switch, but the velocity
+        # co-move uses the HOMOGENEOUS (Wood) impedance and applies the SAME Δu to
+        # both phases, leaving α_g and the enthalpies untouched.  That is a
+        # homogeneous-mixture approximation of the true acoustic invariant; the
+        # new 'characteristic' below projects onto the model's own acoustic
+        # eigenvector instead.  The two agree in the single-phase limits (measured
+        # a_Wood/a_Städtke = 1.000 at the gasdom outlet) and differ by up to ~2.3×
+        # in the impedance at intermediate α_g.  Since the residual Δu at steady
+        # state is O(Δx) (~0.2% of the exit velocity in the shipped runs), results
+        # from the two paths are interchangeable to ~0.06% there.
+        #
         # Regime-aware outlet that AUTO-SWITCHES subsonic ↔ supersonic, mirroring
         # the single-phase Städtke outlet (fvm.py make_jax_stadtke_step._bc_outlet).
         # The two-fluid eigenstructure is analogous: exactly ONE acoustic wave
@@ -633,9 +655,73 @@ def make_two_fluid_step(
             du    = (p98 - p_gh) / imped
             U_hN  = jnp.array([p_gh, uh[1] + du, uh[2] + du, ag, uh[4], uh[5]])
             return U_h.at[-1].set(U_hN)
+    elif bc_outlet == 'characteristic':
+        # Regime-aware outlet, EIGENVECTOR-PROJECTION form (2026-07-28).  Same
+        # regime switch as 'characteristic_old' (tanh blend on the Städtke mixture
+        # Mach), but the ghost state is built the way the characteristic theory
+        # actually prescribes.
+        #
+        # At a subsonic outlet exactly ONE wave enters: the acoustic λ₄ = û − a < 0.
+        # A non-reflecting ghost must therefore perturb the interior state ALONG
+        # the corresponding RIGHT eigenvector r₄ and along nothing else — that
+        # leaves the five outgoing wave amplitudes untouched, so imposing p_out
+        # emits no reflection:
+        #     U_ghost = U[N-2] + s·r₄,     s = (p_ghost − p[N-2]) / (r₄)_p
+        # The scaling makes the pressure component land exactly on the (blended)
+        # target back-pressure, and every other component follows from r₄.
+        #
+        # What this buys over the legacy shared-Δu form:
+        #   * (r₄)_{u_g} = R_24 ≠ (r₄)_{u_l} = R_34 — the two phases get DIFFERENT
+        #     velocity shifts (they coincide only at zero slip and equal ρ̂),
+        #   * (r₄)_α = χ ≠ 0 — the acoustic wave carries a void-fraction change,
+        #   * (r₄)_{h_k} = ρ̂²ã²/ρ_k, so s·(r₄)_{h_k} = (p_ghost − p)/ρ_k, i.e.
+        #     exactly the isentropic dh = dp/ρ an acoustic wave transports (the
+        #     legacy ghost froze h_k at the interior value).
+        # No Wood impedance appears anywhere: the eigenvector supplies its own,
+        # consistent with the flux, the CFL and the regime switch.
+        #
+        # (r₄)_p = ρ̂²ã² > 0 always (ρ̂² = ρ_gρ_l + kρ_mix², ã² > 0), so the scaling
+        # never divides by zero; the ε below is belt-and-braces for the ghost limit.
+        # As w→0 (supersonic) p_ghost→p[N-2] ⇒ s→0 ⇒ pure extrapolation, so the
+        # operator stays smooth across the sonic point exactly as before.
+        _p_out = jnp.float64(p_out)
+        _relax = jnp.float64(p_out_relax)
+        _msw   = jnp.float64(0.05)          # tanh half-width in Mach (switch sharpness)
+        _a_lo  = jnp.float64(alpha_eps)     # ghost α_g floor (same one the interior uses)
+
+        def _bc_outlet(U_h):
+            uh   = U_h[-2]
+            p98  = uh[0]
+            eg   = phase_props(fluid_g, p98, uh[4])
+            el   = phase_props(fluid_l, p98, uh[5])
+            cq   = common_quantities(uh, eg, el, k)
+            ev, R_h = eigenstructure(uh, eg, el, cq)[:2]
+            # Regime from the scheme's OWN wave speeds (see 'characteristic_old':
+            # using the Wood speed here mis-classifies the outlet and silently
+            # drops the back-pressure).
+            a_s   = 0.5 * (ev[2] - ev[3])                 # mixture sound speed (>0)
+            u_s   = 0.5 * (ev[2] + ev[3])                 # hat-weighted mixture velocity
+            M_out = jnp.abs(u_s) / (a_s + 1e-300)
+            w     = 0.5 * (1.0 + jnp.tanh((1.0 - M_out) / _msw))   # 1 sub, 0 super
+            p_gh  = p98 + w * _relax * (_p_out - p98)
+            # Project the pressure change onto the INCOMING acoustic eigenvector.
+            r4    = R_h[:, 3]                             # col 4 ↔ λ₄ = û − a
+            s     = (p_gh - p98) / (r4[0] + 1e-300)
+            U_hN  = uh + s * r4
+            # Realizability guards.  The perturbation is tiny in practice (Δp of a
+            # few hundred Pa ⇒ Δh = Δp/ρ of order 10 J/kg), so these clips are
+            # inactive — identity, and thus invisible to the Newton Jacobian —
+            # everywhere except a pathological transient.  They exist so a large
+            # startup Δp cannot push the ghost off the EOS tables or through the
+            # void bounds, which is how the legacy path used to die.
+            U_hN  = U_hN.at[0].set(jnp.clip(U_hN[0], p_lo, p_hi))
+            U_hN  = U_hN.at[3].set(jnp.clip(U_hN[3], _a_lo, 1.0 - _a_lo))
+            U_hN  = U_hN.at[4].set(jnp.clip(U_hN[4], hg_lo, hg_hi))
+            U_hN  = U_hN.at[5].set(jnp.clip(U_hN[5], hl_lo, hl_hi))
+            return U_h.at[-1].set(U_hN)
     else:
-        raise ValueError(f"unknown bc_outlet={bc_outlet!r} "
-                         f"(only 'transmissive', 'pressure', 'characteristic')")
+        raise ValueError(f"unknown bc_outlet={bc_outlet!r} (only 'transmissive', "
+                         f"'pressure', 'characteristic', 'characteristic_old')")
 
     def _bc_U_h(U_h):
         return _bc_outlet(_bc_inlet(U_h))
