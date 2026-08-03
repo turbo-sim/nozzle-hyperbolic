@@ -49,9 +49,9 @@ shutil.copy(_here / SETTINGS_YAML, out_dir / SETTINGS_YAML)
 print(f"Output directory: {out_dir.resolve()}")
 
 
-out_dir  = pathlib.Path(run_name)
-out_dir.mkdir(parents=True, exist_ok=True)
-print(f"Output directory: {out_dir.resolve()}")
+# out_dir  = pathlib.Path(run_name)
+# out_dir.mkdir(parents=True, exist_ok=True)
+# print(f"Output directory: {out_dir.resolve()}")
 
 ## Fluid
 perfect_gas = case_data["fluid"]["perfect_gas"]
@@ -145,6 +145,12 @@ parameters = {
     "warmup_cfg":      case_data["numerical_settings"].get("warmup", None),
     "nozzle_type":     nozzle_type,
     "wall_friction":   bool(case_data["numerical_settings"].get("wall_friction", True)),
+    # 4th-order JST filter for the low-Mach p-checkerboard (port of the
+    # two-fluid eps_void filter).  0.0 = OFF (default, behaviour unchanged);
+    # ~0.05 typical.  Optional velocity gate ucut/uwidth [m/s] (null = ungated).
+    "eps_filter":        float(case_data["numerical_settings"].get("eps_filter", 0.0)),
+    "eps_filter_ucut":   case_data["numerical_settings"].get("eps_filter_ucut", None),
+    "eps_filter_uwidth": case_data["numerical_settings"].get("eps_filter_uwidth", None),
 }
 if perfect_gas:
     parameters["gamma"] = cp / cv

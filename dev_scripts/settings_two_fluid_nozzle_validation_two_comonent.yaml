@@ -53,7 +53,7 @@ eos:
 
 # ── Grid ─────────────────────────────────────────────────────────────────────
 grid:
-  Nx: 100
+  Nx: 200
   x1: 0.0
   x2: 0.31
   radius: 0.01        # legacy fallback (geometry block wins)
@@ -83,11 +83,15 @@ numerics:
   jacobian: colored
   jacobian_validate: false   # confirm colored==dense with the widened ±2 filter stencil
   profile: false
+  nc_form: wb
   # normal_eq forms J·Jᵀ → squares κ(J); fine for a soft gas-dominant block but
   # blows up here (water dominant, nearly incompressible → ρa²~2e9 vs gas ~3e6,
   # κ² overflows → NaN, dt-independent).  lstsq (SVD min-norm) does NOT square κ.
   # Try 'qr' for same accuracy at ~3-5× the speed once it runs.
-  linear_solve: normal_eq
+  # normal_eq_banded (E1b, 2026-07-14): SAME numbers as normal_eq (certified by
+  # debug_banded_solve.py: dW agrees to 2.8e-14, ssr to 1e-12) in O(N) instead
+  # of O(N³) — ×2.4 at N=200, far more at N≥400.  Fall back: normal_eq.
+  linear_solve: normal_eq_banded
   # Low-Mach acoustic-dissipation floor:  z_ac = clip(Ma_face, lowmach_diss, 1).
   #   1.0 = full standard dissipation (checkerboard-free test / baseline)
   #   0.0 = z_ac=Ma (reduces pressure diffusion at low Ma → checkerboard grows)
@@ -128,18 +132,27 @@ numerics:
   # in between.  This is the ROOT-CAUSE fix (the old hard switch was |du|<1e-4, far too
   # tight).  Widen [lo,hi] on coarser meshes (du changes more per cell) so the blend
   # still spans a few cells; shrink toward the physical slip on fine meshes.
-  du_blend_lo: 0.01
-  du_blend_hi: 0.10
+  # du_blend_lo: 0.01
+  # du_blend_hi: 0.10
+  du_blend_lo: 0.5
+  du_blend_hi: 1.0      # → zero-slip (P12) formulation everywhere
+  # eos_project: damped
+  eos_rows: true
+  eos_project: false
+  # GENERAL w_ref (2026-07-17): state-derived column-scaling floors, certified
+  # bit-identical to the solver defaults on this two-component state
+  # (debug_wref_sensitivity.py); adapts automatically if α becomes small.
+  w_char: auto
 
 # ── Initial / inlet condition ─────────────────────────────────────────────────
 # Inlet is specified by (p, T, u); the driver builds each phase's enthalpy from
 # (p, T) via the EOS (PT_INPUTS) — NOT a saturation offset.
-# ic:
-#   type: nozzlex
-#   pickle: results/solution_elliot_subsonic_20.0bar_mr68_nb1.00e+13_nd1.00e+11_u1_1.0.pkl
 ic:
-  type: nozzlex
+  type: stagnation
+  # type: nozzlex
   pickle: results/smoothed_restart.pkl
+  # pickle: results_old/solution_elliot_subsonic_20.0bar_mr67.88_nb1.00e+13_nd1.00e+11.pkl
+  # pickle: results/solution_elliot_subsonic_20.0bar_mr68_nb1.00e+13_nd1.00e+11_u1_1.0.pkl
 
   # uniform:
   #   p:          200000.0   # Pa  — 100 bar (shared by both phases)
@@ -189,7 +202,7 @@ time_control:
 
 # ── Run control ───────────────────────────────────────────────────────────────
 run:
-  n_steps: 10000
+  n_steps: 20000
   print_every: 50
   ssr_tol: 1.0e-6
   t_end: null
@@ -197,3 +210,7 @@ run:
   plateau_ratio: 1.01
   visualize_ic: false
   debug_newton: false
+
+save_options:
+  repo_main: results_two_components
+  repo_run: two_component_old

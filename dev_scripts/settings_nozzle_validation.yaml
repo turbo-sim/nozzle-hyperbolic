@@ -11,7 +11,7 @@ numerical_settings:
   x2: 0.31           # matches geometry L=0.2
   t1: 0.00
   t2: 100.0          # large — residual criterion will stop iteration first
-  CFL: 0.5         # keep small for shock capture; supersonic cases can use larger
+  CFL: 1.0         # keep small for shock capture; supersonic cases can use larger
   max_iterations: 10000
   residuals: 1.0e-6
  
@@ -31,6 +31,15 @@ numerical_settings:
   adaptive_dt: false            # true = halve dt on large Δp/Δh/Δu (safe); false = full CFL dt, accept always (faster, no safety net)
 
   wall_friction: false  # frictionless — exact solution assumes inviscid
+
+  # 4th-order JST filter for the low-Mach PRESSURE checkerboard (port of the
+  # two-fluid eps_void filter).  0.0 = OFF (identical to previous behaviour).
+  # Conservative flux, O(eps·Δx³) on smooth flow — sweep 0.02→0.1 and confirm
+  # the profile is ε-independent.  ucut/uwidth [m/s] = optional velocity gate
+  # (null → uniform; leave ungated here — the p-mode sits at the THROAT).
+  eps_filter: 0.05
+  eps_filter_ucut: null
+  eps_filter_uwidth: null
 
   profile: false         # JAX device trace → <out_dir>/jax_trace; view at ui.perfetto.dev or tensorboard
 

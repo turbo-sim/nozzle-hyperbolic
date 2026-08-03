@@ -1,0 +1,156 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# GAS-DOMINANT compressible validation: two-fluid solver vs analytic area–Mach.
+#
+# Goal
+# ----
+# Mirror of the Bernoulli ghost-limit case at the OTHER end of the void range:
+# alpha_g ≈ 1 − 1e-4 (gas dominant, near-massless liquid-slot ghost), choked
+# converging–diverging nozzle, shock-free PERFECT EXPANSION.  The converged
+# solution must reproduce the analytic perfect-gas isentropic solution:
+#     A/A* → M(x) (sub branch before the throat, sup branch after),
+#     T = T0/(1+(γ−1)/2 M²),  p = p0 (T/T0)^(γ/(γ−1)),  u = M√(γRT),
+#     choked  mdot* = A* p0 √(γ/(RT0)) (2/(γ+1))^((γ+1)/(2(γ−1))).
+# Validates the α_g→1 limit: K-matrix conditioning with roles swapped, area
+# sources in the compressible regime, choking at the mixture-sonic condition,
+# the Harten fix at the expansion sonic point (first two-fluid transonic test).
+#
+#   gas    = Air (DOMINANT, perfect gas → analytic reference is EXACT)
+#   liquid = Air (GHOST in the liquid slot, alpha_l ≈ 1e-4, perfect gas)
+#
+# AIR + AIR by design (2026-07-17): the ghost is a numerical passenger; using
+# the SAME fluid in both slots makes any phase asymmetry pure numerics.  A
+# real-liquid ghost is impossible here: at M_exit=2.2 the slaved ghost reaches
+# T ≈ 0.51·T0 ≈ 152 K — off every liquid table (supercooled water physically
+# ends ~235 K).  Real water enters the ladder later, in the CONDENSATION case,
+# where the liquid lives near T_sat(p) (always in-table).
+#
+# ►►► DRIVER KNOB: SRC_SCALE = 1.0 (drag+heat slave the ghost, as in Bernoulli).
+# ─────────────────────────────────────────────────────────────────────────────
+
+fluid:
+  name: air
+
+eos:
+  # ── DOMINANT gas: analytic perfect gas (exact area–Mach reference) ──
+  gas:
+    fluid_name: Air
+    backend: perfect_gas
+    T_ref: 300.0                # fit at the reservoir state
+    p_ref: 200000.0             # 2 bar
+  # ── GHOST 'liquid' slot: SAME perfect gas (unbounded, explosion-proof) ──
+  liquid:
+    fluid_name: Air
+    backend: perfect_gas
+    T_ref: 300.0
+    p_ref: 200000.0
+
+# ── Grid ─────────────────────────────────────────────────────────────────────
+grid:
+  Nx: 401
+  x1: 0.0
+  x2: 0.2                       # = L of the symmetric parabolic nozzle
+  radius: 0.01
+
+# ── Geometry: symmetric parabolic C-D nozzle (geometry.py defaults) ──────────
+# A_inlet/A_throat = A_exit/A_throat = 2.0  →  M_exit(sup) = 2.197,
+# p_exit/p0 = 0.0939, T_exit/T0 = 0.509, inlet M = 0.306.
+geometry:
+  function: get_symmetric_nozzle
+  roughness: 0.0
+
+# ── Interphase closure ────────────────────────────────────────────────────────
+sources:
+  bubble_number:  1.0e13
+  droplet_number: 1.0e11        # α_g→1 ⇒ droplet regime (ghost dispersed in gas)
+  mass_transfer: false          # two-component, no phase change
+
+# ── Numerics (the full 2026-07-17 modern block, as certified on Bernoulli) ────
+numerics:
+  CFL: 5.0
+  newton_iter: 5
+  delta_factor: 1e-6            # Harten fix — WATCH the throat sonic cell
+  recon: muscl_van_albada
+  k_vm: 0.5
+  jacobian: colored
+  jacobian_validate: true
+  profile: false
+  linear_solve: normal_eq_banded
+  # COMPRESSIBLE case ⇒ FULL standard dissipation (2026-07-17 anchor probe):
+  # lowmach_diss 0.0 DIVERGED here (2Δx mode growing from the M≈0.3 inlet,
+  # NaN < 60 steps at CFL 1 and 5; ghost fluid irrelevant — N2 identical) —
+  # the Ma-scaling is an INCOMPRESSIBLE-LIMIT fix, and its eps_void safety
+  # net is velocity-gated OFF here (u ≥ 105 m/s everywhere).  With 1.0 the
+  # anchor march is textbook: SSR monotone 8e-4→1.3e-4, dM ~7e-3 (=O(Δx)),
+  # osc at the throat only.  At M ∈ [0.3, 2.2] full dissipation is the
+  # correct standard scheme anyway (z=clip(Ma,1,1)=1 ∀Ma — no accuracy loss).
+  lowmach_diss: 1.0
+  lowmach_diss_bc: 1.0
+  nc_scale: 1.0
+  # JST void filter: velocity-gated (ucut 40 m/s) ⇒ automatically OFF over
+  # the accelerated part of the nozzle (u up to ~570 m/s), active only in the
+  # slow inlet region — its design intent.
+  eps_void: 0.02
+  eps_void_ucut:   40.0
+  eps_void_uwidth: 12.0
+  eps_void_scale:  frozen
+  # Zero-slip flux formulation everywhere (drag pins du≈0, as in Bernoulli).
+  du_blend_lo: 1.0e9
+  du_blend_hi: 2.0e9
+  # General state-derived column scaling (certified 2026-07-17).
+  w_char: auto
+  # E3-augmented system + banded solve + guarded Jacobian lagging.
+  eos_rows: true
+  eos_rows_banded: true
+  jac_lag: 1
+  eos_project: false
+  nc_form: cell
+
+# ── Initial condition: analytic isentropic (area–Mach) profile ────────────────
+# The IC IS the steady solution up to discretization error → anchor property:
+# SSR must start small and decrease.
+ic:
+  type: isentropic
+
+# ── Boundary conditions ───────────────────────────────────────────────────────
+# Stagnation reservoir inlet; characteristic outlet with the ADAPTED exit
+# pressure (perfect expansion).  At M_exit=2.2 the outlet auto-switches to
+# transmissive (regime weight w→0) — p_out only matters if the flow ever goes
+# subsonic at the exit during the transient.
+bc:
+  inlet: stagnation
+  outlet: characteristic
+
+  p0:            200000.0      # Pa — reservoir pressure (2 bar)
+  T_g0:          300.0         # K
+  T_l0:          300.0         # K
+  void_fraction: 0.99999        # alpha_g ≈ 1 − 1e-4 ⇒ GAS dominant
+  slip:          1.0
+
+  p_out:         18787.0       # Pa = 0.09393·p0 — adapted (design) exit pressure
+  p_out_relax:   1.0
+
+# ── Time-step control ─────────────────────────────────────────────────────────
+time_control:
+  adaptive_dt:  true
+  max_halvings: 8
+  dp_max:       0.50
+  dh_max:       0.05
+  du_max:       0.20
+  da_max:       0.10
+  dt_grow:      1.20
+
+# ── Run control ───────────────────────────────────────────────────────────────
+run:
+  n_steps: 10000
+  print_every: 50
+  ssr_tol: 1.0e-6
+  t_end: null
+  plateau_window: 4000
+  plateau_ratio: 1.01
+  visualize_ic: false
+  debug_newton: false
+
+
+save_options:
+  repo_main: results_single_phase_validation
+  repo_run: perfect_gas

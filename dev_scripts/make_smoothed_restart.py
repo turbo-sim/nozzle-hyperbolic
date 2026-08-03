@@ -54,6 +54,21 @@ fields = {k: smooth(D[k]) for k in
           ("p", "u_g", "u_l", "alpha_g", "T_g", "T_l", "h_g", "h_l", "rho_g", "rho_l")}
 x = D["x"].astype(float)
 
+# argv[4] == 'slaveghost' (ghost-limit cases): REPLACE the ghost-gas fields with
+# their drag/heat-slaved values instead of restarting the transient's garbage
+# (observed: smoothed h_g carried a 60 K hump → stiff heat source → NaN at t=0).
+#   u_g := u_l,  T_g := T_l  (h = cp·T for the perfect gas — cp, R fitted from
+#   the run's own data), alpha := its median (≈ the BC seed).
+if len(sys.argv) > 4 and sys.argv[4] == "slaveghost":
+    cp_est = float(np.median(D["h_g"] / D["T_g"]))
+    R_est  = float(np.median(D["p"] / (D["rho_g"] * D["T_g"])))
+    fields["u_g"]     = fields["u_l"].copy()
+    fields["h_g"]     = cp_est * fields["T_l"]
+    fields["rho_g"]   = fields["p"] / (R_est * fields["T_l"])
+    fields["alpha_g"] = np.full_like(x, float(np.median(D["alpha_g"])))
+    print(f"SLAVED ghost: u_g=u_l, T_g=T_l (cp={cp_est:.1f}, R={R_est:.1f}), "
+          f"alpha={fields['alpha_g'][0]:.2e} const")
+
 # report the 2Dx suppression on the diagnostic fields
 def osc_pct(f):
     o = np.abs(f[1:-1] - 0.5*(f[:-2] + f[2:]))
@@ -71,7 +86,9 @@ pass1 = dict(
     h1=fields["h_l"],     h2=fields["h_g"],
     rho1=fields["rho_l"], rho2=fields["rho_g"],
 )
-out = _here / "results" / "smoothed_restart.pkl"
+# argv[3]: output filename (default smoothed_restart.pkl — careful, the
+# two-component yaml points at that name; give case-specific names).
+out = _here / "results" / (sys.argv[3] if len(sys.argv) > 3 else "smoothed_restart.pkl")
 with open(out, "wb") as f:
     pickle.dump({"pass1": pass1, "pass2": None, "pass3": None}, f)
 print(f"Wrote: {out}")
