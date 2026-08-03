@@ -31,7 +31,6 @@ snakeviz = "^2.2.2"
 parse = "^1.22.0"
 line-profiler = "^5.0.2"
 tensorboard = "^2.20.0"
-nozzlex = {path = "../nozzlex", develop = true}
 
 
 [tool.poetry.group.dev.dependencies]
@@ -61,4 +60,3 @@ build-backend = "poetry.core.masonry.api"
 
 # Rememeber to add --tags when publishing a new version
 # git push origin main --tags
-
