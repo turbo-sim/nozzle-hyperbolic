@@ -47,5 +47,11 @@ debug_*
 check_*
 
 # results folders
-results/
-results_old/
+results*
+
+# old_file
+old_*
+
+implementation_notes/
+demo_nozzlex/
+
