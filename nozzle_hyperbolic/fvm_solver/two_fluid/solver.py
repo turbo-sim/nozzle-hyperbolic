@@ -195,13 +195,48 @@ def make_two_fluid_step(
               on ghost-scale noise — use for ghost-limit cases) | 'muscl_minmod'
               | 'mc' | 'constant'
     sources_fn : optional callable with signature
-    lowmach_diss : small blend factor for a Rusanov/LF stabilization term,
-                   used to damp the low-Mach checkerboard mode at the interface flux
                    (u_h, eos_g, eos_l, cq, dlnA, sat_g, sat_l) → D_VE (6,)
                  where sat_g = fluid_g.get_state_saturation(p) — sat. vapor props dict,
                        sat_l = fluid_l.get_state_saturation(p) — sat. liquid props dict.
                  Use sat_g["enthalpy"], sat_g["temperature"], etc. (canonical names).
                  If None, only the geometric area-variation source is included.
+    lowmach_diss, lowmach_diss_bc : small blend factor(s) for a Rusanov/LF
+                 stabilization term, used to damp the low-Mach checkerboard mode
+                 at the interface flux. lowmach_diss_bc optionally overrides the
+                 blend at the two boundary faces (None → same as lowmach_diss).
+    nc_scale   : float, default 1.0. Scales the non-conservative geometric
+                 coupling term (H^nc·ΔF, see nc_form below). nc_scale=0 turns
+                 NC coupling OFF — a DIAGNOSTIC setting, not for production runs.
+    eps_void, eps_void_ucut, eps_void_uwidth, eps_void_scale :
+                 4th-order JST-style filter damping the low-Mach void/slip
+                 checkerboard mode. eps_void=0 (default) disables it.
+                 eps_void_scale: 'wood' (default, true dipping mixture sound
+                 speed) or 'frozen' (non-dipping surrogate) — both are
+                 deliberately-supported production choices, not legacy vs new.
+                 eps_void_ucut/_uwidth optionally gate the filter to low-velocity
+                 regions only (None → ungated).
+    eps_ghost, eps_ghost_acut, eps_ghost_awidth, eps_ghost_k2, eps_ghost_alo :
+                 shock-aware (JST-sensor cross-faded) filter damping the
+                 ghost-phase 2Δx limit cycle near the void floor. eps_ghost=0
+                 (default) disables it. NOTE: eps_ghost_k2 defaults to 0.0, but
+                 an inline comment at its use site recommends ~4 (from a
+                 certified run) to keep the damping rate constant through the
+                 shock-sensor cross-fade — doc/default drift, see
+                 dev_scripts/OPEN_QUESTIONS.md item 5.
+    du_blend_lo, du_blend_hi : velocity-difference thresholds blending between
+                 the exact two-velocity FVS flux and a shared-velocity
+                 (homogeneous) low-Mach-safe flux at the interface.
+    debug_newton : bool, default False. When True, runs Newton as a plain
+                 Python for-loop with print() diagnostics each iteration (not
+                 JIT-able) — interactive debugging only, never production.
+    jacobian_mode : 'dense' (default) | 'colored'. 'colored' is a graph-colored,
+                 cheaper Jacobian assembly, verified numerically equivalent to
+                 'dense' via the jac_diff sparsity guard — pure perf choice.
+    linear_solve : 'lstsq' (default, SVD min-norm, most robust) |
+                 'normal_eq' / 'normal_eq_banded' (κ²-squared, faster) | 'qr'.
+                 Deliberate accuracy/speed tradeoffs, not legacy vs new.
+    linear_reg : float, default 0.0. Tikhonov regularization added to the
+                 linear solve; 0 = off.
     bc_inlet   : 'transmissive' (default), 'total_state', 'stagnation',
                  'stagnation_ramped', 'static_state', or 'subsonic_inflow'.
                  'total_state' mirrors _bc_inlet_real from the single-phase solver:
@@ -214,11 +249,98 @@ def make_two_fluid_step(
                    right eigenvector r₄ (λ₄ = û − a), so no reflection is emitted.
                  'characteristic_old' is the legacy form of the same BC: identical
                    switch, but a shared Δu on both phases through the homogeneous
-                   (Wood) impedance, with α_g and h_k frozen.  Kept as an A/B
-                   reference; the two agree to ~0.06% at steady state.
+                   (Wood) impedance, with α_g and h_k frozen.  Kept as an
+                   INTENTIONAL A/B reference (still selected by some driver
+                   scripts to reproduce old runs) — the two agree to ~0.06% at
+                   steady state. Not a cleanup target.
     H_g0       : total gas enthalpy at inlet [J/kg]  (required when bc_inlet='total_state')
     H_l0       : total liquid enthalpy at inlet [J/kg]
     alpha_g0   : void fraction at inlet [-]
+    s_g0, s_l0 : stagnation entropy at inlet [J/(kg·K)], gas/liquid — closes the
+                 reservoir isentrope for the 'stagnation'/'stagnation_ramped'
+                 inlets; which one is used is selected by dom_phase.
+    dom_phase  : 'gas' (default) | 'liquid'. Selects which phase's isentrope
+                 (s_g0 vs s_l0) drives the stagnation-inlet pressure fixed
+                 point: 'gas' for gas-dominant tiers, 'liquid' for
+                 liquid-dominant/flashing cases.
+    iso_h, iso_p : optional caller-precomputed (h, p) isentrope tables,
+                 bypassing the in-function bicubic isentrope build — needed when
+                 the dominant phase's bicubic EOS has no root at low p on its
+                 own isentrope (e.g. a liquid isentrope landing two-phase).
+    quality, slip : required by the 'stagnation'/'stagnation_ramped' inlets —
+                 gas mass fraction x0 and velocity slip ratio S0 = u_g/u_l,
+                 jointly fixing the inlet void fraction and velocity split.
+    U_h_inlet  : full 6-vector Dirichlet inlet state (p, u_g, u_l, α_g, h_g, h_l),
+                 used by bc_inlet='static_state'/'subsonic_inflow'.
+    p_out      : back-pressure [Pa] for bc_outlet='pressure'/'characteristic'/
+                 'characteristic_old'.
+    p_out_relax : float, default 1.0. Under-relaxation factor blending p_out
+                 into the outlet ghost each step (1.0 = full imposition).
+    eos_project : True (default, classic 2×2 (p, α) pair projection) | 'damped'
+                 (conditioning-gated pair, ghost-safe — use for flashing) |
+                 False (off). 'triangular' FAILED certification (see
+                 dev_scripts/debug_projection_tri.py, which documents the
+                 failure) and now raises a ValueError rather than being
+                 silently selectable.
+    proj_s_ref : float, default 2e-2. Reference entropy scale conditioning the
+                 'damped' projection's gate.
+    eos_rows, eos_rows_banded : bool, default False. eos_rows=True switches to
+                 an EXPERIMENTAL 8-row E3-augmented residual system that folds
+                 the EOS-manifold projection directly into the Newton residual
+                 instead of post-hoc projecting; self-labeled "prototype"
+                 (2026-07-15), fixes a measured secular liquid-mass drain but
+                 is not yet the production default — see
+                 dev_scripts/OPEN_QUESTIONS.md item 4. eos_rows_banded=True
+                 switches the dense eos_rows path to a verified-equivalent
+                 O(N) block-banded twin (only meaningful when eos_rows=True).
+    jac_lag    : int, default 1. Newton Jacobian refresh cadence on the
+                 eos_rows_banded path; 1 = refresh every iteration (certified
+                 default); >1 lags the refresh but additionally force-refreshes
+                 whenever the residual failed to decrease (added after a
+                 naively-scheduled lag diverged on strong transients).
+    nc_form    : 'cell' (default, "ours") | 'staedtke' (book eq. 8.38) | 'wb'
+                 (well-balanced, 2026-07-15). Correctness is an UNRESOLVED
+                 pairing property between this term and the area-source
+                 content, discriminated only by dev_scripts/debug_nc_contact.py
+                 — see dev_scripts/OPEN_QUESTIONS.md item 1. Production stays
+                 on 'cell' regardless of this docstring's existence.
+    use_saturation : bool, default True. Whether sources_fn's sat_g/sat_l
+                 saturation-property lookups are computed; set False only for
+                 fluids/sources that never reference them (e.g. non-saturating
+                 gases, or mass-transfer-off configs). Must be True if
+                 pin_ghost=True.
+    w_char     : None (default, fixed two-component-calibrated Newton min-norm
+                 floors) | 'auto' (local rolling-max floor scaled to the field,
+                 certified by dev_scripts/debug_wref_sensitivity.py for a
+                 ghost-limit thrash bug) | explicit length-8 list override. See
+                 dev_scripts/OPEN_QUESTIONS.md item 3 for why 'auto' isn't yet
+                 the default.
+    ssr_mode   : 'all' (default, equal-weighted steady-state residual across
+                 all rows — self-labeled legacy in-code) | 'mass' (mass-row-
+                 weighted; fixes a measured pathology where ghost rows owned up
+                 to 99.98% of the plain SSR² on a converged run). See
+                 dev_scripts/OPEN_QUESTIONS.md item 2.
+    return_debug : bool, default False. When True, step() additionally returns
+                 an internal-state debug dict (Jacobian, residual breakdown,
+                 etc.) for probe scripts; adds overhead, not for production.
+    alpha_eps  : float, default _ALPHA_EPS. Per-run void-fraction floor; the
+                 default is tuned for the gas-dominant tier — flashing runs
+                 with a thin liquid-side ghost should raise it (~1e-4..1e-3).
+    pin_ghost, pin_ghost_momentum : bool, default False. Algebraic pins slaving
+                 the ghost-phase energy/momentum toward the saturation curve /
+                 dominant-phase value, guarding against the ghost-phase 2Δx
+                 amplifier. Both carry an explicit "NO-DEADLOCK INVARIANT — do
+                 not break" contract at their implementation site (the pin may
+                 only ever WIDEN toward 1, never narrow) that any future edit
+                 must preserve.
+
+    See also: dAdx must satisfy dAdx·dx ≡ ΔA_face (the well-balanced area-
+    gradient invariant) or the smooth-flow flux divergence will not exactly
+    cancel the geometric source, reintroducing a 2Δx checkerboard. This
+    function does not currently assert the invariant itself — see
+    dev_scripts/main_two_fluid.py's "WELL-BALANCED area gradient" section for
+    the caller-side fix, and dev_scripts/OPEN_QUESTIONS.md for the note that
+    this should move into an internal check.
 
     Returns
     -------
@@ -432,101 +554,113 @@ def make_two_fluid_step(
             return _apply_ramped_inlet(U_h, U_h0, n_cells=3)
 
     elif bc_inlet == "stagnation_ramped_soft":
-        # Characteristic-consistent reservoir BC, blended into the first three
-        # cells via UNDER-RELAXATION (not a hard overwrite) to avoid injecting
-        # grid-scale noise at the interior/BC interface. The extrapolation of
-        # the single outgoing characteristic is also damped (limited) instead
-        # of a raw linear extrapolation, since raw linear extrapolation is a
-        # high-pass filter on 2dx noise and will amplify checkerboard modes.
-        _H_g0 = jnp.float64(H_g0);  _H_l0 = jnp.float64(H_l0)
-        _s_g0 = jnp.float64(s_g0)
-        _x0   = jnp.float64(quality)
-        _S0   = jnp.float64(slip)
-        _rx   = (1.0 - _x0) / _x0
-
-        _OMEGA   = jnp.float64(0.3)     # relaxation gain, e.g. 0.2-0.4
-        _EXTRAP_LIMIT = jnp.float64(0.5)        # 0 = no extrap (1st order),
-                                                # 1 = full linear extrap
-
-        def _umix_of(uh_cell):
-            p_, ug_, ul_, ag_, hg_, hl_ = uh_cell
-            al_ = 1.0 - ag_
-            rg_ = phase_props(fluid_g, p_, hg_).rho
-            rl_ = phase_props(fluid_l, p_, hl_).rho
-            return (ag_ * rg_ * ug_ + al_ * rl_ * ul_) / (ag_ * rg_ + al_ * rl_)
-
-        def _split(u_mix, ag, rg, rl):
-            al = 1.0 - ag
-            rmix = ag * rg + al * rl
-            u_l  = u_mix * rmix / (ag * rg * _S0 + al * rl)
-            return _S0 * u_l, u_l
-
-        def _damped_extrap(u1, u2, u3):
-            # Minmod-limited extrapolation of the outgoing characteristic instead
-            # of raw 2*u1 - u2. Falls back toward u1 (1st order / zero-gradient)
-            # whenever the interior gradient changes sign or is noisy, which is
-            # exactly the checkerboard signature -> kills it at the source.
-            d1 = u1 - u2
-            d2 = u2 - u3
-            same_sign = jnp.sign(d1) == jnp.sign(d2)
-            slope = jnp.where(same_sign,
-                            jnp.sign(d1) * jnp.minimum(jnp.abs(d1), jnp.abs(d2)),
-                            0.0)
-            return u1 + _EXTRAP_LIMIT * slope
-
-        def _bc_inlet(U_h):
-            u_mix = _damped_extrap(_umix_of(U_h[1]), _umix_of(U_h[2]), _umix_of(U_h[3]))
-
-            # p_s = jnp.clip(U_h[1, 0], p_lo, p_hi)   # (was) seed from the SPIKING cell 1
-            p_s = jnp.clip(U_h[0, 0], p_lo, p_hi)     # warm-start from previous inlet (ghost)
-            h_g = jnp.clip(U_h[1, 4], hg_lo, hg_hi)
-            h_l = jnp.clip(U_h[1, 5], hl_lo, hl_hi)
-            for _ in range(4):
-                rg = phase_props(fluid_g, p_s, h_g).rho
-                rl = phase_props(fluid_l, p_s, h_l).rho
-                ag = 1.0 / (1.0 + _rx * (rg / rl) * _S0)
-                u_g, u_l = _split(u_mix, ag, rg, rl)
-                h_g = jnp.clip(_H_g0 - 0.5 * u_g**2, hg_lo, hg_hi)
-                h_l = jnp.clip(_H_l0 - 0.5 * u_l**2, hl_lo, hl_hi)
-                # OLD gas-isentrope NEWTON step (commented — ρT~6000 → overshoots p to
-                # the table edge → the inlet spike; under-relax/cap BROKE convergence):
-                # st  = fluid_g.get_state(jxp.HmassP_INPUTS,
-                #                         jnp.expand_dims(h_g, 0), jnp.expand_dims(p_s, 0))
-                # p_s = jnp.clip(p_s + st["rho"][0] * st["T"][0] * (st["s"][0] - _s_g0),
-                #             p_lo, p_hi)
-                # p ON the reservoir isentrope at h_g — PRECOMPUTED isentrope lookup
-                # (interp), NOT a per-step reverse (h,s)→p solve.  Exact on-isentrope
-                # pressure, always finite, clamps below-range instead of crashing.
-                p_s = jnp.clip(jnp.interp(h_g, _h_iso, _p_iso), p_lo, p_hi)
-            rg = phase_props(fluid_g, p_s, h_g).rho
-            rl = phase_props(fluid_l, p_s, h_l).rho
-            ag = 1.0 / (1.0 + _rx * (rg / rl) * _S0)
-            u_g, u_l = _split(u_mix, ag, rg, rl)
-            U_h0 = jnp.array([p_s, u_g, u_l, ag, h_g, h_l])
-
-            return _apply_ramped_inlet_relaxed(U_h, U_h0, n_cells=3, omega=_OMEGA)
-
-        def _apply_ramped_inlet_relaxed(U_h, U_h0, n_cells, omega):
-            # Instead of overwriting cells 1..n_cells with a spatial ramp toward
-            # U_h0 (hard reset every step -> impedance mismatch at cell n_cells+1
-            # -> reflected 2dx noise), nudge each cell a fraction `omega` of the
-            # way toward a *per-cell* target that itself ramps in weight from the
-            # boundary inward. This is a soft spring, not a Dirichlet reset, so
-            # residual-based (implicit) convergence is unaffected at steady state
-            # -- omega only controls transient path, not the converged solution,
-            # since at convergence U_h == U_h0 makes the correction vanish anyway.
-            # GHOST cell 0 MUST carry the imposed reservoir state — it is what the
-            # inlet flux (face between ghost 0 and cell 1) reads.  The soft ramp only
-            # touches cells 1..n_cells, so WITHOUT this the ghost floats to garbage
-            # (observed: p→0, u→−55, T<0 spike at x≈0).  Hard-set it like every other
-            # inlet variant; the under-relaxation below is only for the interior cells.
-            U_h = U_h.at[0].set(U_h0)
-            idx = jnp.arange(1, n_cells + 1)
-            ramp_w = jnp.linspace(1.0, 1.0 / n_cells, n_cells)   # 1 at inlet -> weaker inward
-            target = U_h0[None, :]                                # same target state, weighted blend
-            blended_target = ramp_w[:, None] * target + (1.0 - ramp_w[:, None]) * U_h[idx]
-            U_h = U_h.at[idx].set(U_h[idx] + omega * (blended_target - U_h[idx]))
-            return U_h
+        # RETIRED (2026-08-04): never selected anywhere in the repo (undocumented
+        # in this docstring's bc_inlet enum, zero callers found by a full grep of
+        # dev_scripts/), and its inline alternate gas-isentrope Newton step is
+        # explicitly marked broken below ("BROKE convergence"). The under-
+        # relaxed/damped-extrapolation implementation is left commented out
+        # (not deleted) as the historical record of what was tried; see 'stagnation'
+        # and 'stagnation_ramped' above for the maintained reservoir-BC variants.
+        raise ValueError(
+            "bc_inlet='stagnation_ramped_soft' is retired (never used, contains "
+            "a known-broken inline Newton step). Use 'stagnation' or "
+            "'stagnation_ramped' instead."
+        )
+        # # Characteristic-consistent reservoir BC, blended into the first three
+        # # cells via UNDER-RELAXATION (not a hard overwrite) to avoid injecting
+        # # grid-scale noise at the interior/BC interface. The extrapolation of
+        # # the single outgoing characteristic is also damped (limited) instead
+        # # of a raw linear extrapolation, since raw linear extrapolation is a
+        # # high-pass filter on 2dx noise and will amplify checkerboard modes.
+        # _H_g0 = jnp.float64(H_g0);  _H_l0 = jnp.float64(H_l0)
+        # _s_g0 = jnp.float64(s_g0)
+        # _x0   = jnp.float64(quality)
+        # _S0   = jnp.float64(slip)
+        # _rx   = (1.0 - _x0) / _x0
+        #
+        # _OMEGA   = jnp.float64(0.3)     # relaxation gain, e.g. 0.2-0.4
+        # _EXTRAP_LIMIT = jnp.float64(0.5)        # 0 = no extrap (1st order),
+        #                                         # 1 = full linear extrap
+        #
+        # def _umix_of(uh_cell):
+        #     p_, ug_, ul_, ag_, hg_, hl_ = uh_cell
+        #     al_ = 1.0 - ag_
+        #     rg_ = phase_props(fluid_g, p_, hg_).rho
+        #     rl_ = phase_props(fluid_l, p_, hl_).rho
+        #     return (ag_ * rg_ * ug_ + al_ * rl_ * ul_) / (ag_ * rg_ + al_ * rl_)
+        #
+        # def _split(u_mix, ag, rg, rl):
+        #     al = 1.0 - ag
+        #     rmix = ag * rg + al * rl
+        #     u_l  = u_mix * rmix / (ag * rg * _S0 + al * rl)
+        #     return _S0 * u_l, u_l
+        #
+        # def _damped_extrap(u1, u2, u3):
+        #     # Minmod-limited extrapolation of the outgoing characteristic instead
+        #     # of raw 2*u1 - u2. Falls back toward u1 (1st order / zero-gradient)
+        #     # whenever the interior gradient changes sign or is noisy, which is
+        #     # exactly the checkerboard signature -> kills it at the source.
+        #     d1 = u1 - u2
+        #     d2 = u2 - u3
+        #     same_sign = jnp.sign(d1) == jnp.sign(d2)
+        #     slope = jnp.where(same_sign,
+        #                     jnp.sign(d1) * jnp.minimum(jnp.abs(d1), jnp.abs(d2)),
+        #                     0.0)
+        #     return u1 + _EXTRAP_LIMIT * slope
+        #
+        # def _bc_inlet(U_h):
+        #     u_mix = _damped_extrap(_umix_of(U_h[1]), _umix_of(U_h[2]), _umix_of(U_h[3]))
+        #
+        #     # p_s = jnp.clip(U_h[1, 0], p_lo, p_hi)   # (was) seed from the SPIKING cell 1
+        #     p_s = jnp.clip(U_h[0, 0], p_lo, p_hi)     # warm-start from previous inlet (ghost)
+        #     h_g = jnp.clip(U_h[1, 4], hg_lo, hg_hi)
+        #     h_l = jnp.clip(U_h[1, 5], hl_lo, hl_hi)
+        #     for _ in range(4):
+        #         rg = phase_props(fluid_g, p_s, h_g).rho
+        #         rl = phase_props(fluid_l, p_s, h_l).rho
+        #         ag = 1.0 / (1.0 + _rx * (rg / rl) * _S0)
+        #         u_g, u_l = _split(u_mix, ag, rg, rl)
+        #         h_g = jnp.clip(_H_g0 - 0.5 * u_g**2, hg_lo, hg_hi)
+        #         h_l = jnp.clip(_H_l0 - 0.5 * u_l**2, hl_lo, hl_hi)
+        #         # OLD gas-isentrope NEWTON step (commented — ρT~6000 → overshoots p to
+        #         # the table edge → the inlet spike; under-relax/cap BROKE convergence):
+        #         # st  = fluid_g.get_state(jxp.HmassP_INPUTS,
+        #         #                         jnp.expand_dims(h_g, 0), jnp.expand_dims(p_s, 0))
+        #         # p_s = jnp.clip(p_s + st["rho"][0] * st["T"][0] * (st["s"][0] - _s_g0),
+        #         #             p_lo, p_hi)
+        #         # p ON the reservoir isentrope at h_g — PRECOMPUTED isentrope lookup
+        #         # (interp), NOT a per-step reverse (h,s)→p solve.  Exact on-isentrope
+        #         # pressure, always finite, clamps below-range instead of crashing.
+        #         p_s = jnp.clip(jnp.interp(h_g, _h_iso, _p_iso), p_lo, p_hi)
+        #     rg = phase_props(fluid_g, p_s, h_g).rho
+        #     rl = phase_props(fluid_l, p_s, h_l).rho
+        #     ag = 1.0 / (1.0 + _rx * (rg / rl) * _S0)
+        #     u_g, u_l = _split(u_mix, ag, rg, rl)
+        #     U_h0 = jnp.array([p_s, u_g, u_l, ag, h_g, h_l])
+        #
+        #     return _apply_ramped_inlet_relaxed(U_h, U_h0, n_cells=3, omega=_OMEGA)
+        #
+        # def _apply_ramped_inlet_relaxed(U_h, U_h0, n_cells, omega):
+        #     # Instead of overwriting cells 1..n_cells with a spatial ramp toward
+        #     # U_h0 (hard reset every step -> impedance mismatch at cell n_cells+1
+        #     # -> reflected 2dx noise), nudge each cell a fraction `omega` of the
+        #     # way toward a *per-cell* target that itself ramps in weight from the
+        #     # boundary inward. This is a soft spring, not a Dirichlet reset, so
+        #     # residual-based (implicit) convergence is unaffected at steady state
+        #     # -- omega only controls transient path, not the converged solution,
+        #     # since at convergence U_h == U_h0 makes the correction vanish anyway.
+        #     # GHOST cell 0 MUST carry the imposed reservoir state — it is what the
+        #     # inlet flux (face between ghost 0 and cell 1) reads.  The soft ramp only
+        #     # touches cells 1..n_cells, so WITHOUT this the ghost floats to garbage
+        #     # (observed: p→0, u→−55, T<0 spike at x≈0).  Hard-set it like every other
+        #     # inlet variant; the under-relaxation below is only for the interior cells.
+        #     U_h = U_h.at[0].set(U_h0)
+        #     idx = jnp.arange(1, n_cells + 1)
+        #     ramp_w = jnp.linspace(1.0, 1.0 / n_cells, n_cells)   # 1 at inlet -> weaker inward
+        #     target = U_h0[None, :]                                # same target state, weighted blend
+        #     blended_target = ramp_w[:, None] * target + (1.0 - ramp_w[:, None]) * U_h[idx]
+        #     U_h = U_h.at[idx].set(U_h[idx] + omega * (blended_target - U_h[idx]))
+        #     return U_h
 
     elif bc_inlet == 'static_state':
         # Fully-fixed (Dirichlet) STATIC inlet — mirrors the space-marching demo:
@@ -1860,10 +1994,19 @@ def make_two_fluid_step(
         # site in the scheme, not projected away.
 
     # eos_project: True (classic 2×2 pair) | 'damped' (conditioning-gated
-    # pair, ghost-safe and α-uniform — use for flashing) | 'triangular'
-    # (FAILED certification, kept for reference — do not use) | False.
+    # pair, ghost-safe and α-uniform — use for flashing) | False.
+    # 'triangular' FAILED certification (see dev_scripts/debug_projection_tri.py,
+    # which exists to document the failure) and is retired to a hard error below
+    # rather than silently selectable — _project_cell_tri is kept, unreachable,
+    # as the historical record of what was tried (2026-08-04 downgrade).
+    if eos_project == 'triangular':
+        raise ValueError(
+            "eos_project='triangular' FAILED certification and is retired — "
+            "see dev_scripts/debug_projection_tri.py for the certification run "
+            "that documents the failure (secular e_l drift, fails at step 1). "
+            "Use eos_project=True (classic) or 'damped' (ghost-safe) instead."
+        )
     _project_one = (_project_cell_damped if eos_project == 'damped'
-                    else _project_cell_tri if eos_project == 'triangular'
                     else _project_cell)
 
     def _project_interior(W_int_flat):
