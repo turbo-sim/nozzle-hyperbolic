@@ -432,3 +432,93 @@ def get_nozzle_simoneau_bspline(
 
     area, area_slope, radius = jax.vmap(_scalar)(jnp.asarray(length, dtype=jnp.float64))
     return Geometry(A=area, dAdx=area_slope, D_h=radius*2, roughness=float(roughness))
+
+
+def get_southwest_nozzle(
+    length,
+    roughness=0.0,
+    convergent_length=0.250,
+    throat_length=0.044,
+    divergent_length=0.300,
+    radius_in=0.0333250,
+    radius_throat=0.0101600,
+    radius_out=0.0333250,
+    cubic_on_area=False,
+):
+    """
+    Converging-diverging nozzle of Table 1.
+ 
+        convergent   L = 250 mm   D: 66.65 -> 20.32 mm   cubic
+        throat       L =  44 mm   D  = 20.32 mm          constant
+        divergent    L = 300 mm   D: 20.32 -> 66.65 mm   linear
+ 
+    The cubic is the smoothstep S(s) = 3s^2 - 2s^3, the unique cubic matching
+    the two end radii with zero slope at both ends.  Zero slope at the
+    downstream end is what lets the contraction meet the constant-area throat
+    without a kink.  The table does not say whether the cubic is laid on the
+    diameter or on the area, so `cubic_on_area` switches between the two
+    (static Python flag, resolved at trace time).
+ 
+    Sections:
+        0: cubic convergent,  x in [0, convergent_length]
+        1: constant throat,   x in [convergent_length, +throat_length]
+        2: linear divergent,  x in [throat exit, total_length]
+ 
+    The throat -> divergent junction is C0 only: the straight wall starts at a
+    finite slope, so dA/dx jumps from 0 to about 15 A there.  That is what the
+    table prescribes.  If the reconstruction dislikes it, blend `drdx` over a
+    few mm the way get_nozzle_smd_divergent_smooth does, rather than changing
+    the profile itself.
+    """
+ 
+    x_throat_in = convergent_length
+    x_throat_out = convergent_length + throat_length
+    drdx_div = (radius_out - radius_throat) / divergent_length
+ 
+    def region_convergent(length):
+        s = jnp.clip(length / convergent_length, 0.0, 1.0)
+        smoothstep = s * s * (3.0 - 2.0 * s)
+        dsmoothstep = 6.0 * s * (1.0 - s) / convergent_length
+        if cubic_on_area:
+            radius = jnp.sqrt(
+                radius_in**2 + (radius_throat**2 - radius_in**2) * smoothstep
+            )
+            drdx = 0.5 * (radius_throat**2 - radius_in**2) * dsmoothstep / radius
+        else:
+            radius = radius_in + (radius_throat - radius_in) * smoothstep
+            drdx = (radius_throat - radius_in) * dsmoothstep
+        area = jnp.pi * radius**2
+        perimeter = 2.0 * jnp.pi * radius
+        area_slope = perimeter * drdx
+        return area, area_slope, perimeter, radius
+ 
+    def region_throat(length):
+        radius = jnp.float64(radius_throat)
+        area = jnp.pi * radius**2
+        perimeter = 2.0 * jnp.pi * radius
+        area_slope = jnp.float64(0.0)
+        return area, area_slope, perimeter, radius
+ 
+    def region_divergent(length):
+        l = length - x_throat_out
+        radius = radius_throat + drdx_div * l
+        area = jnp.pi * radius**2
+        perimeter = 2.0 * jnp.pi * radius
+        area_slope = perimeter * drdx_div
+        return area, area_slope, perimeter, radius
+ 
+    funcs = [region_convergent, region_throat, region_divergent]
+ 
+    # lax.switch needs a scalar index → build the scalar core and vmap it over
+    # the position array.
+    def _scalar(length):
+        conds = [
+            length >= x_throat_in,
+            length >= x_throat_out,
+        ]
+        idx = jnp.sum(jnp.array(conds))  # 0 → convergent, 1 → throat, 2 → divergent
+        area, area_slope, perimeter, radius = jax.lax.switch(idx, funcs, length)
+        return area, area_slope, radius
+ 
+    area, area_slope, radius = jax.vmap(_scalar)(jnp.asarray(length, dtype=jnp.float64))
+    return Geometry(A=area, dAdx=area_slope, D_h=radius * 2, roughness=float(roughness))

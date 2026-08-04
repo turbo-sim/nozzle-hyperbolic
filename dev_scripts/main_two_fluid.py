@@ -1,30 +1,9 @@
 # %%
 """
-Two-fluid FVS solver — SINGLE-PHASE-LIMIT verification (ghost second phase).
+Two-fluid FVS solver.
 
-Purpose
--------
-Verify the new quasi-1D AREA-CHANGE source term (sources.D_VE_area) by collapsing
-one phase to a "ghost" (alpha ~ 1e-4) so the two-fluid model must reduce to the
-ordinary single-phase quasi-1D Euler flow in a nozzle.  The dominant phase should
-then match the single-phase Städtke solver (dev_scripts/main.py) run with the SAME
-fluid, geometry, and boundary conditions.
-
-Why this isolates the area source
----------------------------------
-  * GHOST collapses the second phase → no real two-phase coupling.
-  * SRC_SCALE = 0.0 turns OFF the physical interphase sources (drag / heat / mass
-    transfer in D_VE_algebric), so the ONLY source acting is the area term.
-  * AREA_SRC = True enables D_VE_area = [0, 0, ag*p*G, al*p*G, -p*Da, +p*Da],
-    with G = (1/A) dA/dx.  In the single-phase limit ag→1 this is exactly the
-    single-phase wall-pressure source p*G (fvm.py), and Da→0 so the energy terms
-    vanish.  A constant-area pipe gives G=0 → the source is a no-op, so this test
-    REQUIRES a nozzle geometry (set the `geometry:` block in the YAML).
-
-Expected result
----------------
-Dominant-phase p, u, (rho, T) profiles along the nozzle overlay the single-phase
-solver to plotting accuracy.  Ghost phase is passive (its alpha stays ~floor).
+To run different cases, create your own settings_your_name.yaml
+and set it in SETTINGS_FILE
 
 Run from dev_scripts/:
     python main_two_fluid_single_phase.py
@@ -67,31 +46,16 @@ from nozzle_hyperbolic.fvm_solver.two_fluid.sources import (
 
 # Settings file for this test (two-fluid format: gas=Air, liquid=water ghost,
 # mirroring the single-phase settings_nozzle_validation.yaml).
-# SETTINGS_YAML = "settings_two_fluid_nozzle_validation.yaml"
-# SETTINGS_YAML = "settings_two_fluid_nozzle_validation_two_comonent.yaml"
-# SETTINGS_YAML = "settings_two_fluid_nozzle_validation_two_component_test_static.yaml"
-# SETTINGS_YAML = os.environ.get("SETTINGS_YAML", "settings_flashing_smd_supersonic_test.yaml")
-# SETTINGS_YAML = "settings_two_fluid_gas_isentropic.yaml"
-# SETTINGS_YAML = "settings_two_fluid_gas_subsonic.yaml"
-# SETTINGS_YAML = "settings_two_fluid_gas_shock.yaml"
-SETTINGS_YAML = os.environ.get("SETTINGS_YAML","settings_two_fluid_liquid_bernoulli.yaml")
+SETTINGS_FILE = "settings_two_fluid_nozzle_validation_two_component_test_static.yaml"
+SETTINGS_YAML = os.environ.get("SETTINGS_YAML",SETTINGS_FILE)
 # SETTINGS_YAML = os.environ.get("SETTINGS_YAML","settings_two_fluid_liquid_bernoulli_symmetric.yaml")
 _here = pathlib.Path(__file__).parent
 cfg   = load_config(_here / SETTINGS_YAML)
 with open(_here / SETTINGS_YAML, encoding="utf-8") as _f:
     _raw = _yaml.safe_load(_f)
 T_IN = float(_raw["bc"]["T_g0"])   # inlet static T (driver builds h from p,T)
-# bernoulli_N2000_muscl_van_albada_20260729_13550
-# ── Single-phase-limit test knobs ─────────────────────────────────────────────
-# SRC_SCALE : scales the interphase source (D_VE_algebric with mass transfer, or
-#   D_VE_algebric_two_component = drag+heat only when mass_transfer=False in the
-#   YAML).  Keep 1.0 here: with mass_transfer=False the drag+heat SLAVES the ghost
-#   (u_l→u_g, T_l→T_g), dumping the area source's +p·D_α interfacial work into the
-#   gas so h_l can't blow up.  Redistributes between phases only ⇒ the 99.999%
-#   dominant phase (and the area-source validation) is unaffected.
-# AREA_SRC  : the quasi-1D area-change source (D_VE_area) — the term under test.
+
 SRC_SCALE = float(os.environ.get("SRC_SCALE", "1.0"))   # env-overridable (debug_ghost_pump convention)
-# SRC_SCALE = 0.0
 AREA_SRC  = True
 # DOM_ONLY_DT: base the adaptive-dt increment check on the DOMINANT phase only,
 #   ignoring the near-massless GHOST's u_l/h_l (which, with no drag, oscillate
@@ -222,7 +186,7 @@ print(f"  max|(1/A)dA/dx| = {_G_max:.3e} 1/m"
 
 
 # ── Shared state plotter — used for BOTH the initial condition and the final ──
-# solution so the IC is drawn "as an initial solution" (identical panels/format).
+# solution so the IC is drawn "as an initial solution".
 def _plot_state(U_h_arr, title, out_png):
     U  = np.asarray(U_h_arr)
     p, ag = U[:, 0], U[:, 3]
@@ -301,10 +265,6 @@ def _plot_state(U_h_arr, title, out_png):
     return fig
 
 # ── Stagnation (reservoir) inlet state from the YAML bc block ──────────────────
-# Mirrors the single-phase settings_nozzle_validation.yaml `boundary_conditions`,
-# extended for two phases: p0 (shared), per-phase stagnation T_g0/T_l0, composition
-# (void_fraction OR quality) and slip.  H_g0/s_g0/H_l0 come from the reservoir
-# state at rest (u=0); the inlet velocity/mass flux emerge (so the nozzle chokes).
 P0   = cfg.BC_P0   if cfg.BC_P0   is not None else cfg.P_INIT
 T_G0 = cfg.BC_T_G0 if cfg.BC_T_G0 is not None else T_IN
 T_L0 = cfg.BC_T_L0 if cfg.BC_T_L0 is not None else T_G0
@@ -314,8 +274,7 @@ SLIP = cfg.BC_SLIP
 _stl0 = fluid_l_inverse_call.get_state(jxp.PT_INPUTS, jnp.array([P0]), jnp.array([T_L0]))
 _stg0 = fluid_g_inverse_call.get_state(jxp.PT_INPUTS, jnp.array([P0]), jnp.array([T_G0]))
 # _stl0 = _stg0
-# print("Second call is not working, change if change the fluid!!!")
-# input("Now press enter to continue: \n \n")
+
 H_g0   = float(_stg0["enthalpy"][0])          # gas stagnation enthalpy (u=0)
 s_g0   = float(_stg0["s"][0])                 # gas stagnation entropy
 H_l0   = float(_stl0["enthalpy"][0])          # liquid stagnation enthalpy
@@ -356,11 +315,7 @@ elif cfg.BC_VOID is not None:
 else:
     raise ValueError("bc.inlet='stagnation' needs bc.void_fraction or bc.quality")
 
-# Authoritative dominant phase for the pressure closure: MASS fraction, not the
-# volume-weighted α hint above.  QUALITY is the gas mass fraction (density-aware),
-# so it self-selects the phase whose isentrope pins the shared inlet pressure —
-# unless bc.dom_phase forces gas/liquid.  The trace (ghost) phase is compressible/
-# ill-conditioned; closing on the dominant phase is the stiff, physical choice.
+# Authoritative dominant phase for the pressure closure: MASS fraction.
 if cfg.DOM_PHASE in ("gas", "liquid"):
     dom = cfg.DOM_PHASE
     _dom_src = f"forced (bc.dom_phase={cfg.DOM_PHASE})"
@@ -998,10 +953,6 @@ for _nm, _f in [("p    ", p_f), ("u_g  ", u_g_f), ("u_l  ", u_l_f),
     print(f"  {_nm}:  max 2Δx osc = {_amp:.3e}   ({_rel*100:.2f}% of range){_flag}")
 
 # ── Mass-transfer source diagnostic (σ_Mg at flashing onset) ──────────────────
-# Evaluate the SAME closure the solver integrates, per cell, on the final state:
-# where does evaporation switch on, how big is it, and does it carry a 2Δx
-# odd-even structure (source = the checkerboard pump) or is it smooth (the thin
-# ghost is the amplifier)?  Pure post-processing — no effect on the march.
 if cfg.MASS_TRANSFER and SRC_SCALE != 0.0:
     def _mt_cell(u_h):
         eos_g_c = phase_props(fluid_g, u_h[0], u_h[4])
