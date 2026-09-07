@@ -20,20 +20,77 @@ winner in-code. Production stays on `'cell'`.
 settled; until then `'cell'` remains the default and the other two exist only
 for that probe.
 
-## 2. `ssr_mode` default — candidate for promotion
+## 2. Steady-state residual definition — `ssr_mode` is a workaround, not the fix
 
-`solver.py:2082`: `else: # 'all' (legacy, equal votes)` — this is the
-**default**, despite being self-labeled legacy in the comment. `'mass'`
-(mass-row-weighted) was measured to fix a real pathology: ghost rows owned
-99.98% of the plain SSR² on a converged N600 shock run (ghost/dominant ratio
-7553×), i.e. the default convergence metric is dominated by numerically
-irrelevant ghost-phase noise on that case.
+`solver.py:2210`. The steady-state residual is
 
-**Recommended action:** consider promoting `ssr_mode='mass'` to the default.
-Low risk to try (it only changes what "converged" means, not the physics),
-but changes what SSR thresholds in existing configs/scripts mean — worth a
-side-by-side rerun of your current reference case before flipping the
-default globally.
+    S_ss = t_char * R_ss / (V_cell * |V|)      t_char = dx/max(lam_max)
+                                                V_cell = A*dx
+         = R_ss / (A * max(lam_max) * |V|)      (the two dx cancel)
+
+then reduced to a scalar by an RMS over all cells and all six rows
+(`ssr_mode='all'`, the default, self-labeled legacy in-code) or by a
+mass-fraction-weighted RMS (`ssr_mode='mass'`).
+
+**What is right about it.** Dimensionless, so the six rows are comparable at
+all (raw they are kg/m3/s vs kg/m2/s2 vs J/m3/s); relative, so no hand-tuned
+per-equation constant is needed; scaled by a wave speed, so it is tied to the
+physics that sets the timestep.
+
+**What is wrong with it.** The normalisation is the *local, per-phase*
+conserved variable `|V|`. A relative residual is right when `V` is a
+meaningful magnitude and catastrophic when `V -> 0`: for a ghost at
+alpha = 1e-3 the denominator is ~1e-4 of the mixture, so a negligible absolute
+residual is reported as an enormous relative one. Measured: ghost rows owned
+**99.98%** of the plain SSR2 on a converged N600 shock run, ghost/dominant
+ratio **7553x**.
+
+That is not a ghost problem. It is a normalisation problem that the ghost
+merely exposes, and `ssr_mode='mass'` cancels the spurious amplification
+rather than preventing it. The cost of the workaround: a genuinely diverging
+ghost is suppressed too, so the convergence metric cannot warn about it
+(`pin_ghost` and a mass-flow conservation check are the current cover).
+
+Two secondary defects:
+
+- **Not mesh-independent.** `R_ss` carries a factor of cell size, so
+  `ssr_tol = 1e-8` is a different physical standard on N=420 than on N=600.
+  SSR values from different grids are not comparable.
+- **`t_char` uses a global `max(lam_max)`**, so cells in slow regions are
+  scaled by a transit time much shorter than their own, weighting the fast
+  regions more.
+
+**Planned fix, in this order** (order matters — steps 2 and 3 make things
+worse if done before step 1):
+
+1. **Reference-scale each row against a mixture-level or global magnitude**
+   instead of the local per-phase `|V|` — e.g. gas mass residual over
+   `(m_g + m_l)`, momentum over the inlet momentum flux, or a running max over
+   the field. A near-massless phase then contributes a near-zero residual,
+   which is the honest answer.
+2. **Equal weighting across rows becomes correct**, and `ssr_mode` stops
+   needing to exist. Keep `'mass'` and `'all'` accepted for reproducing old
+   runs.
+3. **Reduce with a max over the six equations** rather than an RMS, so the
+   worst-converged equation controls the stop instead of hiding behind five
+   good ones. RMS over *cells*, max over *equations* — a max over cells too
+   would let one shock or sonic cell in a limit cycle veto convergence
+   forever, structurally the same failure as the ghost.
+4. **Report all six per-equation values every `print_every`.** Worth doing
+   regardless of the above: today SSR is one scalar that says nothing about
+   *what* is lagging. "E_g limiting at 3e-7 while mass_l is at 2e-9" is
+   actionable; "SSR = 3e-7" is not. This would also have made the ghost
+   pathology visible immediately instead of requiring a dedicated probe.
+
+**Consequences to plan for.** A max-of-six is always >= the current RMS, so
+existing `ssr_tol` values become stricter and every reference case needs a
+re-baselined tolerance. Archived NICFD 2026 cases record `ssr_mode: mass` in
+their `settings.yaml`; those files need updating if those cases are ever
+re-run under a new criterion.
+
+**Stopgap until then:** `ssr_mode='mass'` is the right choice for any case
+with a thin ghost, and is what the flashing cases use. Promoting it to the
+default is still reasonable, but it is a patch — the real fix is step 1.
 
 ## 3. `w_char='auto'` — candidate for promotion
 

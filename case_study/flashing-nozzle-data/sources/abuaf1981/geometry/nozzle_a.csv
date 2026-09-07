@@ -1,0 +1,14 @@
+# SCAFFOLD -- placeholder wall coordinates, NOT the BNL nozzle.
+# Replace with the digitised/tabulated wall of the converging-diverging test section.
+# x = 0 at the throat, positive downstream (see ../meta.yaml x_origin).
+# original units: mm -> converted to m here.
+# A_m2 left empty: compute as pi*r_m^2 unless the report states an area directly.
+x_m,r_m,A_m2
+-0.1000,0.0250,
+-0.0500,0.0180,
+-0.0100,0.0080,
+0.0000,0.0064,
+0.0100,0.0068,
+0.0500,0.0085,
+0.1000,0.0105,
+0.2000,0.0145,

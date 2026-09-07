@@ -53,7 +53,7 @@ eos:
 
 # ── Grid ─────────────────────────────────────────────────────────────────────
 grid:
-  Nx: 400
+  Nx: 256
   x1: 0.0
   x2: 0.31
   radius: 0.01        # legacy fallback (geometry block wins)
@@ -108,7 +108,7 @@ numerics:
   # 0.017 ≈ 0.2 × (a_s/max(a_g,a_l)) matches the AVERAGE strength of the wood-0.2 run
   # → a fair A/B (any improvement = the non-dip, not just more dissipation).  Sweep up
   # from here (0.017→0.03→0.05) if the du/h_g checkerboard needs more.
-  eps_void: 0.01
+  eps_void: 0.05
   # LOW-VELOCITY GATE for the void filter: phase-velocity cutoff u0 [m/s]
   # (null → ungated / uniform, as before).  The filter is weighted by
   # ½(1+tanh((u0−u_mat)/Δu)) with u_mat=min(|u_g|,|u_l|), so it acts ONLY in the
@@ -151,7 +151,7 @@ numerics:
 ic:
   type: restart # stagnation restart
   # type: nozzlex
-  run: results_two_phase/two_component_N200_muscl_van_albada_20260803_152504 # two_component_N500_muscl_van_albada_20260726_004729
+  run: results/nozzle_valid_gasdom_N500_muscl_van_albada_20260722_115901 # two_component_N500_muscl_van_albada_20260726_004729
   # pickle: results_old/solution_elliot_subsonic_20.0bar_mr67.88_nb1.00e+13_nd1.00e+11.pkl
   # pickle: results/solution_elliot_subsonic_20.0bar_mr68_nb1.00e+13_nd1.00e+11_u1_1.0.pkl
 
@@ -213,5 +213,5 @@ run:
   debug_newton: false
 
 save_options:
-  repo_main: results_two_phase
+  repo_main: results_grid_sesitivity
   repo_run: two_component
