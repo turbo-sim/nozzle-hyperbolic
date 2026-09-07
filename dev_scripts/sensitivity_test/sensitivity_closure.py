@@ -446,7 +446,10 @@ def sensitivities(dt_use, rcond=1e-12, svd=None):
     keep = S > rcond * S[0]
     y = -(Vt[keep].T @ ((U[:, keep].T @ Rth) / S[keep, None]))          # (8Nc, 2)
     dW_dth = y * w_ref[:, None]                                         # unscale
-    return dJ_dW @ dW_dth, svd, int(keep.sum())
+    # dW_dth is the FULL field sensitivity (8*Nc, n_theta).  Contracting it to
+    # dJ/dtheta discards where in the nozzle the parameter acts; it is returned
+    # so sensitivity_plots.py can put that back.
+    return dJ_dW @ dW_dth, svd, int(keep.sum()), dW_dth
 
 
 print("\nSolving the IFT system...")
@@ -460,7 +463,7 @@ print(f"  singular values (scaled): max={_S[0]:.3e}  min={_S[-1]:.3e}  "
 for _rc in (1e-8, 1e-10, 1e-12, 1e-14):
     print(f"    rank at rcond={_rc:.0e}: {int((_S > _rc*_S[0]).sum())} / {_S.size}")
 
-dJ_dth, _svd, _rank = sensitivities(dt_ss, rcond=1e-12, svd=_svd)
+dJ_dth, _svd, _rank, dW_dth = sensitivities(dt_ss, rcond=1e-12, svd=_svd)
 print(f"  using rcond=1e-12  (rank {_rank}/{_S.size})")
 
 names = ["mdot [kg/s]", "x_exit [-]"]
@@ -492,8 +495,11 @@ print("rcond SWEEP — the answer must not depend on where the null space is cut
 print("=" * 78)
 print(f"{'rcond':>10} {'rank':>7} {'dlnMdot/dlnNb':>16} {'dlnMdot/dlnNd':>16} "
       f"{'dlnX/dlnNb':>14} {'dlnX/dlnNd':>14}")
+RCOND_ROWS = []           # (rcond, rank, [elasticities]) — replotted in fig 4
 for _rc in (1e-6, 1e-8, 1e-10, 1e-12, 1e-14):
-    _d, _, _rk = sensitivities(dt_ss, rcond=_rc, svd=_svd)
+    _d, _, _rk, _ = sensitivities(dt_ss, rcond=_rc, svd=_svd)
+    RCOND_ROWS.append((_rc, _rk, [float(_d[i, j] * theta0[j] / J_star[i])
+                                  for i in range(2) for j in range(2)]))
     print(f"{_rc:10.0e} {_rk:7d} "
           f"{float(_d[0,0]*theta0[0]/J_star[0]):16.6e} "
           f"{float(_d[0,1]*theta0[1]/J_star[0]):16.6e} "
@@ -521,11 +527,15 @@ if FD_LO and FD_HI:
                               Dd["alpha_g"], Dd["h_g"], Dd["h_l"]])
         Wf = W_from_U_h_batch(jnp.asarray(Uh), fluid_g, fluid_l)
         c2 = load_config(sorted(d.glob("settings*.yaml"))[0])
+        if Wf.shape[0] != N:
+            sys.exit(f"FD run {d.name} has {Wf.shape[0]} cells, reference has "
+                     f"{N} — the QoI contraction assumes a common grid.")
         return (np.asarray(_qoi(Wf[1:-1].reshape(-1))),
-                float(c2.BUBBLE_NUMBER), float(c2.DROPLET_NUMBER), d.name)
+                float(c2.BUBBLE_NUMBER), float(c2.DROPLET_NUMBER), d.name,
+                np.asarray(Wf[1:-1].reshape(-1)))
 
-    J_lo, nb_lo, nd_lo, n_lo = _load_case(FD_LO)
-    J_hi, nb_hi, nd_hi, n_hi = _load_case(FD_HI)
+    J_lo, nb_lo, nd_lo, n_lo, W_lo = _load_case(FD_LO)
+    J_hi, nb_hi, nd_hi, n_hi, W_hi = _load_case(FD_HI)
     p_lo_, p_hi_ = ((nb_lo, nb_hi) if FD_PAR == "N_b" else (nd_lo, nd_hi))
     jcol = 0 if FD_PAR == "N_b" else 1
     dP = p_hi_ - p_lo_
@@ -557,6 +567,7 @@ if FD_LO and FD_HI:
 
 
 # ── Optional: dt-insensitivity sweep (verification 3) ────────────────────────
+DT_ROWS = []              # (dt/dt_cfl, cond, [elasticities]) — replotted in fig 4
 if DT_SWEEP:
     print("\n" + "=" * 78)
     print("dt-INSENSITIVITY SWEEP — the steady Jacobian must stop depending on dt")
@@ -565,8 +576,11 @@ if DT_SWEEP:
           f"{'dlnMdot/dlnNd':>16} {'dlnX/dlnNb':>14} {'dlnX/dlnNd':>14}")
     for f in (1e0, 1e2, 1e4, 1e6, 1e8, 1e10):
         try:
-            d_, sv_, _ = sensitivities(f * dt_cfl)
+            d_, sv_, _, _ = sensitivities(f * dt_cfl)
             S_ = sv_[0][1]
+            DT_ROWS.append((f, S_[0] / S_[-1],
+                            [float(d_[i, j] * theta0[j] / J_star[i])
+                             for i in range(2) for j in range(2)]))
             print(f"{f:12.0e} {S_[0]/S_[-1]:11.3e} "
                   f"{float(d_[0,0]*theta0[0]/J_star[0]):16.6e} "
                   f"{float(d_[0,1]*theta0[1]/J_star[0]):16.6e} "
@@ -576,3 +590,114 @@ if DT_SWEEP:
             print(f"{f:12.0e}   failed: {type(e).__name__}: {e}")
     print("Converged columns ⇒ the transient term Vc·dV/dW is fully suppressed "
           "and these are true steady sensitivities.")
+
+
+# ── FIGURES ───────────────────────────────────────────────────────────────────
+# The table above is a contraction of dW/dtheta against dJ/dW, i.e. the spatial
+# structure summed away.  These figures plot dW/dtheta itself, so the question
+# "10x more bubbles costs 13% of the mass flow — earned WHERE?" has an answer.
+if "--no-plot" not in sys.argv:
+    import matplotlib
+    if "--show" not in sys.argv:
+        matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import nozzle_hyperbolic as hyp
+    sys.path.insert(0, str(_here))          # sensitivity_plots sits beside this file
+    import sensitivity_plots as sp
+    from nozzle_hyperbolic.fvm_solver.two_fluid.sources import interfacial_area
+
+    hyp.set_plot_options(fontsize=11, grid=False)
+    matplotlib.rcParams["savefig.dpi"] = 200
+
+    out = run_dir / "sensitivity"
+    out.mkdir(exist_ok=True)
+    x_int = x[1:-1]
+    x_throat = float(x[int(np.argmin(A))])
+    ag_int = np.asarray(U_h_star[1:-1, 3])
+
+    # Derived fields as one pure function of W, so a forward-mode JVP along the
+    # sensitivity direction gives every field's sensitivity at once — including
+    # the derived ones (slip, mdot) — with no hand-differentiation.
+    def _fields(W_flat):
+        Wm = W_flat.reshape(Nc, 8)
+        p_, ag_, mg_, ug_, ml_, ul_ = (Wm[:, 0], Wm[:, 1], Wm[:, 2],
+                                       Wm[:, 3], Wm[:, 4], Wm[:, 5])
+        return {"p": p_, "alpha_g": ag_, "u_g": ug_, "u_l": ul_,
+                "du": ug_ - ul_, "mdot": (mg_ * ug_ + ml_ * ul_) * A_j[1:-1]}
+
+    state = {k: np.asarray(v) for k, v in _fields(W_int0).items()}
+    # tangent = theta_j * dW/dtheta_j  ⇒  the JVP output is d(field)/d(ln theta_j)
+    sens = {k: np.zeros((len(PARAM), Nc)) for k in state}
+    for j in range(len(PARAM)):
+        _, tang = jax.jvp(_fields, (W_int0,),
+                          (jnp.asarray(theta0[j] * dW_dth[:, j]),))
+        for k, v in tang.items():
+            sens[k][j] = np.asarray(v)
+
+    f1 = sp.plot_sensitivity_fields(
+        x_int, state, sens, PARAM, inert=inert, alpha_g=ag_int,
+        x_throat=x_throat,
+        title=f"{run_dir.name} — state (top) and its sensitivity per e-fold "
+              f"of the closure parameter (bottom)")
+    f1.savefig(out / "sens_fields.png", bbox_inches="tight")
+
+    # The interfacial area is the ONLY channel through which N_b/N_d reach the
+    # physics, so its profile and its own derivative explain every zero and every
+    # kink in the figure above.
+    _d_min_b, _d_min_d = 5e-6, 1e-5        # sources.py call site / library default
+    _ag_j = jnp.asarray(ag_int)
+
+    # lax.map, NOT vmap.  interfacial_area() branches on alpha through a nested
+    # lax.cond cascade; vmap batches the predicate and lowers it to a select,
+    # which evaluates the DEAD branches too — and those contain alpha**(2/3) and
+    # (1-alpha)**(2/3), whose tangents are infinite at alpha = 0 and 1.  That is
+    # the dead-branch NaN trap, and hitting it here would be an artefact of the
+    # plotting code, not of the solver.  lax.map keeps each cond a real branch.
+    def _ia_fields(th):
+        def one(a):
+            ai_, d_ = interfacial_area(a, alpha_b=0.3, alpha_d=0.7,
+                                       Nb=th[0], Nd=th[1], d_min_b=_d_min_b)
+            return jnp.stack([ai_, d_])
+        return jax.lax.map(one, _ag_j)                       # (Nc, 2)
+
+    _iad = np.asarray(jax.jit(_ia_fields)(theta0))
+    ai_p, d_p = _iad[:, 0], _iad[:, 1]
+    _jia = np.asarray(jax.jit(jax.jacfwd(_ia_fields))(theta0))        # (Nc,2,2)
+    dai = (_jia[:, 0, :] * np.asarray(theta0)[None, :]).T             # (2, Nc)
+    f2 = sp.plot_regime_map(
+        x_int, ag_int, ai_p, d_p, dai, PARAM,
+        alpha_b_star=float(np.pi * theta0[0] * _d_min_b**3 / 6.0),
+        alpha_d_star=float(1.0 - np.pi * theta0[1] * _d_min_d**3 / 6.0),
+        x_throat=x_throat,
+        title=f"{run_dir.name} — flow regime and the interfacial-area channel")
+    f2.savefig(out / "sens_regime.png", bbox_inches="tight")
+
+    f4 = sp.plot_diagnostics(
+        _S, RCOND_ROWS, DT_ROWS, ["mdot", "x_exit"], PARAM,
+        title=f"{run_dir.name} — is the IFT solve trustworthy?")
+    f4.savefig(out / "sens_diagnostics.png", bbox_inches="tight")
+
+    saved = ["sens_fields.png", "sens_regime.png", "sens_diagnostics.png"]
+
+    # AD vs FD field by field — the strong form of the validation gate.  Two
+    # scalars that disagree tell you nothing about WHY; two fields do.
+    if FD_LO and FD_HI and dP != 0.0:
+        dln = float(np.log(p_hi_ / p_lo_))
+        fl = {k: np.asarray(v) for k, v in _fields(jnp.asarray(W_lo)).items()}
+        fh = {k: np.asarray(v) for k, v in _fields(jnp.asarray(W_hi)).items()}
+        sens_fd = {k: (fh[k] - fl[k]) / dln for k in fl}
+        sens_ad = {k: sens[k][jcol] for k in fl}
+        f3 = sp.plot_ad_vs_fd(
+            x_int, sens_ad, sens_fd, list(fl.keys()), FD_PAR,
+            alpha_g=ag_int, x_throat=x_throat,
+            title=f"{run_dir.name} — AD vs central FD in log space, "
+                  f"dln{FD_PAR}={dln:.4f}")
+        f3.savefig(out / "sens_ad_vs_fd.png", bbox_inches="tight")
+        saved.append("sens_ad_vs_fd.png")
+
+    print("\n" + "=" * 78)
+    print(f"FIGURES → {out}")
+    for s in saved:
+        print(f"  {s}")
+    if "--show" in sys.argv:
+        plt.show()

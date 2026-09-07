@@ -66,7 +66,7 @@ eos:
 
 # ── Grid ──────────────────────────────────────────────────────────────────────
 grid:
-  Nx: 200
+  Nx: 300
   x1: 0.0
   x2: 1.2        # m — see caveat 3 (keeps p_exit in-table; full nozzle ≈ 0.9 m)
   radius: 0.01   # legacy fallback (geometry block wins)
@@ -92,7 +92,7 @@ sources:
 
 # ── Numerics (full certified E3 stack) ────────────────────────────────────────
 numerics:
-  CFL: 2.0
+  CFL: 1.0
   newton_iter: 7
   delta_factor: 1e-6              # Harten fix — WATCH the throat sonic cell
   recon: muscl_van_albada         # smooth limiter (flashing front ~ a shock in α;
@@ -117,7 +117,7 @@ numerics:
   lowmach_diss_bc: 0.0
   # JST void filter, velocity-gated: active only in the slow inlet, OFF at the
   # throat/supersonic (u_mat inlet ~ few m/s → throat ~100 m/s; u0=40, Δu=12).
-  eps_void: 0.1
+  eps_void: 0.05
   # PROBE 2026-07-21: gate lifted (null = ungated/uniform).  The gas u_g/h_g 2Δx
   # wind-up lives in the strong-flashing region at u>100 m/s where the u-gated
   # filter was OFF.  Restore 70.0 if this probe is negative.
@@ -173,7 +173,7 @@ ic:
                                   # Alternatives: 'stagnation' (from rest — rougher,
                                   # hits the deferred startup-corner issue) or a
                                   # 'nozzlex' pickle seed.
-  run: results_two_phase/smd_supersonic_N200_muscl_van_albada_20260725_155004 # smd_supersonic_N420_muscl_van_albada_20260725_104129 # smd_supersonic_N422_muscl_van_albada_20260724_175819 #smd_supersonic_N410_muscl_van_albada_20260723_130322  #   smd_supersonic_N200_muscl_van_albada_20260722_182410 # smd_supersonic_N120_muscl_van_albada_20260722_171951  #  smd_supersonic_N120_muscl_van_albada_20260722_163746 #   smd_supersonic_N100_muscl_van_albada_20260722_161147
+  run: results_two_phase/smd_supersonic_N600_muscl_van_albada_20260725_173528 # smd_supersonic_N420_muscl_van_albada_20260725_104129 # smd_supersonic_N422_muscl_van_albada_20260724_175819 #smd_supersonic_N410_muscl_van_albada_20260723_130322  #   smd_supersonic_N200_muscl_van_albada_20260722_182410 # smd_supersonic_N120_muscl_van_albada_20260722_171951  #  smd_supersonic_N120_muscl_van_albada_20260722_163746 #   smd_supersonic_N100_muscl_van_albada_20260722_161147
   alpha_floor: 1.0e-6             # thick ghost seed — match numerics.alpha_eps
 
 
