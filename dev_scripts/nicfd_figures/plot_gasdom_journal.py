@@ -58,12 +58,12 @@ from isentropic_ic import isentropic_ic, isentropic_shock_ic, _area_mach
 # NOTE: all three entries currently point at the SHOCK run — swap in the real
 # subsonic / adapted folders when those simulations are done; nothing else needs
 # to change ('auto' picks the right reference from each run's own settings).
-_SUBSONIC_RUN = "results_single_phase_validation/perfect_gas_N500_muscl_van_albada_20260728_180246"
+# _SUBSONIC_RUN = "results_single_phase_validation/perfect_gas_N500_muscl_van_albada_20260728_180246"
 
 _SHOCK_RUN = "results/nozzle_valid_gasdom_N600_muscl_van_albada_20260718_180641"
 _ADAPTED_RUN = "results_single_phase_validation/perfect_gas_N401_muscl_van_albada_20260727_185925"
 RUNS = [
-    (_SUBSONIC_RUN, "subsonic",             "auto"),
+    # (_SUBSONIC_RUN, "subsonic",             "auto"),
     (_SHOCK_RUN, "supersonic-shock",     "auto"),
     (_ADAPTED_RUN, "supersonic-adapted", "auto"),
 ]
@@ -117,7 +117,7 @@ C_ANA = "0.15"            # analytic reference colour (near-black)
 _PG = ("perfect_gas", "perfectgas", "ideal_gas", "idealgas")
 
 _here = pathlib.Path(__file__).parent
-
+_here = _here.parent
 
 def _build_fluid(lut):
     if str(lut.get("backend", "")).lower() in _PG:

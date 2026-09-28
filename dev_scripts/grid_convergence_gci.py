@@ -42,6 +42,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import glob
+import itertools
 import math
 import os
 import re
@@ -70,12 +71,30 @@ DEFAULT_EXTRA_RUNS = [
 FINGERPRINT_KEYS = [
     "p_out", "lowmach_diss", "lowmach_diss_bc", "recon", "eos_rows",
     "eos_project", "nc_form", "nc_scale", "eps_void", "eps_ghost", "k_vm",
+    # van Albada eps normalisation (added 2026-09-09).  This changes the
+    # reconstruction operator itself, so runs that differ here are NOT the same
+    # numerical model and must never share a ladder.  Absent in older settings
+    # files -> parses as None -> those runs group together as before.
+    "va_eps_mode", "va_rel", "va_r0", "va_rm",
 ]
 GRID_KEYS = ["Nx", "x1", "x2"]
 
-QOIS = ["p", "alpha_g", "mdot"]
+# Evaluated at the OUTLET NODE.  x2 is exactly the last node on every grid
+# regardless of Nx, so these need no interpolation on any refinement ratio --
+# which removes the error that dominates the frac-sampled QoIs below (measured:
+# switching linear->cubic interpolation moved eps32 by 39.5%).
+# NOTE: exit pressure is deliberately NOT a QoI -- it is identically p_out
+# (verified: p[-1] - p_out = 0.0000), i.e. imposed by the BC with zero grid
+# dependence.  Velocities and mdot are extrapolated, so they are valid.
+QOIS_EXIT = ["u_mix", "mdot_exit", "slip_ratio", "slip_du"]
+# Interpolated at x1 + frac*(x2-x1).  Kept for continuity with the earlier
+# report; the R gate below will refuse them when they do not converge.
+QOIS_POINT = ["p", "alpha_g", "mdot"]
+QOIS = QOIS_EXIT + QOIS_POINT
 X_FRAC_DEFAULT = 0.99          # interpolate QoIs at x1 + frac*(x2-x1)
 FS_3GRID = 1.25                # Celik safety factor, observed order verified
+FORMAL_ORDER = 2.0             # MUSCL + van Albada
+P_MIN, P_MAX = 0.5, 3.0        # plausible band for p_obs around FORMAL_ORDER
 FS_2GRID = 3.0                 # Roache safety factor, order ASSUMED (2 grids only)
 
 
@@ -85,11 +104,26 @@ def _grab(text: str, key: str) -> Optional[str]:
     return m.group(1) if m else None
 
 
+# Keys added to settings_*.yaml AFTER runs already existed.  A run whose file
+# predates the key is not a different numerical model -- it used the code
+# default.  Normalise absent (and the YAML spelling of "use the default") to one
+# canonical token, or every pre-existing run splits off into its own group and
+# no ladder can ever be completed.
+FINGERPRINT_DEFAULTS = {
+    "va_eps_mode": "magnitude",   # solver default before the key existed
+    "va_rel": "null",             # null => mode-calibrated default (1e-3)
+    "va_r0": "0.5",
+    "va_rm": "4",
+}
+
+
 def parse_settings(path: str) -> dict:
     text = open(path, encoding="utf-8").read()
     out = {}
     for key in GRID_KEYS + FINGERPRINT_KEYS:
         raw = _grab(text, key)
+        if raw is None and key in FINGERPRINT_DEFAULTS:
+            raw = FINGERPRINT_DEFAULTS[key]
         out[key] = raw
     for key in ("Nx",):
         if out[key] is not None:
@@ -163,10 +197,35 @@ def load_qois(csv_path: str, x1: float, x2: float, frac: float) -> dict:
         + (1.0 - interior["alpha_g"]) * interior["rho_l"] * interior["u_l"]
     )
     mdot = np.interp(x_t, x, mdot_cell)
-    mdot_spread = float(np.ptp(mdot_cell) / np.mean(mdot_cell))  # conservation check
+    # NOT a conservation check (verified 2026-09-10).  The scheme conserves the
+    # NUMERICAL FLUX A*F_hat at faces exactly: the mass rows of the
+    # non-conservative correction X are identically zero (matrices.py:383,
+    # "Rows: (zero, zero, gas_mom, liq_mom, gas_E, liq_E)") and the area source
+    # D_VE_area is [0, 0, ...] in the mass rows too.  What varies here is the
+    # CELL-CENTRED product A*(a*rho_g*u_g + (1-a)*rho_l*u_l), which differs from
+    # F_hat by the FVS upwind/dissipation terms -- an O(h^p) reconstruction
+    # artefact, not a lost-mass error.  Evidence: the deviation profile keeps the
+    # same SHAPE on all three grids (corr +0.98 N429 vs N600) while its amplitude
+    # scales down ~O(h^0.9).  It is still a useful diagnostic: it is largest where
+    # the scheme is most dissipative, so it flags shock-dominated cases (the
+    # two_component ladder peaks at +1.38% at x/L=0.595, exactly at its 26.7%/cell
+    # shock, versus 0.77% for the shock-free smd 15 bar case).
+    mdot_spread = float(np.ptp(mdot_cell) / np.mean(mdot_cell))
+
+    # ── Exit-node QoIs (full array: the first/last rows are the domain
+    # boundary NODES, not ghost cells -- x[0] == x1 and x[-1] == x2 exactly).
+    ag, rg, rl = data["alpha_g"], data["rho_g"], data["rho_l"]
+    ug, ul = data["u_g"], data["u_l"]
+    rho_mix = ag * rg + (1.0 - ag) * rl
+    u_mix = (ag * rg * ug + (1.0 - ag) * rl * ul) / rho_mix     # mass-averaged
+    mdot_x = data["A"] * (ag * rg * ug + (1.0 - ag) * rl * ul)
 
     return dict(p=float(p), alpha_g=float(alpha_g), mdot=float(mdot),
-                mdot_spread=mdot_spread)
+                mdot_spread=mdot_spread,
+                u_mix=float(u_mix[-1]),
+                mdot_exit=float(mdot_x[-1]),
+                slip_ratio=float(ug[-1] / ul[-1]),
+                slip_du=float(ug[-1] - ul[-1]))
 
 
 def build_run(path: str, frac: float) -> Optional[Run]:
@@ -178,6 +237,18 @@ def build_run(path: str, frac: float) -> Optional[Run]:
     if s["Nx"] is None or s["x1"] is None or s["x2"] is None:
         return None
 
+    # CONSISTENCY GUARD (2026-09-11): settings_*.yaml and solution.csv must
+    # describe the SAME grid.  A folder was found whose yaml said Nx=183 while
+    # solution.csv held 351 points -- the settings snapshot had been overwritten
+    # after the run.  Read that way, h would be 0.31/182 instead of 0.31/350,
+    # a 1.92x error in the representative spacing, silently corrupting any ladder
+    # the run joined.  h is therefore taken from the DATA and cross-checked.
+    _n_rows = int(np.genfromtxt(os.path.join(path, "solution.csv"),
+                                delimiter=",", names=True).shape[0])
+    if _n_rows != s["Nx"]:
+        raise ValueError(
+            f"grid mismatch: settings say Nx={s['Nx']} but solution.csv has "
+            f"{_n_rows} rows -- settings snapshot does not match the data")
     h = (s["x2"] - s["x1"]) / (s["Nx"] - 1)
     fp = tuple(s[k] for k in FINGERPRINT_KEYS) + (s["x1"], s["x2"])
     family = os.path.basename(settings_file)
@@ -199,13 +270,53 @@ def group_runs(runs: list) -> dict:
     for key, members in groups.items():
         by_nx = {}
         for m in members:
-            if m.Nx in by_nx:
-                print(f"  [note] duplicate Nx={m.Nx} in group; keeping "
-                      f"{os.path.basename(m.path)} over "
-                      f"{os.path.basename(by_nx[m.Nx].path)}")
-            by_nx[m.Nx] = m
+            prev = by_nx.get(m.Nx)
+            if prev is None:
+                by_nx[m.Nx] = m
+                continue
+            # Prefer the CONVERGED run, then the lower final SSR, then the later
+            # folder.  Keeping "whatever sorted last" silently replaced a
+            # converged N=256 (SSR 1.0e-08) with an interrupted one (1.6e-06)
+            # merely because a second scan root sorted after the first.
+            def _rank(r):
+                return (1 if r.converged else 0,
+                        -(r.ssr_final if r.ssr_final is not None else float("inf")),
+                        os.path.basename(r.path))
+            keep, drop = (m, prev) if _rank(m) > _rank(prev) else (prev, m)
+            _s = lambda r: ("?" if r.ssr_final is None
+                            else f"{r.ssr_final:.2e}")
+            print(f"  [note] duplicate Nx={m.Nx} in group; keeping "
+                  f"{os.path.basename(keep.path)} (SSR={_s(keep)}) over "
+                  f"{os.path.basename(drop.path)} (SSR={_s(drop)})")
+            by_nx[m.Nx] = keep
         deduped[key] = sorted(by_nx.values(), key=lambda r: -r.Nx)  # finest first
     return deduped
+
+
+def select_triplet(members: list) -> list:
+    """Pick the best 3 grids from a group, finest first.
+
+    Taking the three finest blindly is wrong once a group holds a superseded
+    grid: {500, 358, 351, 256} gives r32 = 1.02, far below the 1.3 minimum,
+    while {500, 351, 256} gives 1.426/1.373.  Rank every 3-subset by, in order:
+      1. all three iteratively converged   (an unconverged grid makes eps
+         meaningless, so this outranks everything else)
+      2. both refinement ratios >= 1.3     (Celik minimum)
+      3. largest min(r21, r32)             (better separated => better
+         conditioned p-solve, and eps well above the noise floor)
+      4. finest available h1               (tie-break)
+    """
+    best, best_key = None, None
+    for trio in itertools.combinations(sorted(members, key=lambda r: r.h), 3):
+        g1, g2, g3 = trio                       # h ascending => fine, med, coarse
+        r21, r32 = g2.h / g1.h, g3.h / g2.h
+        key = (all(g.converged for g in trio),
+               r21 >= 1.3 and r32 >= 1.3,
+               min(r21, r32),
+               -g1.h)
+        if best_key is None or key > best_key:
+            best, best_key = list(trio), key
+    return best
 
 
 # ── GCI math ─────────────────────────────────────────────────────────────
@@ -237,15 +348,47 @@ def gci_3grid(phi1: float, phi2: float, phi3: float,
     eps21 = phi2 - phi1
     eps32 = phi3 - phi2
     p = solve_order_p(eps32, eps21, r21, r32)
-    out = dict(eps21=eps21, eps32=eps32, p=p, monotonic=(eps32 * eps21 > 0))
-    if p is None or phi1 == 0:
+
+    # ── Celik convergence condition.  R = eps21/eps32 classifies the triplet:
+    #     0 < R < 1  monotonic convergence  -> GCI applies
+    #     R < 0      oscillatory            -> GCI formula NOT applicable
+    #     R > 1      monotonic DIVERGENCE   -> the solution moves further apart
+    #                as the grid refines; no order exists to extrapolate
+    # This MUST be tested before reporting anything.  solve_order_p() takes the
+    # absolute value (as the published formula does), so a diverging triplet
+    # still yields a plausible-looking positive p -- e.g. the two_component
+    # ladder gave p_obs=1.294 for pressure when the true signed order was -1.28.
+    R = (eps21 / eps32) if eps32 != 0 else float("nan")
+    if R != R:                      # nan: eps32 == 0
+        conv = "degenerate"
+    elif R < 0.0:
+        conv = "oscillatory"
+    elif R < 1.0:
+        conv = "converging"
+    else:
+        conv = "diverging"
+    out = dict(eps21=eps21, eps32=eps32, p=p, R=R, conv=conv,
+               monotonic=(eps32 * eps21 > 0))
+    if p is None or phi1 == 0 or conv != "converging":
         out["ok"] = False
         return out
-    phi_ext = (r21 ** p * phi1 - phi2) / (r21 ** p - 1)
-    gci_fine = FS_3GRID * abs(eps21 / phi1) / (r21 ** p - 1)
-    gci_coarse = FS_3GRID * abs(eps32 / phi2) / (r32 ** p - 1)
-    asym_check = gci_coarse / (r21 ** p * gci_fine) if gci_fine != 0 else float("nan")
-    out.update(ok=True, phi_ext=phi_ext, gci_fine=gci_fine, gci_coarse=gci_coarse,
+    # Guard against an implausible observed order.  GCI divides by (r^p - 1),
+    # so a spuriously LARGE p collapses the band toward zero: the two_component
+    # ladder gave p_obs = 16.8 for mdot_exit (the fine pair agreed to 8.3e-6
+    # while the coarse grid sat 205x further away), which would have been
+    # reported as 0.0000% uncertainty.  A p outside [P_MIN, P_MAX] means the
+    # triplet is not in the asymptotic range for this QoI, so fall back to the
+    # formal order -- the conservative reading -- and say so.
+    p_used, p_clamped = p, False
+    if not (P_MIN <= p <= P_MAX):
+        p_used, p_clamped = FORMAL_ORDER, True
+    phi_ext = (r21 ** p_used * phi1 - phi2) / (r21 ** p_used - 1)
+    gci_fine = FS_3GRID * abs(eps21 / phi1) / (r21 ** p_used - 1)
+    gci_coarse = FS_3GRID * abs(eps32 / phi2) / (r32 ** p_used - 1)
+    asym_check = (gci_coarse / (r21 ** p_used * gci_fine)
+                  if gci_fine != 0 else float("nan"))
+    out.update(ok=True, p_used=p_used, p_clamped=p_clamped,
+               phi_ext=phi_ext, gci_fine=gci_fine, gci_coarse=gci_coarse,
                e_ext=abs((phi_ext - phi1) / phi_ext) if phi_ext != 0 else float("nan"),
                asymptotic_check=asym_check)
     return out
@@ -265,8 +408,12 @@ def fmt_run_row(r: Run) -> str:
             "NOT CONVERGED" if r.converged is False else "?")
     tol_txt = f"tol={r.ssr_tol:.1e}" if r.ssr_tol else ""
     ssr_txt = f"SSR={r.ssr_final:.3e}" if r.ssr_final is not None else "SSR=?"
+    # mdot_spread: cell-centred reconstruction spread, NOT a conservation error
+    # (see load_qois).  Large values flag a dissipation/shock-dominated solution.
+    _sp = r.qois.get('mdot_spread')
+    _sp_txt = f'mdot_recon_spread={_sp*100:5.2f}%' if _sp is not None else ''
     return (f"    Nx={r.Nx:<5d} h={r.h:.5e}  {ssr_txt} {tol_txt:12s} "
-            f"[{conv}]  {os.path.basename(r.path)}")
+            f"[{conv}]  {_sp_txt}  {os.path.basename(r.path)}")
 
 
 def report_group(key: tuple, members: list, out_lines: list):
@@ -285,7 +432,10 @@ def report_group(key: tuple, members: list, out_lines: list):
     for m in members:
         out_lines.append(fmt_run_row(m))
 
-    not_converged = [m for m in members if m.converged is False]
+    # Only grids in the SELECTED triplet matter -- a superseded run left in the
+    # folder must not raise a warning about a ladder it is not part of.
+    _used = select_triplet(members) if len(members) >= 3 else members
+    not_converged = [m for m in _used if m.converged is False]
     if not_converged:
         out_lines.append("  *** WARNING: the following grid(s) did NOT reach SSR_tol "
                           "-- iterative error is not proven small compared to the "
@@ -301,7 +451,7 @@ def report_group(key: tuple, members: list, out_lines: list):
                           ">= 3 to verify the observed order).")
         return
 
-    grids = members[:3] if len(members) >= 3 else members
+    grids = select_triplet(members) if len(members) >= 3 else members
     # grids[0] is finest (smallest h); a refinement ratio is coarser/finer, so > 1
     r_list = [grids[i + 1].h / grids[i].h for i in range(len(grids) - 1)]
     for i, r in enumerate(r_list):
@@ -312,26 +462,43 @@ def report_group(key: tuple, members: list, out_lines: list):
     if len(grids) >= 3:
         g1, g2, g3 = grids[0], grids[1], grids[2]
         r21, r32 = g2.h / g1.h, g3.h / g2.h
-        out_lines.append(f"\n  {'QoI':10s} {'phi1(fine)':>14s} {'phi2(med)':>14s} "
-                          f"{'phi3(coarse)':>14s} {'p_obs':>7s} {'GCI_fine%':>10s} "
-                          f"{'GCI_coarse%':>12s} {'phi_extrap':>14s} {'asym.chk':>9s}")
-        for qoi in QOIS:
-            phi1, phi2, phi3 = g1.qois[qoi], g2.qois[qoi], g3.qois[qoi]
-            res = gci_3grid(phi1, phi2, phi3, r21, r32)
-            if not res["ok"]:
-                note = ("non-monotonic convergence (oscillatory) -- GCI formula "
-                         "not applicable; consider Fs=3 two-grid bound instead"
-                         if not res["monotonic"] else
-                         "could not resolve an observed order p")
-                out_lines.append(f"  {qoi:10s} {phi1:14.6g} {phi2:14.6g} "
-                                  f"{phi3:14.6g}   -- {note}")
-                continue
-            out_lines.append(
-                f"  {qoi:10s} {phi1:14.6g} {phi2:14.6g} {phi3:14.6g} "
-                f"{res['p']:7.3f} {res['gci_fine']*100:10.4f} "
-                f"{res['gci_coarse']*100:12.4f} {res['phi_ext']:14.6g} "
-                f"{res['asymptotic_check']:9.3f}"
-            )
+        _NOTE = {
+            "oscillatory": "OSCILLATORY (R<0): sign flip between eps21 and eps32 "
+                           "-- Richardson/GCI not applicable",
+            "diverging":   "DIVERGING (R>1): grids move APART under refinement "
+                           "-- no observed order exists to report",
+            "degenerate":  "DEGENERATE (eps32 == 0): grids 2 and 3 identical",
+        }
+        for _label, _qois in (
+                ("EXIT-NODE QoIs (x2 is a node on every grid; no interpolation)",
+                 QOIS_EXIT),
+                (f"POINT QoIs interpolated at frac={X_FRAC_DEFAULT:g}",
+                 QOIS_POINT)):
+            out_lines.append("")
+            out_lines.append(f"  -- {_label} --")
+            out_lines.append(f"  {'QoI':11s} {'phi1(fine)':>14s} {'phi2(med)':>14s} "
+                             f"{'phi3(coarse)':>14s} {'R':>7s} {'p_obs':>7s} "
+                             f"{'GCI_fine%':>10s} {'GCI_coarse%':>12s} "
+                             f"{'phi_extrap':>14s} {'asym.chk':>9s}")
+            for qoi in _qois:
+                phi1, phi2, phi3 = g1.qois[qoi], g2.qois[qoi], g3.qois[qoi]
+                res = gci_3grid(phi1, phi2, phi3, r21, r32)
+                _R = res.get("R")
+                _rtxt = f"{_R:7.3f}" if _R is not None and _R == _R else "    n/a"
+                if not res["ok"]:
+                    note = _NOTE.get(res.get("conv"),
+                                     "could not resolve an observed order p")
+                    out_lines.append(f"  {qoi:11s} {phi1:14.6g} {phi2:14.6g} "
+                                     f"{phi3:14.6g} {_rtxt}   -- {note}")
+                    continue
+                out_lines.append(
+                    f"  {qoi:11s} {phi1:14.6g} {phi2:14.6g} {phi3:14.6g} "
+                    f"{_rtxt} {res['p']:7.3f} {res['gci_fine']*100:10.4f} "
+                    f"{res['gci_coarse']*100:12.4f} {res['phi_ext']:14.6g} "
+                    f"{res['asymptotic_check']:9.3f}"
+                    + ("   <- p_obs outside [%.1f,%.1f]; GCI uses formal p=%.0f"
+                       % (P_MIN, P_MAX, FORMAL_ORDER) if res["p_clamped"] else "")
+                )
     else:
         g1, g2 = grids[0], grids[1]
         r21 = g2.h / g1.h
@@ -391,8 +558,12 @@ def main():
     out_lines = [
         f"GCI report -- {len(runs)} run(s) discovered, "
         f"{len(groups)} distinct settings group(s)",
-        f"QoIs interpolated at x1 + {args.frac:g}*(x2-x1); "
-        f"first/last CSV row (ghost cells) excluded.",
+        f"EXIT-NODE QoIs ({', '.join(QOIS_EXIT)}) are read at x2, which is an "
+        f"exact node on every grid -- no interpolation, any refinement ratio.",
+        f"POINT QoIs ({', '.join(QOIS_POINT)}) are interpolated at "
+        f"x1 + {args.frac:g}*(x2-x1), excluding the first/last row.",
+        f"Every triplet is gated on Celik R = eps21/eps32: GCI is reported ONLY "
+        f"for 0 < R < 1 (monotonic convergence).",
     ]
     for key, members in groups.items():
         if len(members) >= 3:
