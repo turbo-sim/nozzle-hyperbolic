@@ -100,6 +100,13 @@ def load_config(yaml_path: pathlib.Path) -> types.SimpleNamespace:
     cfg.NEWTON_ITER  = int(n["newton_iter"])
     cfg.DELTA_FACTOR = float(n["delta_factor"])
     cfg.RECON        = str(n["recon"])
+    # van Albada eps normalisation.  Absent/None => original behaviour
+    # ('magnitude', va_rel=1e-3), so old settings files are unchanged.
+    cfg.VA_EPS_MODE  = str(n.get("va_eps_mode", "magnitude"))
+    cfg.VA_REL       = (float(n["va_rel"])
+                        if n.get("va_rel") is not None else None)
+    cfg.VA_R0        = float(n.get("va_r0", 0.5))   # smoothness-gate knee
+    cfg.VA_RM        = int(n.get("va_rm", 4))       # smoothness-gate exponent
     cfg.K_VM         = float(n["k_vm"])
     cfg.JACOBIAN          = str(n.get("jacobian", "dense"))          # dense | colored
     cfg.JACOBIAN_VALIDATE = bool(n.get("jacobian_validate", False))

@@ -46,7 +46,8 @@ from nozzle_hyperbolic.fvm_solver.two_fluid.sources import (
 
 # Settings file for this test (two-fluid format: gas=Air, liquid=water ghost,
 # mirroring the single-phase settings_nozzle_validation.yaml).
-SETTINGS_FILE = "settings_two_fluid_nozzle_validation_two_component_test_static.yaml"
+# SETTINGS_FILE = "settings_two_fluid_nozzle_validation_two_component_test_static.yaml"
+SETTINGS_FILE = "settings_flashing_smd_supersonic_test.yaml"
 SETTINGS_YAML = os.environ.get("SETTINGS_YAML",SETTINGS_FILE)
 # SETTINGS_YAML = os.environ.get("SETTINGS_YAML","settings_two_fluid_liquid_bernoulli_symmetric.yaml")
 _here = pathlib.Path(__file__).parent
@@ -677,6 +678,10 @@ _ret = make_two_fluid_step(
     delta_factor  = cfg.DELTA_FACTOR,
     newton_iter   = cfg.NEWTON_ITER,
     recon         = cfg.RECON,
+    va_eps_mode   = cfg.VA_EPS_MODE,
+    va_rel        = cfg.VA_REL,
+    va_r0         = cfg.VA_R0,
+    va_rm         = cfg.VA_RM,
     sources_fn    = _sources_fn,
     lowmach_diss  = cfg.LOWMACH_DISS,
     lowmach_diss_bc = cfg.LOWMACH_DISS_BC,

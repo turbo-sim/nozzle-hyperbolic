@@ -129,6 +129,10 @@ def make_two_fluid_step(
     delta_factor=1e-6,
     newton_iter=5,
     recon='muscl_van_leer',
+    va_eps_mode='magnitude',
+    va_rel=None,
+    va_r0=0.5,
+    va_rm=4,
     sources_fn=None,
     lowmach_diss=0.0,
     lowmach_diss_bc=None,
@@ -354,6 +358,24 @@ def make_two_fluid_step(
     # a thin liquid-side ghost should set ~1e-4..1e-3 so the solver cannot
     # re-thin α below the IC floor mid-march (h_g = E/(αρ) amplifier guard).
     alpha_eps = float(alpha_eps)
+    # van Albada eps normalisation (see _muscl below).  'magnitude' is the
+    # original behaviour and the default, so omitting these keys reproduces every
+    # pre-2026-09-09 run exactly.  va_rel=None picks the value calibrated for the
+    # chosen mode (1e-3 magnitude / 1e-4 range) so switching mode alone cannot
+    # land on a mis-scaled floor.
+    if va_eps_mode not in ('magnitude', 'range', 'smoothness'):
+        raise ValueError(f"va_eps_mode must be 'magnitude', 'range' or "
+                         f"'smoothness', got {va_eps_mode!r}")
+    _va_rel_eff = float(va_rel) if va_rel is not None else (
+        {'range': 1e-4, 'smoothness': 1e-12}.get(va_eps_mode, 1e-3))
+    _va_r0 = float(va_r0)
+    _va_rm = int(va_rm)
+    if _va_r0 <= 0.0 or _va_rm < 4 or _va_rm % 2:
+        raise ValueError("va_r0 must be > 0 and va_rm an EVEN integer >= 4: "
+                         "even so the gate can be evaluated on r^2 (no abs() "
+                         "in the AD'd residual), >=4 so the smooth-region "
+                         "perturbation stays O(h^m) below the O(h^2) "
+                         "truncation error")
     if pin_ghost and not use_saturation:
         raise ValueError("pin_ghost=True requires use_saturation=True "
                          "(the pin reads h_sat_g(p) from the saturation table)")
@@ -870,15 +892,84 @@ def make_two_fluid_step(
             # noise of the ghost-limit case that flicker slowly pumps the state
             # (same pathology class as the du_blend branch alternation).  The ε²
             # floor makes the slope response to sub-ε noise O(noise³/ε²) → no
-            # flicker; smooth-gradient slopes (≫ε) are untouched.  ε is RELATIVE
-            # per cell/variable (fields span 1e-4 .. 1e6 in magnitude), with a
-            # domain-mean fallback so u through 0 keeps a finite floor.
-            _va_rel = 1e-3
-            eps  = _va_rel * (jnp.abs(U_h[1:-1])
-                              + 0.1 * jnp.mean(jnp.abs(U_h), axis=0)[None, :])
+            # flicker; smooth-gradient slopes (≫ε) are untouched.
+            # eps normalisation is selectable (va_eps_mode):
+            #
+            # 'magnitude' (DEFAULT, original 2026-07-14 behaviour, va_rel=1e-3):
+            #     eps ~ |U| per cell, with a domain-mean fallback so u through 0
+            #     keeps a finite floor.  Reproduces every run made before
+            #     2026-09-09 bit-for-bit.
+            #
+            # 'range' (EXPERIMENTAL 2026-09-09, va_rel=1e-4):
+            #     eps ~ (max U - min U) per variable.  The |U|-based floor tracks
+            #     field MAGNITUDE, so any variable that is a large offset with a
+            #     small variation gets a floor above its own cell-to-cell
+            #     increments and is limited to 1st order at every resolution --
+            #     measured on the N=500 two-component run, exit region:
+            #         alpha_g (0.978 +/- 0.019) kept  0.03% of its true slope
+            #         h_l     (9.7e4 +/- 4.3e3) kept  9.5%
+            #         h_g                       kept 12.7%
+            #     while u_g/u_l (variation ~ magnitude) were untouched, which is
+            #     why only the velocities showed 2nd order and the observed order
+            #     sat at ~1.2 instead of 2.
+            #     va_rel must stay well below 1/N (the smooth-region cell
+            #     increment is ~range/N): 1e-4 leaves ~17x headroom at N=600.
+            #     KNOWN TRADE-OFF: removing the over-limiting also removes noise
+            #     suppression it was providing -- on N=256 the 2dx checkerboard in
+            #     u_l went 0.27% -> 1.70% of range and alpha 0.49% -> 1.14%, and
+            #     the mdot conservation spread worsened 2.35% -> 2.84%.  Not yet
+            #     recommended for production; see also an h-scaled floor
+            #     (eps^2 ~ dx^3) which would fix the asymptotics without this cost.
+            #
+            # The +1e-12*mean term in 'range' is a degenerate-field guard (rng==0).
             a, b = dU[:-1], dU[1:]
+            if va_eps_mode == 'range':
+                _va_scale = (jnp.max(U_h, axis=0) - jnp.min(U_h, axis=0)
+                             + 1e-12 * jnp.mean(jnp.abs(U_h), axis=0))[None, :]
+            else:                       # 'magnitude' and 'smoothness'
+                _va_scale = (jnp.abs(U_h[1:-1])
+                             + 0.1 * jnp.mean(jnp.abs(U_h), axis=0)[None, :])
+            eps  = _va_rel_eff * _va_scale
             s    = jnp.where(a * b > 0.0,
                              a * b * (a + b) / (a*a + b*b + eps*eps), 0.0)
+            if va_eps_mode == 'smoothness':
+                # Detect the 2dx mode by the SHAPE of the stencil rather than by
+                # thresholding its amplitude -- which is what both amplitude
+                # modes get wrong, in opposite directions.
+                #
+                #   r = |a-b| / |a+b|
+                #     numerator   = |2nd difference|  ~ O(h^2) where smooth
+                #     denominator = |centred diff|    ~ O(h)   where smooth
+                #   => r ~ O(h) in smooth cells (gate -> 1, FULL 2nd order as
+                #      h -> 0), but r ~ O(1) on a 2dx mode, independent of h.
+                # Measured on two_component N=256/358/500 (magnitude runs):
+                #   r median  alpha_g 0.01377 / 0.00993 / 0.00712  (ratios 1.39,
+                #   1.39 vs the h ratio 1.40 -- r tracks h almost exactly), while
+                #   r_max stayed ~8-14 on every grid.
+                # Because a*b>0 in the active branch, |a+b| = |a|+|b| >= |a-b|,
+                # so r <= 1 there; r0=0.5 puts the half-suppression point inside
+                # that range.  m >= 3 keeps the smooth-region perturbation
+                # O(h^m), i.e. below the O(h^2) truncation error.
+                # Retention measured at N=500 (active cells, bulk r<p50 / rough
+                # r>p99):  magnitude 4-98% / 5-80%   (mis-targeted: it passes
+                # 79.6% of p's roughest slopes while killing 96% of alpha's
+                # smoothest);  range 94-99.7% / 64-97% (no tail suppression);
+                # smoothness 100% / 7-31%.
+                # r is clipped only to keep r**m finite when a+b -> 0 exactly;
+                # the gate is already ~1e-6 there.
+                # SMOOTH FORM (required): the residual is differentiated by
+                # jax.jacfwd, so abs()/minimum() would put kinks straight into
+                # the Jacobian -- and |a-b| kinks exactly at a==b, which IS the
+                # smooth case (93.8% of cells have r<0.1).  Newton then loses
+                # quadratic convergence.  Since va_rm is even,
+                #     (r/r0)**m == (r^2/r0^2)**(m/2)
+                # and r^2 needs no abs at all, so this is the SAME gate written
+                # without a single non-differentiable operation.  The clip is
+                # unnecessary too: as (a+b)->0, q->inf and the gate -> 0 on its
+                # own (written as a product so inf never reaches a subtraction).
+                _q    = (a - b) ** 2 / ((a + b) ** 2 + 1e-300)
+                _gate = 1.0 / (1.0 + (_q / (_va_r0 * _va_r0)) ** (_va_rm // 2))
+                s     = s * _gate
             sigma = jnp.zeros_like(U_h).at[1:-1].set(s)
             U_L_m  = U_h[:-1] + 0.5 * sigma[:-1]
             U_R_m  = U_h[1:]  - 0.5 * sigma[1:]

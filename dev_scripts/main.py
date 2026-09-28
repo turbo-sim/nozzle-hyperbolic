@@ -23,7 +23,7 @@ import shutil
 
 hyp.set_plot_options(grid=False)
 
-SETTINGS_YAML = "settings_nozzle_validation.yaml"
+SETTINGS_YAML = "settings_nozzle_hem.yaml"
 
 ## Read settings
 # with open("settings_shock_tube.yaml", 'r') as file:

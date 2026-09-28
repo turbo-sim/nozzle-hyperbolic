@@ -1,24 +1,24 @@
 boundary_conditions:
-  p_stagnation: 10e5    # Pa  — 2 bar, well into ideal-gas regime for Air
+  p_stagnation: 2e5    # Pa  — 2 bar, well into ideal-gas regime for Air
   T_stagnation: 295.15    # K
-  p_out:        9.8e5   # Pa  — supersonic design condition (A/A*=2, γ=1.4, M≈2.2)
-  # p_out:        18450.0  # Pa  — supersonic design condition (A/A*=2, γ=1.4, M≈2.2)
+  # p_out:        9.8e4   # Pa  — supersonic design condition (A/A*=2, γ=1.4, M≈2.2)
+  p_out:        18450.0  # Pa  — supersonic design condition (A/A*=2, γ=1.4, M≈2.2)
   # p_out: 6000
 
 numerical_settings:
-  Nx: 200
+  Nx: 100
   x1: 0.0
   x2: 0.31           # matches geometry L=0.2
   t1: 0.00
   t2: 100.0          # large — residual criterion will stop iteration first
-  CFL: 1.0         # keep small for shock capture; supersonic cases can use larger
+  CFL: 0.5         # keep small for shock capture; supersonic cases can use larger
   max_iterations: 10000
   residuals: 1.0e-6
  
   flux_method: hllc  # ignored by fvs_newton, kept for completeness
 
   time_discretization: fvs_newton
-  initialization: constant   # 'shocked' | 'subsonic' | 'isentropic' | 'simple'
+  initialization: isentropic   # 'shocked' | 'subsonic' | 'isentropic' | 'simple'
   x_shock_fraction: 0.88   # 88% of nozzle length ≈ analytical shock position for p_out=58450 Pa
 
   reconstruction: muscl_van_leer # muscl_van_leer | constant
@@ -44,7 +44,7 @@ numerical_settings:
   profile: false         # JAX device trace → <out_dir>/jax_trace; view at ui.perfetto.dev or tensorboard
 
 geometry:
-  function: get_nozzle_elliot
+  function: get_symmetric_nozzle
   roughness: 0.0
   # L:        0.2     # nozzle length [m]
   # A_inlet:  0.30    # inlet/outlet area [m²]   → area ratio A_inlet/A_throat = 2
@@ -52,24 +52,24 @@ geometry:
 
 fluid:
   perfect_gas: false   # fvs_newton requires real-gas EOS
-  # fluid_name: Air
-  fluid_name: water
+  fluid_name: Air
+  # fluid_name: water
   use_lookup_table: true
   lut:
-    # backend:   HEOS
-    # h_min:     150000.0   # J/kg  →  covers exit at M≈2.2, T≈152 K
-    # h_max:     500000.0   # J/kg  →  well above stagnation h≈400 kJ/kg at T0=300 K
-    # p_min:     5000.0     # Pa    (below p_out)
-    # p_max:     500000.0   # Pa    (above p0)
-    # N_h:       100
-    # N_p:       80
-    # table_dir: fluid_tables
-    backend: HEOS
-    h_min: 1000.0    # J/kg
-    h_max: 140000.0   # J/kg
-    p_min: 10000.0   # Pa
-    p_max: 6000000.0  # Pa  (60 bar, was 30)
-    N_h: 145
-    N_p: 200
+    backend:   HEOS
+    h_min:     150000.0   # J/kg  →  covers exit at M≈2.2, T≈152 K
+    h_max:     500000.0   # J/kg  →  well above stagnation h≈400 kJ/kg at T0=300 K
+    p_min:     5000.0     # Pa    (below p_out)
+    p_max:     500000.0   # Pa    (above p0)
+    N_h:       100
+    N_p:       80
     table_dir: fluid_tables
-    gradient_method: forward
+    # backend: HEOS
+    # h_min: 1000.0    # J/kg
+    # h_max: 140000.0   # J/kg
+    # p_min: 10000.0   # Pa
+    # p_max: 6000000.0  # Pa  (60 bar, was 30)
+    # N_h: 145
+    # N_p: 200
+    # table_dir: fluid_tables
+    # gradient_method: forward

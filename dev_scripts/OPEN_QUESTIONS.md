@@ -170,3 +170,195 @@ being dead (not a judgment call):
 
 Both implementations are kept commented-out in place (not deleted) as the
 historical record of what was tried.
+
+
+---
+
+*Added 2026-09-10, from the van Albada eps-normalisation work
+(`va_eps_mode`, solver.py `_muscl`).*
+
+## 8. `va_eps_mode='smoothness'` diverges from a stagnation IC on coarse grids — OPEN
+
+`results_grid_limiterfix/two_component_N150_*` (CFL 5.0, `va_eps_mode:
+smoothness`) died with `NaN/Inf in state at step 1 (dt=1.16e-07)`.  The same
+grid family runs fine at N=256/358/500 with the same mode and CFL 10, and N=150
+is fine under `va_eps_mode: magnitude`.
+
+**Claim:** this is a start-up problem, not a steady-state one.  The stagnation
+IC is far from the solution; the smoothness gate (correctly) does not suppress
+the large slopes that the IC's discontinuous start produces, where the
+`magnitude` floor did — it crushed every slope on a coarse grid, so it never
+saw them.
+
+**Why it matters:** it blocks extending the convergence ladder DOWNWARD.  The
+existing smoothness ladder {256, 358, 500} has N=256 under-resolved and
+N=358/500 already agreed to ~0.004%, so a coarser grid is exactly what is
+needed to find three grids inside one asymptotic range.
+
+**Recommended action:** don't weaken the gate for this.  Ramp the IC instead —
+start on `va_eps_mode: magnitude` (or a low CFL) for the first few hundred
+steps to get off the stagnation state, then switch to `smoothness` for the
+converged solve.  The converged steady state is dt- and path-independent IF it
+is unique (see #9), so a two-stage start is legitimate.
+
+**Probe:** rerun N=150 smoothness from a converged N=150 magnitude solution
+(`ic.type: restart`) instead of `ic.type: stagnation`.  If it converges, the
+diagnosis is confirmed and the two-stage start is the fix.
+
+## 9. Is the converged steady state CFL-independent? — UNVERIFIED, blocks a paper claim
+
+Every converged run in `results_grid_limiterfix` is at CFL 10; every run in
+`results_grid_sesitivity` is at CFL 1-2.  So limiter mode and CFL are fully
+confounded in every old-vs-new comparison made so far.
+
+**What is proven:** the steady state cannot depend on dt *if it is unique*.
+`solver.py:2216` evaluates the steady residual at `dt=1.0` and normalises by
+`t_char = dx/lam_max`; and in `V_new - V_n + dt*(flux+source)`, steady state
+gives `flux+source = 0` with dt cancelling.
+
+**What is NOT proven:** uniqueness.  If the discrete system has several steady
+states, a large early dt can select a different one — at CFL 10 the acoustic
+waves are ~10x under-resolved and implicitly damped, and the early transient off
+a stagnation IC is exactly when they run.  This system shows non-trivial
+solution structure (the N=358 `magnitude` limit cycle at SSR 1.1e-6, persistent
+checkerboard modes, flashing metastability), so multiplicity is plausible.
+
+**Recommended action:** CFL sweep at N=256 (cheapest grid, 1760 steps at CFL
+10), `va_eps_mode: smoothness`, CFL = 2 / 5 / 10.  Agreement establishes
+CFL-independence and lets it be stated in the paper; disagreement is a much
+larger finding that would affect every ladder, including the NICFD study.
+
+
+## 10. two_component: the INTERIOR does not converge, the exit does — LARGELY EXPLAINED (see 10a)
+
+Found while closing the NICFD grid study (`nicfd_figures/gci_nicfd_table.py`).
+Grids {500, 351, 256, 180}, all converged to SSR < 1e-8, `va_eps_mode:
+magnitude`, one shared fingerprint.
+
+**Claim:** every interior quantity of interest fails the Celik convergence
+condition on EVERY valid triplet, while the exit node passes on all four.
+
+  station                          result
+  exit node  (x2, common node)     all 4 triplets converge, p = 1.53 / 1.60 /
+                                   1.65 / 1.70, phi_ext consistent to 0.02%
+  inlet node (x1, common node)     values monotone but |eps21| > |eps32|, i.e.
+                                   differences GROW toward the fine end (R > 1)
+  5 interior stations + 3 integrals  oscillatory or diverging on all 4 triplets;
+                                   the three-coarsest triplet {351,256,180}
+                                   gives R = -0.16 .. -1.64 on all 8 QoIs
+
+So it is not one bad grid — dropping the finest (N=500) does not help.
+
+**What IS established:**
+
+  * The differences are REAL, not noise.  At x/L = 0.80 the spread across the
+    four grids is 5.1e-04 relative: 2.3e12 x machine epsilon and 5.1e4 x the
+    SSR tolerance.
+  * The sequence converges over the coarse end and then STALLS.  Domain L2
+    difference between successive grids: 180-256 = 1.049, 256-351 = 0.630
+    (shrinks 1.66x, about right for 2nd order), 351-500 = 0.841 (GREW, 0.75x).
+    Against the finest: N=180 -> 1.715, N=256 -> 0.900, N=351 -> 0.841.
+  * The jitter is equivalent to a position shift of 0.07 to 1.55 cells, largest
+    where the gradient is steepest (x/L = 0.35, |du/dx| = 2165).
+
+**Five mechanisms were tested and ALL ruled out.  Do not re-propose these:**
+
+  1. Shock-position jitter (shock at x/L ~ 0.593, moves non-monotonically:
+     0.59608 / 0.59104 / 0.59319).  RULED OUT: the non-monotonicity is present
+     UPSTREAM of the shock too (x/L = 0.20, 0.35, 0.50), where a downstream
+     shock cannot reach.
+  2. Rigid translation of the downstream profile by that shift.  RULED OUT:
+     predicted/observed ratios scatter 0.04 to 1.01.
+  3. The 2dx checkerboard sampled at a random sub-cell phase.  RULED OUT: the
+     jitter is 17-2000x the local 2dx amplitude.
+  4. Machine precision or incomplete iteration.  RULED OUT by the scale above.
+  5. Interpolation error from cubic sampling.  RULED OUT: N=351 and N=256 share
+     interior nodes at x/L = 0.2/0.4/0.6/0.8 (gcd(350,255) = 5), and there the
+     interpolated and node-read differences agree to 0.00e+00 exactly.
+
+**Why it does not block the paper:** the two reported results do not depend on
+resolving it.  two_component is quoted at the exit node (four independent
+triplets agreeing, phi_ext consistent to 0.02%, GCI bands ~10x wider than the
+actual extrapolation scatter), and smd 15 bar in the interior (eight QoI
+definitions, p = 2.07-2.84, asym.chk = 1.000-1.002).
+
+**Recommended action / probes, in order of cost:**
+
+  1. Rerun the SAME grids with `va_eps_mode: smoothness`.  Under `magnitude`
+     the limiter keeps only 0.2-7% of alpha's slope; under `smoothness` it keeps
+     ~100% in smooth cells.  N=256/358/500 smoothness runs already exist in
+     `results_grid_limiterfix`.  If the interior non-monotonicity disappears the
+     cause is limiter-related; if it persists it is in the scheme or the physics.
+  2. Add N ~ 700 (r = 1.40 from 500).  If the L2 difference 500-700 keeps
+     shrinking, the 256-351 stall was local; if it stalls again there is a
+     fixed-amplitude error floor in the interior, which would be a solver-level
+     finding.
+
+### 10a. PROBE RESULT (2026-09-15) — limiter exonerated; it is the QoI and the ladder
+
+Probe: `probe_oq10_limiter_interior.py`, comparing the magnitude ladder
+{500, 351, 256} against the smoothness ladder {500, 358, 256} (both converged to
+SSR < 1e-8; the ladders are not grid-identical because magnitude's N=358
+limit-cycled, hence N=351 in the study).
+
+**The limiter is NOT the cause.**  Under `smoothness` every interior QoI still
+fails.  But the FAILURE MODE changes completely:
+
+    interior eps21 (fine pair)      magnitude        smoothness
+      x/L 0.95                     -2.11e-04         2.21e-05
+      x/L 0.90                     -2.62e-04         2.85e-05
+      x/L 0.80                     -5.14e-04         1.03e-04
+
+  magnitude : eps21 and eps32 comparable, signs erratic -> genuine jitter, |R| ~ 1-5
+  smoothness: eps21 collapses ~10x while eps32 GROWS -> |R| ~ 0.00-0.12, i.e. the
+              fine pair has converged and eps21 sits at the noise floor
+
+So `smoothness` IMPROVED the interior convergence; it moved the problem from
+"jitter" to "ladder too fine".
+
+**N=256 is pre-asymptotic.**  Region L2 differences on the smoothness ladder:
+
+    x/L band     |500-358|   |358-256|   ratio   (2nd order predicts 1.96)
+    0.25-0.45      0.320       3.122       9.8
+    0.55-0.65      1.196      11.253       9.4
+    0.65-0.80      0.053       2.320      44.1
+    0.80-0.99      0.006       0.404      66.5
+
+N=358 and N=500 have converged to each other; N=256 has not entered the regime.
+No three grids span one asymptotic window.  The peak difference in BOTH pairs is
+at x/L = 0.599 -- the shock.
+
+**The QoI is implicated.**  The SHOCK POSITION converges where field values do
+not:
+
+    shock position, smoothness:  0.184198 / 0.184524 / 0.185392
+                                 -> PASS p = 2.91, GCI = 0.134%
+    shock position, magnitude :  0.184820 / 0.184671 / 0.184176
+                                 -> p = 4.0, out of band
+    p, alpha_g, u_g, u_l at x/L = 0.90 and 0.70: FAIL under both limiters
+
+Interpretation: the shock moves 0.4-0.7 cells between grids.  A field value at a
+FIXED station downstream superposes two processes converging at different rates
+-- the local solution converging, and the discontinuity sliding past -- which can
+partially cancel and produce non-monotone eps.  The shock position contains only
+one process, so it converges.  For a shocked flow a pointwise field value at a
+fixed station is simply a poor QoI.
+
+**Status:** section 10 is no longer "unexplained".  The interior failure is the
+combination of (i) a pointwise QoI straddling a moving discontinuity and (ii) a
+ladder whose coarse grid is pre-asymptotic.  Neither is a solver defect.
+
+**Remaining work, and it depends on section 8:** confirming this needs a
+smoothness ladder with a COARSER third grid, so that three grids sit in one
+window.  N=180 and N=150 both NaN at step 1 from a stagnation IC under
+`smoothness` -- exactly section 8.  The two-stage start proposed there (run
+`magnitude` first, switch to `smoothness`) is the unblock.  Then re-run this
+probe and check whether the shock position still gives p ~ 2.9 on two
+overlapping triplets, and whether the interior field QoIs recover.
+
+**Does NOT affect the paper:** two_component is reported at the exit node (four
+triplets agreeing, phi_ext consistent to 0.02%) and smd 15 bar in the interior
+(eight QoI definitions, p = 2.07-2.84).  Note also that the exit QoIs pass under
+`magnitude` but go oscillatory under `smoothness` (same eps21-collapse cause), so
+the study's choice of `magnitude` is the configuration in which they are
+measurable.

@@ -66,7 +66,7 @@ eos:
 
 # ── Grid ──────────────────────────────────────────────────────────────────────
 grid:
-  Nx: 300
+  Nx: 100
   x1: 0.0
   x2: 1.2        # m — see caveat 3 (keeps p_exit in-table; full nozzle ≈ 0.9 m)
   radius: 0.01   # legacy fallback (geometry block wins)
@@ -83,7 +83,7 @@ geometry:
 sources:
   # bubble_number:  1.0e12          # physics (from the demo) — NOT a tuning knob
   # droplet_number: 1.0e10
-  bubble_number:  1.0e11          # physics (from the demo) — NOT a tuning knob
+  bubble_number:  1.0e12          # physics (from the demo) — NOT a tuning knob
   droplet_number: 1.0e10
   # FLASHING = phase change ON: closure computes evaporation σ_Mg and the source
   # is assembled by D_VE_algebric (mass + momentum + energy transfer).  Needs the
@@ -92,11 +92,30 @@ sources:
 
 # ── Numerics (full certified E3 stack) ────────────────────────────────────────
 numerics:
-  CFL: 1.0
-  newton_iter: 7
+  CFL: 2.0
+  newton_iter: 8
   delta_factor: 1e-6              # Harten fix — WATCH the throat sonic cell
   recon: muscl_van_albada         # smooth limiter (flashing front ~ a shock in α;
                                   # C0 limiters flicker-pump the growing ghost)
+  # van Albada eps normalisation (see solver.py _muscl).
+  #   magnitude : eps ~ |U| per cell        (DEFAULT, original pre-2026-09-09)
+  #   range     : eps ~ (max U - min U)     (EXPERIMENTAL, use va_rel: 1.0e-4)
+  #   smoothness: gate on local stencil shape r=|a-b|/|a+b|, NOT on amplitude
+  #               (EXPERIMENTAL; va_rel then only guards 0/0, knee va_r0=0.5,
+  #                exponent va_rm=4).  r ~ O(h) where smooth so the gate opens
+  #                as the grid refines -> 2nd order; r ~ O(1) on a 2dx mode
+  #                regardless of h -> stays suppressed.  Measured retention at
+  #                N=500 (bulk/rough): magnitude 4-98%/5-80%, range 94-99%/
+  #                64-97%, smoothness 100%/7-31%.
+  # 'magnitude' over-limits any variable that is a large offset with a small
+  # variation (alpha_g kept 0.03% of its slope, h_l 9.5%) which caps the observed
+  # order near 1.2; 'range' fixes that but currently worsens the 2dx checkerboard
+  # and mdot conservation.  Keep 'magnitude' for the NICFD grid study so every
+  # ladder member uses one scheme.  va_rel: null -> mode-calibrated default.
+  va_eps_mode: magnitude
+  va_rel: null
+  va_r0: 0.5
+  va_rm: 4
   k_vm: 0.5
   jacobian: colored
   jacobian_validate: false
@@ -117,14 +136,14 @@ numerics:
   lowmach_diss_bc: 0.0
   # JST void filter, velocity-gated: active only in the slow inlet, OFF at the
   # throat/supersonic (u_mat inlet ~ few m/s → throat ~100 m/s; u0=40, Δu=12).
-  eps_void: 0.05
+  eps_void: 0.15
   # PROBE 2026-07-21: gate lifted (null = ungated/uniform).  The gas u_g/h_g 2Δx
   # wind-up lives in the strong-flashing region at u>100 m/s where the u-gated
   # filter was OFF.  Restore 70.0 if this probe is negative.
   eps_void_ucut:  null
   eps_void_uwidth: 12.0
   eps_void_scale:  frozen
-  eps_ghost: 0.05
+  eps_ghost: 0.15
   # Band widened 3e-3 → 5e-2 (2026-07-21): the gas-phase h_g/u_g 2Δx mode that
   # kills the flashing march lives at α ≈ 1e-3..1e-2 (onset region) — OUTSIDE
   # the default band, so the certified ghost filter was off exactly where the
@@ -173,7 +192,7 @@ ic:
                                   # Alternatives: 'stagnation' (from rest — rougher,
                                   # hits the deferred startup-corner issue) or a
                                   # 'nozzlex' pickle seed.
-  run: results_two_phase/smd_supersonic_N600_muscl_van_albada_20260725_173528 # smd_supersonic_N420_muscl_van_albada_20260725_104129 # smd_supersonic_N422_muscl_van_albada_20260724_175819 #smd_supersonic_N410_muscl_van_albada_20260723_130322  #   smd_supersonic_N200_muscl_van_albada_20260722_182410 # smd_supersonic_N120_muscl_van_albada_20260722_171951  #  smd_supersonic_N120_muscl_van_albada_20260722_163746 #   smd_supersonic_N100_muscl_van_albada_20260722_161147
+  run: results_bubble_number_sens/smd_supersonic_N300_muscl_van_albada_20260914_225038 
   alpha_floor: 1.0e-6             # thick ghost seed — match numerics.alpha_eps
 
 
@@ -196,7 +215,7 @@ bc:
   # NOT the ill-conditioned ghost-vapor isentrope.  This is the flashing fix.
   dom_phase:     auto             # auto (mass fraction) | gas | liquid
 
-  p_out:       80e5        # Pa — 67.6 bar back-pressure (case "a"); ignored
+  p_out:         0.8e5        # Pa — 67.6 bar back-pressure (case "a"); ignored
   p_out_relax:   1.0              #      once the exit goes supersonic
 
 # ── Time-step control (flashing mass transfer is STIFF → adaptive halving) ─────
@@ -211,7 +230,7 @@ time_control:
 
 # ── Run control ───────────────────────────────────────────────────────────────
 run:
-  n_steps: 20000
+  n_steps: 40000
   print_every: 50
   ssr_tol: 1.0e-8
   t_end: null
@@ -221,5 +240,5 @@ run:
   debug_newton: false
 
 save_options:
-  repo_main: results_two_phase
+  repo_main: results_bubble_number_sens
   repo_run: smd_supersonic

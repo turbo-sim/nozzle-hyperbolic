@@ -53,7 +53,7 @@ eos:
 
 # ── Grid ─────────────────────────────────────────────────────────────────────
 grid:
-  Nx: 256
+  Nx: 180
   x1: 0.0
   x2: 0.31
   radius: 0.01        # legacy fallback (geometry block wins)
@@ -75,10 +75,29 @@ sources:
 
 # ── Numerics ──────────────────────────────────────────────────────────────────
 numerics:
-  CFL: 2.0
+  CFL: 5.0
   newton_iter: 5
   delta_factor: 1e-6
   recon: muscl_van_albada
+  # van Albada eps normalisation (see solver.py _muscl).
+  #   magnitude : eps ~ |U| per cell        (DEFAULT, original pre-2026-09-09)
+  #   range     : eps ~ (max U - min U)     (EXPERIMENTAL, use va_rel: 1.0e-4)
+  #   smoothness: gate on local stencil shape r=|a-b|/|a+b|, NOT on amplitude
+  #               (EXPERIMENTAL; va_rel then only guards 0/0, knee va_r0=0.5,
+  #                exponent va_rm=4).  r ~ O(h) where smooth so the gate opens
+  #                as the grid refines -> 2nd order; r ~ O(1) on a 2dx mode
+  #                regardless of h -> stays suppressed.  Measured retention at
+  #                N=500 (bulk/rough): magnitude 4-98%/5-80%, range 94-99%/
+  #                64-97%, smoothness 100%/7-31%.
+  # 'magnitude' over-limits any variable that is a large offset with a small
+  # variation (alpha_g kept 0.03% of its slope, h_l 9.5%) which caps the observed
+  # order near 1.2; 'range' fixes that but currently worsens the 2dx checkerboard
+  # and mdot conservation.  Keep 'magnitude' for the NICFD grid study so every
+  # ladder member uses one scheme.  va_rel: null -> mode-calibrated default.
+  va_eps_mode: magnitude
+  va_rel: null
+  va_r0: 0.5
+  va_rm: 4
   k_vm: 0.5
   jacobian: colored
   jacobian_validate: false   # confirm colored==dense with the widened ±2 filter stencil
@@ -151,7 +170,7 @@ numerics:
 ic:
   type: restart # stagnation restart
   # type: nozzlex
-  run: results/nozzle_valid_gasdom_N500_muscl_van_albada_20260722_115901 # two_component_N500_muscl_van_albada_20260726_004729
+  run: results_grid_limiterfix\two_component_N500_muscl_van_albada_20260910_103930 # two_component_N500_muscl_van_albada_20260726_004729
   # pickle: results_old/solution_elliot_subsonic_20.0bar_mr67.88_nb1.00e+13_nd1.00e+11.pkl
   # pickle: results/solution_elliot_subsonic_20.0bar_mr68_nb1.00e+13_nd1.00e+11_u1_1.0.pkl
 
@@ -203,7 +222,7 @@ time_control:
 
 # ── Run control ───────────────────────────────────────────────────────────────
 run:
-  n_steps: 20000
+  n_steps: 40000
   print_every: 10
   ssr_tol: 1.0e-8
   t_end: null
@@ -213,5 +232,5 @@ run:
   debug_newton: false
 
 save_options:
-  repo_main: results_grid_sesitivity
+  repo_main: results_grid_limiterfix
   repo_run: two_component

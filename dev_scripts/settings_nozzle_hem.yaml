@@ -1,0 +1,167 @@
+# -----------------------------------------------------------------------------
+# HEM (homogeneous equilibrium) flashing nozzle - SMD single-component water,
+# case "a".  Single-fluid Euler + equilibrium water table, i.e. the HEM
+# counterpart of settings_flashing_smd*.yaml (two-fluid).
+#
+# Physics: subcooled water at 120 bar / 578.95 K (T_sat(120 bar) = 597.8 K, so
+# ~19 K subcooled) accelerates through the SMD converging-diverging nozzle and
+# flashes.  In EQUILIBRIUM the sound speed collapses from ~900 m/s (liquid) to
+# ~86 m/s once the quality leaves zero, so:
+#   * the sonic point is NOT at the geometric throat (x = 0.097 m).  The whole
+#     constant-radius section (x = 0.090 -> 0.463 m) stays subsonic liquid; the
+#     flow only goes sonic at x ~ 0.47 m, just past the end of that section,
+#     and it is the QUALITY - not the area - that takes it there:
+#       x = 0.424  Ma 0.14  Q 0.004  a 490 m/s
+#       x = 0.461  Ma 0.63  Q 0.022  a 131 m/s
+#       x = 0.473  Ma 1.18  Q 0.048  a  86 m/s   <- thermal throat
+#   * upstream of it the flow is at Ma ~ 5e-3 .. 0.2 in a near-incompressible
+#     liquid for 40 % of the domain, which is exactly where FVS leaves an
+#     undamped 2dx pressure mode.
+# Both facts drive the settings below - see the >>> notes on each knob.
+#
+# Converged reference (Nx=100, settings as below), measured not estimated:
+#   SSR 2.998e-06 after 16681 iterations (~23 min at 81 ms/iter)
+#   mdot 14.58 kg/s | p_throat 91.7 bar | exit Ma 2.62, exit p 1.369 bar
+#   total enthalpy conserved to 0.082 %, entropy rise 0.66 J/(kg K) (0.02 %)
+#   face mass flux (the conserved one): 0.007 % inlet->outlet global, with a
+#   1.8 % local blip at x = 0.4606 - the sonic cell at the area break.
+#
+# NOTE: keep this file pure ASCII - main.py opens it without an explicit
+# encoding, so on Windows it is decoded as cp1252 and non-ASCII comments can
+# raise UnicodeDecodeError.
+# -----------------------------------------------------------------------------
+
+boundary_conditions:
+  p_stagnation: 120e5    # Pa  - 120 bar reservoir (case "a")
+  T_stagnation: 578.95   # K   - 19 K subcooled at 120 bar
+  # >>> INERT for this geometry: with A_exit/A_throat ~ 30 the divergent stays
+  # supersonic all the way out (exit Ma ~ 2.6, exit p ~ 1.37 bar), so the
+  # outlet BC switches to full extrapolation and p_out is never imposed.
+  # It only starts to matter if you shorten x2 or raise it above ~1.4 bar.
+  p_out:        0.8e5
+
+numerical_settings:
+  # >>> GRID REFINEMENT IS NOT FREE HERE - check before trusting a finer run.
+  # Nx=200 with eps_filter 0.0 blows up at ~iteration 600 (dt collapses to
+  # 1e-36, Ma_max 64), where the SAME settings at Nx=100 survived to ~4100.
+  # That is the signature of the 2dx pressure mode sharpening as dx shrinks,
+  # so a finer grid needs MORE filtering, not less.  Nx=200 has NOT been
+  # retested with eps_filter 0.05 - do that before any grid-convergence study,
+  # and expect to raise eps_filter with N.
+  Nx: 500
+  x1: 0.0
+  # >>> The SMD geometry is only DEFINED to z_div_end = 0.9001 m; past that the
+  # divergent branch keeps extrapolating linearly, so x2 = 1.2 adds 0.3 m of
+  # fictitious nozzle and takes A_exit/A_throat from ~13 to ~30.  Kept at 1.2
+  # to match settings_flashing_smd_supersonic_test.yaml; use 0.9 for the
+  # physical nozzle.
+  x2: 1.20
+  t1: 0.00
+  t2: 100.0          # large - residual criterion stops the iteration first
+
+  # >>> CFL 0.05 CANNOT CONVERGE THIS CASE.  This is a fully implicit Newton
+  # scheme, so the CFL only sets dt.  With the liquid sound speed ~900 m/s and
+  # dx = 12 mm, CFL 0.05 gives dt ~ 6.7e-7 s against a residence time of
+  # ~1e-2 s - 10000 iterations reach t = 6.7e-3 s, less than ONE flow-through.
+  # CFL 0.5 -> dt ~ 6.4e-6 s, ~8000 iterations to 1e-6.  CFL 2.0 was tried and
+  # diverges around iteration 600 (the sonic point in the constant-area section
+  # runs away), so 0.5 is close to the practical ceiling here.
+  CFL: 0.5
+  max_iterations: 20000
+  # >>> The run STOPS AT ~3x this value, not at this value.  fvm.py's plateau
+  # test is `res < 3.0 * residuals` AND the last 5 residuals within a factor
+  # 1.5 of each other; once the SSR curve flattens the second condition is
+  # always true, so 1.0e-6 here means "stop at 3e-6".  Verified: 16681
+  # iterations, stopped at SSR = 2.998e-06 (38 min at 137 ms/iter).  Set
+  # 3.3e-7 if you actually want the plateau band to close at 1e-6 - expect
+  # several thousand more iterations, and note the SSR descent is not
+  # monotone at that level (it rides a slow limit cycle, 1e-5 <-> 2e-5,
+  # superimposed on the downward trend).
+  residuals: 1.0e-6
+
+  flux_method: hllc  # ignored by fvs_newton, kept for completeness
+
+  time_discretization: fvs_newton
+  # >>> 'simple' DIVERGES on this case.  It ramps p linearly 120 bar -> p_out
+  # and estimates u from Bernoulli, which for A/A* ~ 30 starts with a ~216 %
+  # mass-flux imbalance; the resulting transient throws a cell out of the EOS
+  # table and the Newton solve returns NaN (observed at iteration 400-1000,
+  # the exact step is not reproducible - the transient is chaotic).  The
+  # symptom is "Done: N iterations (plateau / max_iter). SSR = nan", because
+  # t_phys goes NaN and the `t_phys < t_end` loop guard turns false.
+  # 'isentropic' seeds the real-gas isentrope on both branches (~2 % mass-flux
+  # imbalance) and is the only one that survives.  'subsonic' NaNs on step 1.
+  initialization: isentropic   # 'shocked' | 'subsonic' | 'isentropic' | 'simple'
+  x_shock_fraction: 0.88       # unused unless initialization: shocked
+
+  reconstruction: muscl_van_leer # muscl_van_leer | muscl_minmod | constant
+                                 # >>> muscl_minmod was tried: converges to
+                                 # SSR ~7e-5 then destabilises (mass-flux
+                                 # spread 3 % -> 57 % by iter 4750).
+  # global floor on eigenvalue smoothing (Harten fix elsewhere).
+  # >>> ALTERNATIVE STABILISER.  delta_factor 0.02 with eps_filter 0.0 also
+  # survives from the isentropic IC: it reaches SSR 5.2e-5 with the TIGHTEST
+  # mass flux of anything tried (spread 2.9 %), but the SSR then flattens
+  # instead of descending, and each step costs ~2x.  eps_filter 0.05 wins on
+  # SSR (1.3e-5 and still falling) so it is the default; try 0.02 here if you
+  # care more about mass conservation than about the residual level.
+  # Both were harmful from the 'simple' IC - neither rescues a bad start.
+  delta_factor: 1e-6
+  newton_iter:  8       # 5 is not enough once CFL is raised to 0.5
+
+  jacobian: colored          # dense (exact AD, O(N^2)) | colored (banded, O(N))
+  jacobian_validate: false   # startup check: max|J_colored - J_dense| must be ~0
+
+  # >>> MUST be true.  There is no clipping of the interior state after the
+  # Newton update, so a single bad step puts p or h outside the EOS table and
+  # every subsequent quantity is NaN.  This is the only safety net.
+  adaptive_dt: true
+
+  wall_friction: false  # frictionless
+
+  # 4th-order JST filter for the low-Mach PRESSURE checkerboard.
+  # >>> THIS IS THE KNOB THAT MAKES THE CASE CONVERGE.  The subcooled-liquid
+  # run-up (x = 0 -> 0.46, Ma 5e-3 .. 0.2, a collapsing 900 -> 130 m/s as the
+  # quality lifts off zero) carries a persistent 2dx mode in p; without the
+  # filter the solve limit-cycles at
+  # SSR ~2e-4 and dies around iteration 4100.  With eps_filter 0.05 the descent
+  # is monotone (SSR 1.3e-5 at 5000 iters and still falling) and dt never has
+  # to halve.  NOTE it only helps from the isentropic IC - applied to the
+  # 'simple' IC it makes the blow-up EARLIER (NaN at 246 instead of 435),
+  # because the filter is scaled by the conservative variables and rho spans
+  # 706 -> 2.4 kg/m3 across this nozzle.  Sweep 0.02 -> 0.1 and confirm the
+  # profile is eps-independent before quoting numbers.  ucut/uwidth [m/s] =
+  # optional velocity gate (null -> uniform; leave ungated - the p-mode sits
+  # upstream of the thermal throat, not at low velocity only).
+  eps_filter: 0.05
+  eps_filter_ucut: null
+  eps_filter_uwidth: null
+
+  profile: false         # JAX device trace -> <out_dir>/jax_trace
+
+geometry:
+  function: get_nozzle_smd_divergent_smooth
+  roughness: 0.0
+
+fluid:
+  perfect_gas: false   # fvs_newton requires real-gas EOS
+  fluid_name: water
+  use_lookup_table: true
+  lut:
+    backend:   HEOS
+    # >>> The solution only occupies h in [1177, 1374] kJ/kg and p in
+    # [1.3, 120] bar.  The table below spans 600-2000 kJ/kg in 100 points ->
+    # dh = 14 kJ/kg, i.e. the ENTIRE enthalpy variation of the solution is
+    # ~14 cells wide.  That is the leading term in the residual ~0.5 % face-
+    # mass-flux drift.  Bounds are kept wide for transient safety; raise N_h
+    # (300+) when you need the mass flux tight.  Note the cache file is keyed
+    # on N_h x N_p only (water_100x80.pkl) - it is regenerated on a bounds
+    # mismatch, so changing the bounds at the same N clobbers the table that
+    # other cases share.
+    h_min:     600e3   # J/kg
+    h_max:     2000e3  # J/kg
+    p_min:     0.1e5   # Pa
+    p_max:     130e5   # Pa
+    N_h:       400
+    N_p:       400      # log-spaced in p
+    table_dir: fluid_tables
