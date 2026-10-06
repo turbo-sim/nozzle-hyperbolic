@@ -29,9 +29,9 @@ if len(sys.argv) > 1:
 
 import jax.numpy as jnp
 import jaxprop as jxp
-from config_loader import load_config
+from case_study.nicfd.nicfd_figures.config_loader import load_config
 import nozzle_hyperbolic.fvm_solver.geometry as _geom
-from isentropic_ic import isentropic_ic, isentropic_shock_ic
+from case_study.nicfd.nicfd_figures.isentropic_ic import isentropic_ic, isentropic_shock_ic
 
 _here = pathlib.Path(__file__).parent
 if RUN_DIR == "auto":

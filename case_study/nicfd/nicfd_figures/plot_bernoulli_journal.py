@@ -60,8 +60,8 @@ NOZZLE_TRUE_SCALE = False
 if len(sys.argv) > 1:
     RUN_DIR = sys.argv[1]
 
-from config_loader import load_config
-from nozzle_silhouette import add_nozzle
+from case_study.nicfd.nicfd_figures.config_loader import load_config
+from case_study.nicfd.nicfd_figures.nozzle_silhouette import add_nozzle
 import nozzle_hyperbolic.fvm_solver.geometry as _geom
 import CoolProp.CoolProp as CP
 

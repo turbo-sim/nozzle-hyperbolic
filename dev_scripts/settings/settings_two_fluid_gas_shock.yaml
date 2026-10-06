@@ -1,0 +1,65 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# GAS-DOMINANT validation vs the analytic perfect-gas area–Mach solution
+# (normal shock standing in the diverging part at x = 0.15 m), symmetric parabolic nozzle.  α_g ≈ 1 − 1e-4.
+#   gas    = Air, perfect gas (dominant → the analytic reference is exact)
+#   liquid = Air, perfect gas (ghost; same fluid, so any phase asymmetry is pure
+#            numerics — a real liquid ghost would leave its table at ~150 K)
+# Interphase drag + heat (sources.scale = 1) slave the ghost to the gas.
+# Only what differs from defaults_gas_dominant.yaml is listed here; the run log and the
+# settings_*.yaml copy in the run folder show every value used and its source.
+# ─────────────────────────────────────────────────────────────────────────────
+
+base: defaults_gas_dominant.yaml
+
+fluid:
+  name: air
+
+eos:
+  # ── DOMINANT gas: analytic perfect gas (exact area–Mach reference) ──
+  gas:
+    fluid_name: Air
+    backend: perfect_gas
+    T_ref: 300.0                # fit at the reservoir state
+    p_ref: 200000.0             # 2 bar
+  # ── GHOST 'liquid' slot: SAME perfect gas (unbounded, explosion-proof) ──
+  liquid:
+    fluid_name: Air
+    backend: perfect_gas
+    T_ref: 300.0
+    p_ref: 200000.0
+
+grid:
+  Nx: 600
+  x1: 0.0
+  x2: 0.2                       # = L of the symmetric parabolic nozzle
+
+geometry:
+  function: get_symmetric_nozzle
+  roughness: 0.0
+
+sources:
+  bubble_number:  1.0e13
+  droplet_number: 1.0e11        # α_g→1 ⇒ droplet regime (ghost dispersed in gas)
+
+numerics:
+  newton_iter: 10
+  du_blend_lo: 0.5
+  du_blend_hi: 1.0
+  jac_lag: 10
+  ssr_mode: mass
+  newton_tol: 0.0                 # required with jac_lag > 1
+
+ic:
+  type: isentropic_shock
+  x_shock: 0.15               # m — shock stands mid-diverging: M1=1.598 -> M2=0.669, p2/p1=2.816, p02/p0=0.896, M_exit=0.347
+
+bc:
+  p0:            200000.0      # Pa — reservoir pressure (2 bar)
+  T_g0:          300.0         # K
+  T_l0:          300.0         # K
+  void_fraction: 0.9999        # alpha_g ≈ 1 − 1e-4 ⇒ GAS dominant
+  p_out:         164867.0     # Pa = 0.8243·p0 — consistent with the x_shock=0.15 design (from isentropic_shock_ic)
+
+save_options:
+  repo_main: results_single_phase_validation
+  repo_run: perfect_gas_shockwave

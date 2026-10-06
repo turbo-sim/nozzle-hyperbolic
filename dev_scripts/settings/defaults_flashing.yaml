@@ -1,0 +1,17 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# FLASHING family defaults: single-component nozzle flow with phase change
+# (water SMD case; dominant metastable liquid, vapor grows from a ghost).
+# Values = the NICFD 2026 flashing runs.  Builds on defaults.yaml; case files
+# use `base: defaults_flashing.yaml` and override anything below.
+# ─────────────────────────────────────────────────────────────────────────────
+base: defaults.yaml
+
+sources:
+  mass_transfer: true        # phase change ON (evaporation source, saturation props)
+
+numerics:
+  CFL:             2.0
+  pin_ghost:       true      # ghost vapor h_g pinned to saturation before onset
+  ssr_mode:        mass      # convergence measured on the phases carrying mass
+  lowmach_diss_bc: 0.0
+  eps_ghost:       0.05

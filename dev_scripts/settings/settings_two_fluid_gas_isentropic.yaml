@@ -1,0 +1,62 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# GAS-DOMINANT validation vs the analytic perfect-gas area–Mach solution
+# (shock-free perfect expansion, choked), symmetric parabolic nozzle.  α_g ≈ 1 − 1e-4.
+#   gas    = Air, perfect gas (dominant → the analytic reference is exact)
+#   liquid = Air, perfect gas (ghost; same fluid, so any phase asymmetry is pure
+#            numerics — a real liquid ghost would leave its table at ~150 K)
+# Interphase drag + heat (sources.scale = 1) slave the ghost to the gas.
+# Only what differs from defaults_gas_dominant.yaml is listed here; the run log and the
+# settings_*.yaml copy in the run folder show every value used and its source.
+# ─────────────────────────────────────────────────────────────────────────────
+
+base: defaults_gas_dominant.yaml
+
+fluid:
+  name: air
+
+eos:
+  # ── DOMINANT gas: analytic perfect gas (exact area–Mach reference) ──
+  gas:
+    fluid_name: Air
+    backend: perfect_gas
+    T_ref: 300.0                # fit at the reservoir state
+    p_ref: 200000.0             # 2 bar
+  # ── GHOST 'liquid' slot: SAME perfect gas (unbounded, explosion-proof) ──
+  liquid:
+    fluid_name: Air
+    backend: perfect_gas
+    T_ref: 300.0
+    p_ref: 200000.0
+
+grid:
+  Nx: 401
+  x1: 0.0
+  x2: 0.2                       # = L of the symmetric parabolic nozzle
+
+geometry:
+  function: get_symmetric_nozzle
+  roughness: 0.0
+
+sources:
+  bubble_number:  1.0e13
+  droplet_number: 1.0e11        # α_g→1 ⇒ droplet regime (ghost dispersed in gas)
+
+numerics:
+  eps_void_ucut:   40.0
+
+ic:
+  type: isentropic
+
+bc:
+  p0:            200000.0      # Pa — reservoir pressure (2 bar)
+  T_g0:          300.0         # K
+  T_l0:          300.0         # K
+  void_fraction: 0.99999        # alpha_g ≈ 1 − 1e-4 ⇒ GAS dominant
+  p_out:         18787.0       # Pa = 0.09393·p0 — adapted (design) exit pressure
+
+run:
+  ssr_tol: 1.0e-6
+
+save_options:
+  repo_main: results_single_phase_validation
+  repo_run: perfect_gas

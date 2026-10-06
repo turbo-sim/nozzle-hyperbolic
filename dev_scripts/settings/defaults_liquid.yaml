@@ -1,0 +1,23 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# LIQUID-DOMINANT family defaults: nearly incompressible liquid with a ghost
+# gas, no phase change (Bernoulli validation cases).  Builds on defaults.yaml;
+# case files use `base: defaults_liquid.yaml` and override anything below.
+# ─────────────────────────────────────────────────────────────────────────────
+base: defaults.yaml
+
+sources:
+  mass_transfer: false       # two-component: drag + heat transfer only
+
+numerics:
+  CFL:             50.0
+  eps_void:        0.5
+  lowmach_diss_bc: 1.0
+  du_blend_lo:     1.0e9     # zero-slip flux branch everywhere
+  du_blend_hi:     2.0e9
+
+time_control:
+  dp_max: 0.5
+
+run:
+  n_steps: 500000
+  ssr_tol: 1.0e-9

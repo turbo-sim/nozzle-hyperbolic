@@ -2,11 +2,14 @@
 """
 Two-fluid FVS solver.
 
-To run different cases, create your own settings_your_name.yaml
-and set it in SETTINGS_FILE
+To run different cases, create your own settings/settings_your_name.yaml
+and set it in SETTINGS_FILE (or pass it via the SETTINGS_YAML environment variable).
+A settings file starts from a defaults file (`base: defaults_flashing.yaml`, ...;
+see config_loader.py) and lists only what differs.  Every run prints all the
+resolved settings and saves them in its folder, with run_info.yaml.
 
 Run from dev_scripts/:
-    python main_two_fluid_single_phase.py
+    python main_two_fluid.py
 """
 
 import os
@@ -15,7 +18,6 @@ os.environ.setdefault("XLA_FLAGS", "--xla_cpu_multi_thread_eigen=true")
 import jax
 jax.config.update("jax_enable_x64", True)
 
-import pandas as pd
 import pathlib
 _cache_dir = pathlib.Path(__file__).parent.parent / ".jax_cache"
 _cache_dir.mkdir(exist_ok=True)
@@ -35,8 +37,9 @@ from nozzle_hyperbolic.fvm_solver.two_fluid import (
     common_quantities,
 )
 
-import yaml as _yaml
-from config_loader import load_config
+from config_loader import load_config, print_settings, write_resolved_settings
+from initial_conditions import build_initial_condition, ic_source_file
+from run_info import write_run_info
 from nozzle_hyperbolic.fvm_solver.two_fluid.sources import (
     two_fluid_closure,
     D_VE_algebric,
@@ -46,23 +49,55 @@ from nozzle_hyperbolic.fvm_solver.two_fluid.sources import (
 
 # Settings file for this test (two-fluid format: gas=Air, liquid=water ghost,
 # mirroring the single-phase settings_nozzle_validation.yaml).
-# SETTINGS_FILE = "settings_two_fluid_nozzle_validation_two_component_test_static.yaml"
-SETTINGS_FILE = "settings_flashing_smd_supersonic_test.yaml"
+# Settings files live in dev_scripts/settings/ (paths relative to dev_scripts/).
+# SETTINGS_FILE = "settings/settings_two_fluid_nozzle_validation_two_component_test_static.yaml"
+SETTINGS_FILE = "settings/settings_flashing_smd_supersonic_test.yaml"
 SETTINGS_YAML = os.environ.get("SETTINGS_YAML",SETTINGS_FILE)
-# SETTINGS_YAML = os.environ.get("SETTINGS_YAML","settings_two_fluid_liquid_bernoulli_symmetric.yaml")
+# SETTINGS_YAML = os.environ.get("SETTINGS_YAML","settings/settings_two_fluid_liquid_bernoulli_symmetric.yaml")
 _here = pathlib.Path(__file__).parent
-cfg   = load_config(_here / SETTINGS_YAML)
-with open(_here / SETTINGS_YAML, encoding="utf-8") as _f:
-    _raw = _yaml.safe_load(_f)
-T_IN = float(_raw["bc"]["T_g0"])   # inlet static T (driver builds h from p,T)
+# The settings file names its defaults with `base:` (config_loader.py).  The
+# SRC_SCALE environment variable (debug_ghost_pump convention) overrides
+# sources.scale; the override is printed and saved with the run.
+_env_over = ({"sources.scale": float(os.environ["SRC_SCALE"])}
+             if "SRC_SCALE" in os.environ else None)
+cfg   = load_config(_here / SETTINGS_YAML, overrides=_env_over,
+                    override_label="env SRC_SCALE")
 
-SRC_SCALE = float(os.environ.get("SRC_SCALE", "1.0"))   # env-overridable (debug_ghost_pump convention)
-AREA_SRC  = True
-# DOM_ONLY_DT: base the adaptive-dt increment check on the DOMINANT phase only,
-#   ignoring the near-massless GHOST's u_l/h_l (which, with no drag, oscillate
-#   freely and can trigger halving / dt-collapse even when the dominant phase is
-#   fine).  Tests whether the ghost — not the main flow — gates the timestep.
-DOM_ONLY_DT = True
+
+def _pin_cpus(spec):
+    """Restrict this process to the logical CPUs in `spec` ("0-15", "0,2,4-7").
+    On hybrid laptops (P+E cores) Windows may otherwise schedule the run on the
+    ~2× slower E-cores.  Applied before any JAX computation."""
+    cpus = set()
+    for part in spec.split(","):
+        a, _, b = part.strip().partition("-")
+        cpus.update(range(int(a), int(b or a) + 1))
+    if sys.platform == "win32":
+        import ctypes
+        from ctypes import wintypes
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        k32.GetCurrentProcess.restype = wintypes.HANDLE
+        k32.SetProcessAffinityMask.argtypes = [wintypes.HANDLE, ctypes.c_size_t]
+        k32.SetProcessAffinityMask.restype = wintypes.BOOL
+        ok = k32.SetProcessAffinityMask(k32.GetCurrentProcess(),
+                                        sum(1 << c for c in cpus))
+        if not ok:
+            raise OSError(f"SetProcessAffinityMask failed (error {ctypes.get_last_error()})")
+    else:
+        os.sched_setaffinity(0, cpus)
+    print(f"CPU affinity: pinned to logical CPUs {spec}")
+
+
+if cfg.CPU_AFFINITY is not None:
+    _pin_cpus(cfg.CPU_AFFINITY)
+
+SRC_SCALE = cfg.SRC_SCALE          # sources.scale (env SRC_SCALE overrides)
+AREA_SRC  = cfg.AREA_SRC           # sources.area_source
+# DOM_ONLY_DT (time_control.dt_check_dominant_only): base the adaptive-dt
+#   increment check on the DOMINANT phase only, ignoring the near-massless
+#   GHOST's u_l/h_l (which, with no drag, oscillate freely and can trigger
+#   halving / dt-collapse even when the dominant phase is fine).
+DOM_ONLY_DT = cfg.DOM_ONLY_DT
 
 # ── Keep-marching controller (steady-state mode) ──────────────────────────────
 # We care about the STEADY state, so a step that violates the per-step increment
@@ -72,8 +107,8 @@ DOM_ONLY_DT = True
 # through and dt recovers.  We bail ONLY on (a) NaN/Inf, or (b) a genuine STALL —
 # many consecutive floored steps with no SSR progress (a standing checkerboard
 # won't be cured by marching, so we stop and report it instead of spinning).
-DT_FLOOR_FRAC     = 1.0e-3     # floor dt = this * CFL dt_cap (per step)
-FLOOR_STALL_STEPS = 500        # consecutive floored steps w/ no SSR drop → bail
+DT_FLOOR_FRAC     = cfg.DT_FLOOR_FRAC      # floor dt = this * CFL dt_cap (per step)
+FLOOR_STALL_STEPS = cfg.FLOOR_STALL_STEPS  # consecutive floored steps w/ no SSR drop → bail
 
 # Dominant phase (for plotting / dom-phase diagnostics AND the stagnation-inlet
 # pressure closure).  PROVISIONAL here from the volume fraction (for the run_name
@@ -101,7 +136,19 @@ _repo     = cfg.REPO_MAIN or "results"
 run_name  = f"{_prefix}_N{cfg.Nx}_{cfg.RECON}_{_stamp}"
 out_dir   = _here / _repo / run_name
 out_dir.mkdir(parents=True, exist_ok=True)
-shutil.copy(_here / SETTINGS_YAML, out_dir / SETTINGS_YAML)
+# Settings saved with the run: <case name>.yaml = the RESOLVED settings (every
+# value, base: none) — rerun with SETTINGS_YAML=<that file>; inputs/ = the case
+# file and its defaults chain exactly as written.
+_settings_out = write_resolved_settings(
+    cfg, out_dir / pathlib.Path(SETTINGS_YAML).name,
+    header=[f"run: {run_name}"])
+(out_dir / "inputs").mkdir(exist_ok=True)
+_inputs_missing = []
+for _p in cfg._settings.chain:
+    try:
+        shutil.copy(_p, out_dir / "inputs" / _p.name)
+    except OSError:          # e.g. Windows 260-character path limit in a deep folder
+        _inputs_missing.append(_p.name)
 
 # ── Tee terminal output into the run folder (stdout + stderr) ─────────────────
 # Everything printed from here on (settings echo, march log, diagnostics,
@@ -129,6 +176,11 @@ sys.stdout = _Tee(sys.stdout, _log_path)
 sys.stderr = _Tee(sys.stderr, _log_path)
 print(f"Output directory: {out_dir.resolve()}")
 print(f"Terminal log:     {_log_path.name}")
+print_settings(cfg)
+print(f"Resolved settings saved: {_settings_out.name}  (case file + defaults in inputs/)")
+if _inputs_missing:
+    print(f"  WARNING: could not copy {', '.join(_inputs_missing)} into inputs/ "
+          f"(path too long?) — the resolved settings file is complete anyway")
 
 # ── EOS tables ────────────────────────────────────────────────────────────────
 print("Building / loading EOS tables...")
@@ -148,8 +200,19 @@ def _build_fluid(lut):
 fluid_g, _pg_g = _build_fluid(cfg.LUT_G)
 fluid_l, _pg_l = _build_fluid(cfg.LUT_L)
 
-fluid_gas_name = _raw["eos"]["gas"]["fluid_name"]
-fluid_liquid_name = _raw["eos"]["liquid"]["fluid_name"]
+fluid_gas_name = cfg.LUT_G["fluid_name"]
+fluid_liquid_name = cfg.LUT_L["fluid_name"]
+
+# Reproducibility record: code version + local changes (git_diff.patch), software
+# versions, machine / power source, environment, checksums of the input files.
+_inputs = {}
+for _ph, _fl in (("eos_table_gas", fluid_g), ("eos_table_liquid", fluid_l)):
+    if getattr(_fl, "table_name", None):
+        _inputs[_ph] = pathlib.Path(_fl.table_dir) / f"{_fl.table_name}.pkl"
+_ic_file = ic_source_file(cfg._settings.raw["ic"], _here)
+if _ic_file is not None:
+    _inputs["ic_source"] = _ic_file
+print(f"Run record: {write_run_info(out_dir, cfg, resolved_file=_settings_out, input_files=_inputs).name}")
 
 # Reservoir-state (PT) evaluator per phase.  For a perfect gas, the phase object
 # itself does PT analytically (and self-consistently → its s0 matches the solver's
@@ -267,7 +330,9 @@ def _plot_state(U_h_arr, title, out_png):
 
 # ── Stagnation (reservoir) inlet state from the YAML bc block ──────────────────
 P0   = cfg.BC_P0   if cfg.BC_P0   is not None else cfg.P_INIT
-T_G0 = cfg.BC_T_G0 if cfg.BC_T_G0 is not None else T_IN
+if cfg.BC_T_G0 is None:
+    raise ValueError("bc.T_g0 (gas stagnation temperature) is required")
+T_G0 = cfg.BC_T_G0
 T_L0 = cfg.BC_T_L0 if cfg.BC_T_L0 is not None else T_G0
 SLIP = cfg.BC_SLIP
 
@@ -354,7 +419,6 @@ print(f"  isentrope (FluidJAX, {dom}): h_iso {_iso_h.min()/1e3:.1f}..{_iso_h.max
 # continuity  u = mdot/(ρA)  (u peaks at the throat), enthalpy from H0 = h+u²/2,
 # incompressible-Bernoulli pressure dip.  Ghost phase co-flows via the slip ratio.
 _p_in    = float(P0 * 0.99)  #  float(min(cfg.P_OUT, P0 * 0.999))
-p_0_out = cfg.P_OUT
 _stg_in  = fluid_g.get_state(jxp.PSmass_INPUTS, jnp.array([_p_in]), jnp.array([s_g0]))
 h_g_0    = float(_stg_in["enthalpy"][0])
 rho_g_in = float(_stg_in["density"][0])
@@ -365,231 +429,16 @@ h_l_0    = H_l0 - 0.5 * u_l_in**2
 print(f"  IC inlet static: p={_p_in/1e5:.2f} bar  h_g={h_g_0/1e3:.1f} kJ/kg  "
       f"u_g={u_g_in:.1f} m/s  a={_a_in:.1f}  (M_in={u_g_in/_a_in:.3f})")
 
-IC_MODE = _raw["ic"]["type"]
-
-
-if IC_MODE == "uniform":
-    U_h_0 = np.tile(
-        [_p_in, u_g_in, u_l_in, ALPHA_G, h_g_0, h_l_0], (cfg.Nx, 1),
-    ).astype(float)
-    print(f"IC (uniform):  p={_p_in/1e5:.1f} bar  alpha_g={ALPHA_G:.6f}"
-          f"  u_g={u_g_in:.1f} m/s  u_l={u_l_in:.1f} m/s")
-    
-elif IC_MODE == "stagnation":
-    alpha_g = np.maximum(ALPHA_G, 1e-3)
-    U_h_0 = np.tile(
-        [P0, 1e-6, 1e-6, ALPHA_G, H_g0, H_l0], (cfg.Nx, 1),
-    ).astype(float)
-    print(f"IC (uniform):  p={_p_in/1e5:.1f} bar  alpha_g={ALPHA_G:.6f}"
-          f"  u_g={u_g_in:.1f} m/s  u_l={u_l_in:.1f} m/s")
-    
-elif IC_MODE == "simple":
-    # ── Robust "cold-start" IC (no nozzlex needed) ────────────────────────────
-    # A GENTLE, SUBSONIC, slip-consistent guess that lets the time-marching build
-    # the (transonic) flow itself.  Converges in more iterations than the nozzlex
-    # seed, but is robust and self-contained.
-    #
-    # Why NOT per-phase continuity (the previous attempt): computing u_g from GAS
-    # continuity (ρ_g drops ~10× along the nozzle) and u_l from LIQUID continuity
-    # (ρ_l≈const) gives two UNRELATED velocity fields — u_g→585, u_l→264 at the
-    # throat, du swinging −2→+320 m/s — which (a) destroys the imposed slip and
-    # (b) is wildly mixture-SUPERSONIC (Wood a_mix ~tens of m/s at α≈0.39), with a
-    # velocity CAP kink.  The first implicit step then blows up (NaN).  See probe.
-    #
-    # Robust recipe instead:
-    #   * pressure: mild linear ramp P0 → p_out (matches the stagnation inlet and
-    #     the back-pressure outlet at the two ends → minimal startup shock),
-    #   * composition: uniform α_g = ALPHA_G,
-    #   * velocities: SMALL and SLIP-CONSISTENT (u_g = S·u_l, so du≈0) — do not
-    #     pre-build the throat spike; the transient accelerates the flow,
-    #   * enthalpies: stagnation H_g0/H_l0 minus the (tiny) dynamic head → always
-    #     valid EOS states.
-    u_seed_l  = 5.0                                   # m/s — gentle, safely subsonic
-    p_cells   = np.linspace(P0, p_0_out, cfg.Nx)      # inlet→outlet pressure ramp
-    ag        = np.full(cfg.Nx, ALPHA_G)
-    u_cells_l = np.full(cfg.Nx, u_seed_l)
-    u_cells_g = np.full(cfg.Nx, u_seed_l * SLIP)      # impose slip → du starts ~0
-    h_cells_g = np.full(cfg.Nx, H_g0 - 0.5 * u_cells_g**2)
-    h_cells_l = np.full(cfg.Nx, H_l0 - 0.5 * u_cells_l**2)
-
-    U_h_0 = np.stack([p_cells, u_cells_g, u_cells_l, ag, h_cells_g, h_cells_l], axis=1)
-
-    print(f"IC (simple cold-start):  p ramp {P0/1e5:.1f}→{p_0_out/1e5:.2f} bar  "
-          f"alpha_g={ALPHA_G:.4f}  u_g={u_cells_g[0]:.1f}  u_l={u_cells_l[0]:.1f} m/s "
-          f"(slip={SLIP:.2f}, du≈0)")
-elif IC_MODE == "nozzlex":
-    # Seed the transient from a SAVED nozzlex space-marching solution (pickle).
-    # The pickle carries a converged, physically self-consistent two-fluid
-    # profile (drag/heat/area balanced, correct slip) on the SAME FluidBicubic
-    # tables — so the interior starts on the slow manifold instead of a steep,
-    # slip-inconsistent guess.  Phase ordering is auto-detected from densities
-    # (nozzlex idx-1 = liquid in the Elliot two-component pickle).
-    from nozzlex_ic import ic_from_nozzlex_pickle
-    _pkl_rel = _raw["ic"].get("pickle")
-    if _pkl_rel is None:
-        raise ValueError("ic.type='nozzlex' requires ic.pickle: <path to solution pickle>")
-    _pkl = (_here / _pkl_rel)
-    if not _pkl.exists():
-        _pkl = pathlib.Path(_pkl_rel)          # allow an absolute / cwd path too
-    U_h_0, _nz_prof = ic_from_nozzlex_pickle(str(_pkl), x,
-                                             phase1=_raw["ic"].get("phase1", "auto"))
-    print(f"IC (nozzlex pickle):  {_pkl.name}")
-    print(f"  phase1={_nz_prof['phase1']}  (nozzlex idx-1)   profile x:"
-          f" {_nz_prof['x'].min():.4f}..{_nz_prof['x'].max():.4f} m")
-    print(f"  p {U_h_0[:,0].min()/1e5:.2f}..{U_h_0[:,0].max()/1e5:.2f} bar"
-          f"  u_g {U_h_0[:,1].min():.1f}..{U_h_0[:,1].max():.1f}"
-          f"  u_l {U_h_0[:,2].min():.1f}..{U_h_0[:,2].max():.1f} m/s"
-          f"  alpha_g {U_h_0[:,3].min():.3f}..{U_h_0[:,3].max():.3f}")
-elif IC_MODE == "restart":
-    # ── Seed from a PREVIOUS run's saved solution (solution.csv) ──────────────
-    # The cheap way to sweep boundary conditions: converge once, then change
-    # bc.p_out (or anything else) and restart — the transient is only the small
-    # repricing between neighbouring steady states, never the full cold-start
-    # column drain.  ic.run: run folder (or solution.csv path), relative to
-    # dev_scripts or absolute.  A different Nx is fine: linear interp in x.
-    _rst_rel = _raw["ic"].get("run")
-    if _rst_rel is None:
-        raise ValueError("ic.type='restart' requires ic.run: <run folder or solution.csv>")
-    _rst = (_here / _rst_rel)
-    if not _rst.exists():
-        _rst = pathlib.Path(_rst_rel)
-    if _rst.is_dir():
-        _rst = _rst / "solution.csv"
-    _Drs = np.genfromtxt(_rst, delimiter=",", names=True)
-    _xrs = np.asarray(_Drs["x"])
-    U_h_0 = np.column_stack([
-        np.interp(x, _xrs, _Drs[c])
-        for c in ("p", "u_g", "u_l", "alpha_g", "h_g", "h_l")])
-    if not np.isfinite(U_h_0).all():
-        raise ValueError(f"restart solution contains NaN/inf: {_rst}")
-    print(f"IC (restart):  {_rst.parent.name}  ({_xrs.size} cells → Nx={cfg.Nx})")
-    print(f"  p {U_h_0[:,0].min()/1e5:.4f}..{U_h_0[:,0].max()/1e5:.4f} bar"
-          f"  u_l {U_h_0[:,2].min():.2f}..{U_h_0[:,2].max():.2f} m/s"
-          f"  alpha_g {U_h_0[:,3].min():.2e}..{U_h_0[:,3].max():.2e}"
-          f"  (bc.p_out={cfg.P_OUT/1e5:.4f} bar)")
-elif IC_MODE == "isentropic_shock":
-    # ── Analytic choked profile with a STANDING NORMAL SHOCK at ic.x_shock ──
-    # Supersonic branch to the shock, Rankine-Hugoniot jump, subsonic branch
-    # on the post-shock isentrope to the exit.  bc.p_out MUST equal the
-    # construction's p_exit (printed below) — the subsonic outlet then HOLDS
-    # the shock at its design cell.
-    from isentropic_ic import isentropic_shock_ic
-    _xs = float(_raw["ic"]["x_shock"])
-    U_h_0, _isen = isentropic_shock_ic(
-        x, A, p0=P0, T0_g=T_G0, T0_l=T_L0,
-        alpha_g=ALPHA_G, slip=SLIP,
-        fluid_g=fluid_g, fluid_l=fluid_l, x_shock=_xs,
-    )
-    print(f"IC (isentropic + normal shock @ x={_xs} → cell {_isen['i_shock']}):"
-          f"  M1={_isen['M1']:.4f} → M2={_isen['M2']:.4f}"
-          f"  p2/p1={_isen['p_ratio']:.4f}  p02/p0={_isen['p02_ratio']:.4f}")
-    print(f"  M_exit={_isen['M_exit']:.4f}  p_exit={_isen['p_exit']:.1f} Pa"
-          f"  (bc.p_out={cfg.P_OUT:.1f} — {'CONSISTENT' if abs(cfg.P_OUT - _isen['p_exit']) < 500 else 'WARNING: MISMATCH, shock will drift'})"
-          f"  mdot*={_isen['mdot_choked']:.4f} kg/s")
-elif IC_MODE == "isentropic":
-    # ── Analytic choked perfect-expansion IC (gas-dominant mirror of bernoulli)
-    # Area–Mach per cell (sub branch before the throat, sup branch after) from
-    # the reservoir (p0, T0); ghost co-flows at the gas T (SRC slaves it).
-    # This profile IS the steady solution up to discretization error and
-    # doubles as the reference for check_isentropic.py.
-    from isentropic_ic import isentropic_ic
-    U_h_0, _isen = isentropic_ic(
-        x, A, p0=P0, T0_g=T_G0, T0_l=T_L0,
-        alpha_g=ALPHA_G, slip=SLIP,
-        fluid_g=fluid_g, fluid_l=fluid_l,
-    )
-    print(f"IC (isentropic, choked):  gamma={_isen['gamma']:.4f}  "
-          f"R={_isen['R']:.2f} J/kg/K  A*={_isen['A_star']:.4e} m² "
-          f"(throat cell {_isen['i_throat']})")
-    print(f"  M {U_h_0[0,1]/np.sqrt(_isen['gamma']*_isen['R']*_isen['T'][0]):.3f}"
-          f" → M_exit={_isen['M_exit']:.3f}   p {U_h_0[:,0].max()/1e5:.3f}"
-          f"..{U_h_0[:,0].min()/1e5:.4f} bar   T {_isen['T'].max():.1f}"
-          f"..{_isen['T'].min():.1f} K   mdot*={_isen['mdot_choked']:.4f} kg/s")
-elif IC_MODE in ("isentropic_subsonic", "subsonic"):
-    # ── Analytic SUBSONIC (unchoked) venturi IC — dip-and-recover steady state
-    # for a C-D nozzle that stays subsonic (throat is the Mach MAX < 1).  The
-    # subsonic branch holds everywhere, anchored on bc.p_out.  This IS the steady
-    # solution up to discretization error → converges immediately; a CHOKED
-    # isentropic seed (or cold start) stalls because it's the wrong branch and
-    # the low-Mach transient is slow.  For the compressible perfect-gas subsonic
-    # validation; the liquid low-speed case uses the incompressible 'bernoulli' IC.
-    from isentropic_ic import isentropic_subsonic_ic
-    U_h_0, _isen = isentropic_subsonic_ic(
-        x, A, p0=P0, T0_g=T_G0, T0_l=T_L0,
-        alpha_g=ALPHA_G, slip=SLIP,
-        fluid_g=fluid_g, fluid_l=fluid_l, p_out=cfg.P_OUT,
-    )
-    print(f"IC (isentropic subsonic):  gamma={_isen['gamma']:.4f}  "
-          f"R={_isen['R']:.2f} J/kg/K  M_throat={_isen['M_throat']:.4f} "
-          f"(throat cell {_isen['i_throat']})")
-    print(f"  M_exit={_isen['M_exit']:.4f}   p {U_h_0[:,0].min()/1e5:.4f}"
-          f"..{U_h_0[:,0].max()/1e5:.4f} bar   T {_isen['T'].min():.1f}"
-          f"..{_isen['T'].max():.1f} K   mdot={_isen['mdot']:.4f} kg/s")
-elif IC_MODE == "bernoulli":
-    # ── Analytic incompressible (Bernoulli) cold-start — no nozzlex needed ─────
-    # For a nearly incompressible DOMINANT phase the exact steady quasi-1D flow is
-    #   u_dom = u_in·A_in/A(x)   (mass),   p = p0 − ½ρ_dom u_dom²   (Bernoulli),
-    # valid to O(Ma²).  This same profile is the ANALYTIC REFERENCE the ghost-limit
-    # solution must reproduce.  The ghost co-flows (slip), constant α_g, isothermal
-    # at T0 (h from PT → always in-table).  Serves the low-speed-liquid / flashing
-    # inlet regime.  `ic.u_in` sets the inlet dominant-phase velocity (default 1).
-    from bernoulli_ic import bernoulli_ic
-    _u_in = float(_raw["ic"].get("u_in", 1.0))
-    U_h_0, _bern = bernoulli_ic(
-        x, A, p0=P0, T0_g=T_G0, T0_l=T_L0, u_in=_u_in,
-        alpha_g=ALPHA_G, slip=SLIP,
-        fluid_g=fluid_g, fluid_l=fluid_l, dom=dom,
-    )
-    print(f"IC (bernoulli, dom={dom}):  p0={P0/1e5:.2f} bar  u_in={_u_in:.2f} m/s  "
-          f"rho_dom={_bern['rho_dom']:.2f} kg/m³  Ma_in={_bern['Ma_in']:.4f}")
-    print(f"  p {U_h_0[:,0].min()/1e5:.3f}..{U_h_0[:,0].max()/1e5:.3f} bar"
-          f"  u_dom {_bern['u_dom'].min():.2f}..{_bern['u_dom'].max():.2f} m/s"
-          f"  alpha_g={ALPHA_G:.6f}  slip={SLIP:.2f}")
-    if _bern["p_floor_hit"]:
-        print("  WARNING: Bernoulli pressure hit the floor (p≤p_floor) — the "
-              "throat dip is too deep; lower ic.u_in or widen the throat.")
-elif IC_MODE == "nozzlex_csv":
-    # ── Seed from a PREVIOUS run's saved solution (solution**.csv) ──────────────
-    # The cheap way to sweep boundary conditions: converge once, then change
-    # bc.p_out (or anything else) and restart — the transient is only the small
-    # repricing between neighbouring steady states, never the full cold-start
-    # column drain.  ic.run: run folder (or solution.csv path), relative to
-    # dev_scripts or absolute.  A different Nx is fine: linear interp in x.
-    _rst_rel = _raw["ic"].get("run")
-    if _rst_rel is None:
-        raise ValueError("ic.type='restart' requires ic.run: <run folder or solution.csv>")
-    _rst = (_here / _rst_rel)
-    if not _rst.exists():
-        _rst = pathlib.Path(_rst_rel)
-    if _rst.is_dir():
-        _rst = _rst / "results_tfm_120a.csv"
-    _Drs = pd.read_csv(_rst)
-    _xrs = np.asarray(_Drs["distance"])
-    U_h_0 = np.column_stack([
-        np.interp(x, _xrs, _Drs[c])
-        for c in ("pressure", "velocity_gas", "velocity_liquid", "void_fraction", "enthalpy_gas", "enthalpy_liquid")])
-    if not np.isfinite(U_h_0).all():
-        raise ValueError(f"restart solution contains NaN/inf: {_rst}")
-    # ── Ghost-α floor ─────────────────────────────────────────────────────────
-    # The nozzlex reference CSV is built with α_v,in = 1e-6 (fine for the space-
-    # marching ODE, which has no ghost checkerboard), so its pre-flashing region
-    # carries α_g ≈ 1e-6 — two decades below the FVM's certified-safe ghost
-    # thickness (α≥1e-4; α≲1e-5 triggers the ghost-h instability: h_g = E/(α ρ_g)
-    # divides the ghost energy by ~0, so 2Δx noise blows up h_g).  Clip the seed
-    # to a safe floor (mass fraction stays ~1e-6, so flashing physics is unmoved;
-    # only the passive-ghost VOLUME is inflated).  ic.alpha_floor overrides.
-    _a_floor = float(_raw["ic"].get("alpha_floor", 1.0e-4))
-    _a_raw_lo = float(U_h_0[:, 3].min())
-    U_h_0[:, 3] = np.clip(U_h_0[:, 3], _a_floor, 1.0 - _a_floor)
-    print(f"IC (restart):  {_rst.parent.name}  ({_xrs.size} cells → Nx={cfg.Nx})")
-    print(f"  alpha_g floored: raw min {_a_raw_lo:.2e} → clip [{_a_floor:.1e}, "
-          f"{1.0 - _a_floor:.4f}]  ({int(np.sum(np.asarray(np.interp(x, _xrs, _Drs['void_fraction'])) < _a_floor))} cells lifted)")
-    print(f"  p {U_h_0[:,0].min()/1e5:.4f}..{U_h_0[:,0].max()/1e5:.4f} bar"
-          f"  u_l {U_h_0[:,2].min():.2f}..{U_h_0[:,2].max():.2f} m/s"
-          f"  alpha_g {U_h_0[:,3].min():.2e}..{U_h_0[:,3].max():.2e}"
-          f"  (bc.p_out={cfg.P_OUT/1e5:.4f} bar)")
-else:
-    raise ValueError("Initial condition specified is not available. Select among the availables")
+_ic_block = cfg._settings.raw["ic"]
+IC_MODE = _ic_block["type"]
+# All initial conditions live in initial_conditions.py (table of ic.type values at
+# the top of that file).
+U_h_0 = build_initial_condition(
+    _ic_block, x=x, A=A, p0=P0, T_g0=T_G0, T_l0=T_L0,
+    alpha_g=ALPHA_G, slip=SLIP, H_g0=H_g0, H_l0=H_l0, p_out=cfg.P_OUT,
+    fluid_g=fluid_g, fluid_l=fluid_l, dom=dom,
+    inlet_static=(_p_in, u_g_in, u_l_in, h_g_0, h_l_0), base_dir=_here,
+)
 
 # ── Visualize the initial condition (cfg.VISUALIZE_IC / run.visualize_ic) ──────
 if getattr(cfg, "VISUALIZE_IC", False):
@@ -669,6 +518,11 @@ print(f"[Diagnostic]  PROJECT={PROJECT}  MONITOR={MONITOR}  alpha_eps={cfg.ALPHA
       + (f"  w_char={cfg.W_CHAR}" if cfg.W_CHAR is not None else ""))
 
 # ── Solver factory ────────────────────────────────────────────────────────────
+print(f"[Speed-up]  fast_wb_flux={cfg.FAST_WB_FLUX}  flux_single_branch={cfg.FLUX_SINGLE_BRANCH}"
+      f"  flux_local_jac={cfg.FLUX_LOCAL_JAC}  cell_local_jac={cfg.CELL_LOCAL_JAC}"
+      f"  thomas={cfg.THOMAS}  newton_tol={cfg.NEWTON_TOL:g}"
+      f"  ser_beta={cfg.SER_BETA:g}" + (f" (CFL<={cfg.SER_CFL_MAX:g})" if cfg.SER_BETA > 0 else "")
+      + f"  fast_increments={cfg.FAST_INCREMENTS}  cpu_affinity={cfg.CPU_AFFINITY}")
 print(f"Building solver (first JIT compilation may take a minute)... jacobian={cfg.JACOBIAN}")
 _ret = make_two_fluid_step(
     fluid_g, fluid_l,
@@ -728,13 +582,42 @@ _ret = make_two_fluid_step(
     alpha_eps     = cfg.ALPHA_EPS,
     pin_ghost     = cfg.PIN_GHOST,
     pin_ghost_momentum = cfg.PIN_GHOST_MOMENTUM,
+    fast_wb_flux       = cfg.FAST_WB_FLUX,
+    flux_single_branch = cfg.FLUX_SINGLE_BRANCH,
+    flux_local_jac     = cfg.FLUX_LOCAL_JAC,
+    cell_local_jac     = cfg.CELL_LOCAL_JAC,
+    newton_tol         = cfg.NEWTON_TOL,
+    thomas             = cfg.THOMAS,
     return_debug  = False,
 )
 step, compute_dt = _ret
 
+# ── Ramped start-up (bc.p_out_ramp_steps > 0) ─────────────────────────────────
+# The outlet back-pressure is passed to step() at RUNTIME and lowered linearly
+# from _ramp_from to cfg.P_OUT over the first _ramp_n steps; afterwards it stays
+# at cfg.P_OUT (still passed at runtime → one compilation for the whole run).
+# Off (0) → step(W, dt) exactly as before.
+_ramp_n    = cfg.P_OUT_RAMP_STEPS
+_ramp_from = (cfg.P_OUT_RAMP_FROM if cfg.P_OUT_RAMP_FROM is not None
+              else float(U_h_0[-2, 0]))
+_p_out_now = _ramp_from if _ramp_n > 0 else cfg.P_OUT
+if _ramp_n > 0:
+    if cfg.P_OUT_RAMP_SHAPE not in ("linear", "log"):
+        raise ValueError(f"bc.p_out_ramp_shape must be 'linear' or 'log', got {cfg.P_OUT_RAMP_SHAPE!r}")
+    print(f"Ramped start-up ({cfg.P_OUT_RAMP_SHAPE}): p_out {_ramp_from/1e5:.3f} → "
+          f"{cfg.P_OUT/1e5:.3f} bar over {_ramp_n} steps "
+          f"(convergence checks suspended until the ramp ends)")
+
+
+def _step(W, dt_):
+    if _ramp_n > 0:
+        return step(W, dt_, jnp.float64(_p_out_now))
+    return step(W, dt_)
+
+
 print("  Warming up compute_dt / step (triggers full compilation)...")
 dt0 = float(compute_dt(W_0))
-W_test, ssr_test = step(W_0, jnp.float64(dt0))
+W_test, ssr_test = _step(W_0, jnp.float64(dt0))
 print(f"  dt = {dt0:.4e} s   SSR after first step: {float(ssr_test):.4e}   Compilation done.")
 
 # ── Diagnostic monitor ────────────────────────────────────────────────────────
@@ -775,16 +658,37 @@ print(f"{'Step':>6}  {'t [s]':>12}  {'dt [s]':>12}  {'SSR':>12}")
 print("-" * 50)
 
 
-def _increments(W_old, W_new, a_char):
+@jax.jit
+def _increments_core(W_old, W_new, a_char):
+    """Jitted twin of the eager checks below (run.fast_increments): same
+    per-field relative increments, one dispatch instead of ~40 eager ops."""
     Uo = U_h_from_W_batch(W_old)[1:-1]
     Un = U_h_from_W_batch(W_new)[1:-1]
-    bad = bool(jnp.any(jnp.isnan(Un)) | jnp.any(jnp.isinf(Un)))
-    dp  = float(jnp.max(jnp.abs(Un[:, 0] - Uo[:, 0]) / (jnp.abs(Uo[:, 0]) + 1e-10)))
-    dug = float(jnp.max(jnp.abs(Un[:, 1] - Uo[:, 1]) / (jnp.abs(Uo[:, 1]) + a_char + 1e-10)))
-    dul = float(jnp.max(jnp.abs(Un[:, 2] - Uo[:, 2]) / (jnp.abs(Uo[:, 2]) + a_char + 1e-10)))
-    dag = float(jnp.max(jnp.abs(Un[:, 3] - Uo[:, 3])))
-    dhg = float(jnp.max(jnp.abs(Un[:, 4] - Uo[:, 4]) / (jnp.abs(Uo[:, 4]) + 1e-10)))
-    dhl = float(jnp.max(jnp.abs(Un[:, 5] - Uo[:, 5]) / (jnp.abs(Uo[:, 5]) + 1e-10)))
+    bad = jnp.any(jnp.isnan(Un)) | jnp.any(jnp.isinf(Un))
+    den = jnp.stack([jnp.abs(Uo[:, 0]) + 1e-10,
+                     jnp.abs(Uo[:, 1]) + a_char + 1e-10,
+                     jnp.abs(Uo[:, 2]) + a_char + 1e-10,
+                     jnp.ones_like(Uo[:, 3]),
+                     jnp.abs(Uo[:, 4]) + 1e-10,
+                     jnp.abs(Uo[:, 5]) + 1e-10], axis=1)
+    return bad, jnp.max(jnp.abs(Un - Uo) / den, axis=0)
+
+
+def _increments(W_old, W_new, a_char):
+    if cfg.FAST_INCREMENTS:
+        _bad, _d = jax.device_get(_increments_core(W_old, W_new, a_char))
+        bad = bool(_bad)
+        dp, dug, dul, dag, dhg, dhl = (float(v) for v in _d)
+    else:
+        Uo = U_h_from_W_batch(W_old)[1:-1]
+        Un = U_h_from_W_batch(W_new)[1:-1]
+        bad = bool(jnp.any(jnp.isnan(Un)) | jnp.any(jnp.isinf(Un)))
+        dp  = float(jnp.max(jnp.abs(Un[:, 0] - Uo[:, 0]) / (jnp.abs(Uo[:, 0]) + 1e-10)))
+        dug = float(jnp.max(jnp.abs(Un[:, 1] - Uo[:, 1]) / (jnp.abs(Uo[:, 1]) + a_char + 1e-10)))
+        dul = float(jnp.max(jnp.abs(Un[:, 2] - Uo[:, 2]) / (jnp.abs(Uo[:, 2]) + a_char + 1e-10)))
+        dag = float(jnp.max(jnp.abs(Un[:, 3] - Uo[:, 3])))
+        dhg = float(jnp.max(jnp.abs(Un[:, 4] - Uo[:, 4]) / (jnp.abs(Uo[:, 4]) + 1e-10)))
+        dhl = float(jnp.max(jnp.abs(Un[:, 5] - Uo[:, 5]) / (jnp.abs(Uo[:, 5]) + 1e-10)))
     # DOM_ONLY_DT: gate dt on the DOMINANT phase only (exclude the ghost's u/h).
     if DOM_ONLY_DT:
         du = dug if dom == "gas" else dul
@@ -794,19 +698,39 @@ def _increments(W_old, W_new, a_char):
     return bad, dp, du, dh, dag, (dug, dul, dhg, dhl)
 
 
+_ser_ref  = None                   # SER: SSR after the first step
+_cfl_mult = 1.0                    # SER: current CFL multiplier (1 = plain CFL)
+
 _t0 = _time.perf_counter()
 try:
     while n < cfg.N_STEPS:
         halvings = 0
+        _ramping = n < _ramp_n                     # still opening the outlet valve
+        if _ramp_n > 0:
+            _frac = min(1.0, (n + 1) / _ramp_n)
+            if cfg.P_OUT_RAMP_SHAPE == "log":
+                _p_out_now = _ramp_from * (cfg.P_OUT / _ramp_from) ** _frac
+            else:
+                _p_out_now = _ramp_from + (cfg.P_OUT - _ramp_from) * _frac
         if _adaptive:
             dt_cap   = float(compute_dt(W_n))
             a_char   = cfg.CFL * dx / max(dt_cap, 1e-300)
             dt_floor = DT_FLOOR_FRAC * dt_cap            # physical floor (per step)
+            # ── SER CFL ramp (time_control.ser_beta > 0) ─────────────────────
+            # Grow the CFL cap as the SSR falls (pseudo-transient continuation);
+            # dt still grows at most dt_grow per step and the increment checks /
+            # halvings below still apply.  a_char and dt_floor keep the plain CFL.
+            if cfg.SER_BETA > 0.0 and np.isfinite(ssr) and not _ramping:
+                if _ser_ref is None:
+                    _ser_ref = ssr
+                _cfl_mult = min(cfg.SER_CFL_MAX / cfg.CFL,
+                                max(1.0, (_ser_ref / max(ssr, 1e-300)) ** cfg.SER_BETA))
+                dt_cap   = dt_cap * _cfl_mult
             dt       = max(min(dt * cfg.DT_GROW, dt_cap), dt_floor)
             _per = (0, 0, 0, 0)
             bad = ok = floored = False
             for halvings in range(cfg.MAX_HALVINGS + 1):
-                W_try, ssr_j = step(W_n, jnp.float64(dt))
+                W_try, ssr_j = _step(W_n, jnp.float64(dt))
                 jax.block_until_ready(W_try)
                 bad, dp, du, dh, da, _per = _increments(W_n, W_try, a_char)
                 ok = (not bad) and dp < cfg.DP_MAX and dh < cfg.DH_MAX \
@@ -851,7 +775,7 @@ try:
                 break
         else:
             dt         = float(compute_dt(W_n))
-            W_n, ssr_j = step(W_n, jnp.float64(dt))
+            W_n, ssr_j = _step(W_n, jnp.float64(dt))
             ssr        = float(ssr_j)
             jax.block_until_ready(W_n)
 
@@ -865,13 +789,18 @@ try:
         if n <= 10 or n % cfg.PRINT_EVERY == 0 or halvings > 0:
             _el = _time.perf_counter() - _t0
             _hv = (f"  [{halvings} halving(s)]" if (_adaptive and halvings > 0) else "")
-            print(f"{n:>6}  {t_phys:>12.4e}  {dt:>12.4e}  {ssr:>12.4e}  ({_el:.1f}s){_hv}",
+            _cfl_txt = (f"  CFL_eff={cfg.CFL * _cfl_mult:.1f}"
+                        if (_adaptive and cfg.SER_BETA > 0.0) else "")
+            _ramp_txt = f"  p_out={_p_out_now/1e5:.3f} bar" if _ramping else ""
+            print(f"{n:>6}  {t_phys:>12.4e}  {dt:>12.4e}  {ssr:>12.4e}  ({_el:.1f}s){_cfl_txt}{_ramp_txt}{_hv}",
                   flush=True)
 
-        if ssr < cfg.SSR_TOL:
+        # No convergence verdict mid-ramp: at the start of a stagnation ramp the
+        # state IS steady for the current (high) back-pressure, so SSR is tiny.
+        if ssr < cfg.SSR_TOL and not _ramping:
             _stop_reason = f"SSR={ssr:.3e} < tol={cfg.SSR_TOL:.1e}"
             break
-        if n >= _win:
+        if n >= _win and not _ramping:
             _hmax = max(_ssr_hist); _hmin = min(_ssr_hist) + 1e-300
             if _hmax / _hmin < cfg.PLATEAU_RATIO:
                 _stop_reason = f"SSR plateau ({_hmin:.3e}-{_hmax:.3e})"

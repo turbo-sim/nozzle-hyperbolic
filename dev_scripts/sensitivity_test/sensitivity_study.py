@@ -88,7 +88,7 @@ import jax.numpy as jnp
 import jaxprop as jxp
 import yaml as _yaml
 
-from config_loader import load_config
+from config_loader import load_config, resolved_dict
 import nozzle_hyperbolic as hyp
 import nozzle_hyperbolic.fvm_solver.geometry as _geom
 from nozzle_hyperbolic.fvm_solver.two_fluid import (
@@ -174,7 +174,7 @@ EXIT_PLANE_QOIS = {"x_exit", "slip_exit", "p_exit"}
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--config", default="settings_flashing_smd_space_marching_comparison.yaml",
+    p.add_argument("--config", default="settings/settings_flashing_smd_space_marching_comparison.yaml",
                    help="settings yaml, relative to dev_scripts/ (default: flashing SMD)")
     p.add_argument("--nx", default=None,
                    help="cells; overrides grid.Nx. A COMMA-SEPARATED LIST runs a "
@@ -228,8 +228,7 @@ def banner(txt, ch="="):
 # §SETUP — config, fluids, grid, boundary conditions, initial condition
 # =============================================================================
 _cfg_path = _HERE.parent / ARGS.config
-with open(_cfg_path, "r", encoding="utf-8") as _f:
-    RAW = _yaml.safe_load(_f)
+RAW = resolved_dict(_cfg_path)       # the settings file with its `base:` defaults merged in
 
 
 def _as_ladder(v):

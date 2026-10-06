@@ -46,9 +46,9 @@ from matplotlib.lines import Line2D
 import yaml
 import jaxprop as jxp
 
-from config_loader import load_config
-from nozzle_silhouette import add_nozzle
-from isentropic_ic import isentropic_ic, isentropic_shock_ic, _area_mach
+from case_study.nicfd.nicfd_figures.config_loader import load_config
+from case_study.nicfd.nicfd_figures.nozzle_silhouette import add_nozzle
+from case_study.nicfd.nicfd_figures.isentropic_ic import isentropic_ic, isentropic_shock_ic, _area_mach
 
 # ── KNOBS: the cases to overlay (path relative to dev_scripts, label, ref) ─────
 # ref: 'auto' reads ic.type from the run's own settings yaml

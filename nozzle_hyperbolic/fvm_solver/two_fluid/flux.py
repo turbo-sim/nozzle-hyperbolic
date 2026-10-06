@@ -111,7 +111,8 @@ def smoothed_sign(lam, eps):
 
 def fvs_interface_flux(U_h_L, U_h_R, fluid_g, fluid_l, k,
                        delta_factor=0.1, lowmach_diss=0.0,
-                       du_blend_lo=1e-2, du_blend_hi=1e-1):
+                       du_blend_lo=1e-2, du_blend_hi=1e-1,
+                       single_branch=False):
     """
     FVS interface flux F_hat at one face of the two-fluid system.
 
@@ -136,6 +137,10 @@ def fvs_interface_flux(U_h_L, U_h_R, fluid_g, fluid_l, k,
     k            : virtual-mass coefficient
     delta_factor : Harten floor fraction — eps = delta_factor * |a_mix|
                    also used as the slip threshold for the zero-slip branch
+    single_branch : bool, default False.  True evaluates the zero-slip and full
+                   branches once each and selects with jnp.where (same values,
+                   ~half the flux cost under vmap); False keeps the original
+                   lax.cond, which under vmap runs the zero-slip branch twice.
 
     Returns
     -------
@@ -320,6 +325,20 @@ def fvs_interface_flux(U_h_L, U_h_R, fluid_g, fluid_l, k,
                       0.0, 1.0)
         w  = 0.5 * (1.0 + jnp.cos(jnp.pi * t))   # 1 at du_blend_lo → 0 at du_blend_hi (C¹)
         return w * Fz + (1.0 - w) * Ff
+
+    if single_branch:
+        # SPEED-UP (2026-10-05, numerics.flux_single_branch): under vmap the
+        # batched-predicate lax.cond below lowers to select and runs BOTH branches,
+        # and _blend re-runs _zero_slip — the zero-slip branch (incl. its SVD lstsq)
+        # is evaluated twice per face.  Evaluate each branch exactly once and
+        # select: identical values (where() discards the full branch's NaN at
+        # du≈0 in value and tangent alike, as select already did).
+        Fz = _zero_slip(None)
+        Ff = _full_slip(None)
+        t  = jnp.clip((jnp.abs(du) - du_blend_lo) / (du_blend_hi - du_blend_lo),
+                      0.0, 1.0)
+        w  = 0.5 * (1.0 + jnp.cos(jnp.pi * t))
+        return jnp.where(jnp.abs(du) < du_blend_lo, Fz, w * Fz + (1.0 - w) * Ff)
 
     F_hat = jax.lax.cond(jnp.abs(du) < du_blend_lo, _zero_slip, _blend, None)
     # F_hat = _full_slip(None)

@@ -23,13 +23,14 @@ import shutil
 
 hyp.set_plot_options(grid=False)
 
-SETTINGS_YAML = "settings_nozzle_hem.yaml"
+_here = pathlib.Path(__file__).parent
+SETTINGS_YAML = "settings/settings_nozzle_hem.yaml"   # relative to dev_scripts/
+# SETTINGS_YAML = "settings/settings_shock_tube.yaml"
+# SETTINGS_YAML = "settings/settings.yaml"
+# SETTINGS_YAML = "settings/settings_subsonic_pipe.yaml"
 
 ## Read settings
-# with open("settings_shock_tube.yaml", 'r') as file:
-# with open("settings.yaml", 'r')    as file:
-with open(SETTINGS_YAML, 'r') as file:
-# with open("settings_subsonic_pipe.yaml", 'r') as file:
+with open(_here / SETTINGS_YAML, 'r') as file:
     case_data = yaml.safe_load(file)
 
 hyp.print_dict(case_data)
@@ -42,10 +43,9 @@ run_name = (
     f"{case_data['numerical_settings']['flux_method']}_"
     f"N{case_data['numerical_settings']['Nx']}"
 )
-_here = pathlib.Path(__file__).parent
 out_dir   = _here / "results" / run_name
 out_dir.mkdir(parents=True, exist_ok=True)
-shutil.copy(_here / SETTINGS_YAML, out_dir / SETTINGS_YAML)
+shutil.copy(_here / SETTINGS_YAML, out_dir / pathlib.Path(SETTINGS_YAML).name)
 print(f"Output directory: {out_dir.resolve()}")
 
 

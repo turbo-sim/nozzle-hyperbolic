@@ -57,6 +57,7 @@ jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 import jaxprop as jxp
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))  # dev_scripts/ (config_loader)
 from config_loader import load_config
 import nozzle_hyperbolic.fvm_solver.geometry as _geom
 from nozzle_hyperbolic.fvm_solver.two_fluid import (

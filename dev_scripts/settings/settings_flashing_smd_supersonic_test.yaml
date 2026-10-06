@@ -1,0 +1,94 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# FLASHING nozzle — SMD single-component water case "a" (mirror of
+# demo/smd_two_fluid_nozzlex_solution.py).  Hot subcooled water (120 bar,
+# 578.95 K ≈ 19 K below T_sat) accelerates through the SMD converging–diverging
+# nozzle, becomes superheated and flashes; the vapor grows from a ghost.
+#   liquid = water metastable LIQUID (dominant)
+#   gas    = water metastable VAPOR  (ghost at the inlet, grows by flashing)
+# Note: the nozzlex demo has no interphase heat transfer; our closure always
+# includes it.
+# Only what differs from defaults_flashing.yaml is listed here; the run log and the
+# settings_*.yaml copy in the run folder show every value used and its source.
+# ─────────────────────────────────────────────────────────────────────────────
+
+base: defaults_flashing.yaml
+
+fluid:
+  name: water
+
+eos:
+  gas:                              # water metastable VAPOR (the ghost that grows)
+    fluid_name: water
+    backend: HEOS
+    h_min: 2200000.0    # J/kg
+    h_max: 3400000.0    # J/kg
+    p_min: 10000.0      # Pa  (0.1 bar)
+    p_max: 13000000.0   # Pa  (130 bar)
+    N_h: 90
+    N_p: 90
+    N_p_sat: 150
+    table_dir: fluid_tables
+    metastable_phase: vapor         # extends into subcooled (metastable) vapor
+    gradient_method: forward
+  liquid:                           # water metastable LIQUID (the dominant flashing phase)
+    fluid_name: water
+    backend: HEOS
+    h_min: 100000.0     # J/kg
+    h_max: 1800000.0    # J/kg
+    p_min: 10000.0     # Pa  (0.1 bar)
+    p_max: 13000000.0   # Pa  (130 bar)
+    N_h: 90
+    N_p: 90
+    N_p_sat: 150
+    table_dir: fluid_tables
+    metastable_phase: liquid        # extends into superheated (metastable) liquid
+    gradient_method: forward
+
+grid:
+  Nx: 600
+  x1: 0.0
+  x2: 1.2        # m
+
+geometry:
+  function: get_nozzle_smd_divergent_smooth
+  roughness: 0.0
+
+sources:
+  bubble_number:  1.0e12          # physics (from the demo), not a tuning knob
+  droplet_number: 1.0e10
+
+numerics:
+  newton_iter: 8
+  eps_void: 0.15
+  eps_ghost: 0.15
+
+ic:
+  type: restart                   # from a previous run's solution.csv (interpolated in x);
+                                  # cold start: type stagnation (+ bc.p_out_ramp_steps)
+  run: results_bubble_number_sens/smd_supersonic_N300_muscl_van_albada_20260914_225038
+  alpha_floor: 1.0e-6             # thick ghost seed — match numerics.alpha_eps
+
+bc:
+  p0:            12000000.0       # Pa — 120 bar reservoir (shared by both phases)
+  T_g0:          578.95           # K  — case "a" inlet temperature
+  T_l0:          578.95           # K
+  void_fraction: 1.0e-3           # inlet vapor fraction (keep ≥ ic.alpha_floor)
+  p_out:         0.8e5            # Pa — 0.8 bar back-pressure (supersonic exit)
+
+time_control:
+  ser_beta:     1.0
+
+run:
+  cpu_affinity: "0-15"            # P-cores only on this laptop (null = no pinning)
+
+save_options:
+  repo_main: results_bubble_number_sens
+  repo_run: smd_supersonic
+
+# ── Grid sequencing (run_grid_sequence.py only; main_two_fluid.py ignores it) ─
+# Level 1 runs this file as is (e.g. ic.type: stagnation + bc.p_out_ramp_steps);
+# each finer level restarts from the previous converged solution, ramp off.
+#   python run_grid_sequence.py settings/settings_flashing_smd_supersonic_test.yaml
+# grid_sequence:
+#   Nx:      [100, 300, 600]
+#   ssr_tol: [1.0e-6, 1.0e-6, 1.0e-8]
