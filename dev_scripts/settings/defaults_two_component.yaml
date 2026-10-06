@@ -1,0 +1,15 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# TWO-COMPONENT family defaults: air–water mixture with both phases carrying
+# mass, no phase change.  Values = the NICFD 2026 two-component runs.  Builds on
+# defaults.yaml; case files use `base: defaults_two_component.yaml` and
+# override anything below.
+# ─────────────────────────────────────────────────────────────────────────────
+base: defaults.yaml
+
+sources:
+  mass_transfer: false       # two-component: drag + heat transfer only
+
+numerics:
+  newton_iter:     5
+  eos_rows_banded: false     # dense E3 solve (as in the NICFD runs)
+  lowmach_diss_bc: 0.0

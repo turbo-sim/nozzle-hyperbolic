@@ -1,0 +1,99 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# LEGACY defaults — the values that were hard-coded in config_loader.py before
+# 2026-10-06.  Used automatically by every settings file WITHOUT a `base:` key
+# (old settings files, the settings copies saved in run folders), so they load
+# exactly as before.  Do not edit: new settings files should use
+# `base: defaults.yaml` (or a case-family defaults file) instead.
+#
+# Keys that were REQUIRED before (no default) are deliberately absent here:
+# fluid.name, eos.*, grid.Nx/x1/x2, numerics.CFL/newton_iter/delta_factor/recon/
+# k_vm, run.n_steps/print_every/visualize_ic/debug_newton, ic.type.
+# ─────────────────────────────────────────────────────────────────────────────
+base: none
+
+sources:
+  bubble_number:  1.0e8
+  droplet_number: 1.0e8
+  mass_transfer:  true
+  scale:          1.0          # was the SRC_SCALE constant in main_two_fluid.py
+  area_source:    true         # was the AREA_SRC constant in main_two_fluid.py
+
+grid:
+  radius: 0.005                # only used when there is no geometry block
+
+numerics:
+  va_eps_mode:        magnitude
+  va_rel:             null
+  va_r0:              0.5
+  va_rm:              4
+  jacobian:           dense
+  linear_solve:       lstsq
+  w_char:             null
+  eos_project:        true
+  alpha_eps:          1.0e-6
+  pin_ghost:          false
+  pin_ghost_momentum: false
+  proj_s_ref:         0.02
+  eos_rows:           false
+  eos_rows_banded:    false
+  jac_lag:            1
+  nc_form:            cell
+  lowmach_diss:       0.0
+  lowmach_diss_bc:    null
+  nc_scale:           1.0
+  eps_void:           0.0
+  eps_void_ucut:      null
+  eps_void_uwidth:    null
+  eps_void_scale:     wood
+  eps_ghost:          0.0
+  eps_ghost_acut:     3.0e-3
+  eps_ghost_awidth:   0.25
+  eps_ghost_k2:       0.0
+  eps_ghost_alo:      1.0e-5
+  ssr_mode:           all
+  du_blend_lo:        1.0e-2
+  du_blend_hi:        1.0e-1
+  fast_wb_flux:       false
+  flux_single_branch: false
+  flux_local_jac:     false
+  cell_local_jac:     false
+  thomas:             orig
+  newton_tol:         0.0
+
+time_control:
+  adaptive_dt:            false
+  max_halvings:           8
+  dp_max:                 0.20
+  dh_max:                 0.10
+  du_max:                 0.20
+  da_max:                 0.10
+  dt_grow:                1.20
+  ser_beta:               0.0
+  ser_cfl_max:            50.0
+  dt_check_dominant_only: true     # was the DOM_ONLY_DT constant in main_two_fluid.py
+  dt_floor_frac:          1.0e-3   # was the DT_FLOOR_FRAC constant
+  floor_stall_steps:      500      # was the FLOOR_STALL_STEPS constant
+
+run:
+  ssr_tol:         1.0e-6
+  t_end:           null
+  plateau_window:  20
+  plateau_ratio:   1.5
+  fast_increments: false
+  cpu_affinity:    null
+
+bc:
+  inlet:            transmissive
+  outlet:           transmissive
+  p_out:            null         # null → ic.uniform.p (old fallback)
+  p_out_relax:      1.0
+  p_out_ramp_steps: 0
+  p_out_ramp_from:  null
+  p_out_ramp_shape: linear
+  p0:               null
+  T_g0:             null
+  T_l0:             null
+  quality:          null
+  void_fraction:    null
+  slip:             1.0
+  dom_phase:        auto

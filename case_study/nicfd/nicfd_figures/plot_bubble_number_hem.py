@@ -46,8 +46,8 @@ from matplotlib.transforms import blended_transform_factory
 import yaml
 import jaxprop as jxp
 
-from config_loader import load_config
-from nozzle_silhouette import add_nozzle
+from case_study.nicfd.nicfd_figures.config_loader import load_config
+from case_study.nicfd.nicfd_figures.nozzle_silhouette import add_nozzle
 import nozzle_hyperbolic.fvm_solver.geometry as _geom
 from nozzle_hyperbolic.fvm_solver.two_fluid import (
     phase_props, common_quantities, eigenstructure)

@@ -1,0 +1,84 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# TWO-COMPONENT nozzle: nitrogen–water mixture through the Elliot
+# converging–diverging nozzle, no phase change (drag + interphase heat transfer
+# only).  Reservoir 20 bar / 295.15 K, composition from bc.quality (x = 0.0145).
+#   gas    = nitrogen, ordinary table (no metastable extension, no saturation)
+#   liquid = water, subcooled table   (no metastable extension, no saturation)
+# Only what differs from defaults_two_component.yaml is listed here; the run log and the
+# settings_*.yaml copy in the run folder show every value used and its source.
+# ─────────────────────────────────────────────────────────────────────────────
+
+base: defaults_two_component.yaml
+
+fluid:
+  name: Air          # global default; each eos section overrides per phase
+
+eos:
+  gas:
+    fluid_name: nitrogen
+    backend: HEOS
+    # Bounds WIDENED (2026-07-09): startup overshot to ~37.7 bar > old p_max=30 bar
+    # → EOS extrapolation → projection non-finite → runaway p → dt collapse. p_max
+    # 30→60 bar (3× p0); h widened (gas cools while expanding) so transients stay in-table.
+    h_min: 50000.0    # J/kg
+    h_max: 400000.0   # J/kg
+    p_min: 10000.0   # Pa
+    p_max: 6000000.0  # Pa  (60 bar, was 30)
+    N_h: 145
+    N_p: 200
+    table_dir: fluid_tables
+    gradient_method: forward
+    # metastable_phase: (omitted ⇒ ordinary table, no saturation props)
+  liquid:
+    fluid_name: water
+    backend: HEOS
+    # p_max widened 30→60 bar to match the gas (shared p); liquid h barely moves.
+    h_min: 1000.0    # J/kg
+    h_max: 140000.0   # J/kg
+    p_min: 10000.0   # Pa
+    p_max: 6000000.0  # Pa  (60 bar, was 30)
+    N_h: 145
+    N_p: 200
+    table_dir: fluid_tables
+    gradient_method: forward
+    # metastable_phase: (omitted ⇒ ordinary subcooled-liquid table, no sat props)
+
+grid:
+  Nx: 200
+  x1: 0.0
+  x2: 0.31
+
+geometry:
+  function: get_nozzle_elliot
+  roughness: 0.0
+
+sources:
+  bubble_number:  1.0e13
+  droplet_number: 1.0e11
+
+numerics:
+  recon: muscl_van_leer
+  lowmach_diss: 0.5
+  eps_void_ucut:   40.0
+  eps_void_scale:  wood
+  du_blend_lo: 0.5
+  du_blend_hi: 1.0
+  lowmach_diss_bc: null           # = lowmach_diss on the boundary faces
+
+ic:
+  type: stagnation
+
+bc:
+  p0:            2000000.0     # Pa — stagnation pressure (shared by both phases)
+  T_g0:          295.15        # K  — gas    stagnation temperature
+  T_l0:          295.15        # K  — liquid stagnation temperature
+  quality:       0.01449275    # gas mass fraction
+  p_out:         1980000.0     # Pa — back-pressure (subsonic); ignored once supersonic
+
+run:
+  n_steps: 20000
+  ssr_tol: 1.0e-6
+
+save_options:
+  repo_main: results_two_components
+  repo_run: two_component_old

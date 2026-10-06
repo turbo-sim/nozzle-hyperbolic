@@ -1,0 +1,121 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# COMMON DEFAULTS for the two-fluid solver (main_two_fluid.py).
+#
+# The numerics shared by every NICFD 2026 run (flashing, gas-dominant, liquid
+# Bernoulli, two-component), plus the speed-up switches that do not change the
+# result.  Case families refine these in defaults_<family>.yaml
+# (base: defaults.yaml); a case file names its family with
+#     base: defaults_flashing.yaml
+# and only lists what differs.  Any value can be overridden further down the
+# chain — the run log and <run folder>/settings_*.yaml show every value used
+# and the file it came from.
+#
+# NOT set here (each case must give them): fluid.name, eos, grid Nx/x1/x2,
+# geometry, ic, sources bubble_number/droplet_number/mass_transfer,
+# bc p0/T_g0/p_out.
+# ─────────────────────────────────────────────────────────────────────────────
+base: none
+
+sources:
+  scale:       1.0           # multiplier of the interphase sources (0 = off, diagnostic;
+                             # the SRC_SCALE environment variable overrides it)
+  area_source: true          # quasi-1D area source term (false = diagnostic)
+
+grid:
+  radius: 0.01               # constant-area pipe radius when there is no geometry block
+                             # (some debug scripts build their pipe from it)
+
+numerics:
+  CFL:          5.0
+  newton_iter:  7
+  delta_factor: 1.0e-6       # Harten entropy fix
+  recon:        muscl_van_albada
+  k_vm:         0.5          # virtual-mass coefficient
+  # van Albada eps normalisation: magnitude (original) | range | smoothness
+  va_eps_mode:  magnitude
+  va_rel:       null         # null → mode-calibrated default
+  va_r0:        0.5
+  va_rm:        4
+  # Newton / linear algebra: certified E3 stack (EOS closures as extra rows,
+  # block-banded normal equations)
+  jacobian:        colored
+  linear_solve:    normal_eq_banded
+  eos_rows:        true
+  eos_rows_banded: true
+  eos_project:     false     # obsolete under E3
+  w_char:          auto      # state-derived Newton column scaling
+  jac_lag:         1         # recompute the Jacobian every Newton iteration
+  alpha_eps:       1.0e-6    # solver void-fraction clip floor
+  proj_s_ref:      0.02      # only for eos_project: damped
+  # Discretisation
+  nc_form:         cell        # well-balanced non-conservative terms
+  nc_scale:        1.0
+  lowmach_diss:    1.0       # full acoustic dissipation
+  lowmach_diss_bc: null      # null = same as lowmach_diss on the boundary faces
+  du_blend_lo:     5.0       # zero-slip ↔ full flux blend window [m/s]
+  du_blend_hi:     20.0
+  # Ghost-phase pins
+  pin_ghost:          false
+  pin_ghost_momentum: false
+  # JST void filter (4th order) and ghost filter
+  eps_void:         0.05
+  eps_void_ucut:    null     # null = not velocity-gated
+  eps_void_uwidth:  12.0
+  eps_void_scale:   frozen
+  eps_ghost:        0.0
+  eps_ghost_acut:   3.0e-3
+  eps_ghost_awidth: 0.25
+  eps_ghost_k2:     0.0
+  eps_ghost_alo:    1.0e-5
+  ssr_mode:         all      # all | mass (mass-weighted convergence)
+  # Speed-up switches (SPEEDUP_REPORT.md).  These do not change the result:
+  # an N600 run reproduced the 3,410-step reference to 1e-13 in every field,
+  # ~7.5× faster.  false / false / false / false / orig / 0.0 = previous code path.
+  fast_wb_flux:       true   # nc_form wb: cell flux F_c = F(U)
+  flux_single_branch: true   # zero-slip / full flux branches evaluated once
+  flux_local_jac:     true   # per-face 6×12 local Jacobian (custom JVP)
+  cell_local_jac:     true   # per-cell local Jacobians (nc, sources, filter, pin)
+  thomas:             chol   # orig | chol (one Cholesky per block)
+  newton_tol:         1.0e-8 # stop Newton when max|dW_scaled| < tol; 0 = always
+                             # newton_iter.  Must be 0 with jac_lag > 1.
+
+time_control:
+  adaptive_dt:  true
+  max_halvings: 8
+  dp_max:       0.20         # max |Δp|/p per step
+  dh_max:       0.05         # max |Δh|/|h| per step
+  du_max:       0.20         # max |Δu|/(|u|+a) per step
+  da_max:       0.10         # max |Δα_g| per step
+  dt_grow:      1.20
+  # SER CFL ramp: CFL_eff = CFL·clip((SSR_1/SSR)^ser_beta, 1, ser_cfl_max/CFL).
+  # Changes the convergence path, not the steady state.  0 = off.
+  ser_beta:     0.0
+  ser_cfl_max:  50.0
+  dt_check_dominant_only: true   # dt increment check on the dominant phase only
+  dt_floor_frac:          1.0e-3 # failed increment check → dt = this × CFL dt
+  floor_stall_steps:      500    # stop after this many floored steps without progress
+
+run:
+  n_steps:         40000
+  print_every:     50
+  ssr_tol:         1.0e-8
+  t_end:           null
+  plateau_window:  4000
+  plateau_ratio:   1.01
+  visualize_ic:    false
+  debug_newton:    false
+  fast_increments: true      # jit the per-step increment check (same numbers)
+  cpu_affinity:    null      # e.g. "0-15" = P-cores only on the i7-13850HX laptop
+
+bc:
+  inlet:            stagnation
+  outlet:           characteristic
+  p_out_relax:      1.0
+  p_out_ramp_steps: 0        # ramped back-pressure start-up; 0 = off
+  p_out_ramp_from:  null     # null = the IC's outlet pressure
+  p_out_ramp_shape: linear   # linear | log
+  T_l0:             null     # null = T_g0
+  quality:          null     # give void_fraction OR quality
+  void_fraction:    null
+  slip:             1.0      # inlet slip ratio u_g/u_l
+  dom_phase:        auto     # auto (mass fraction) | gas | liquid

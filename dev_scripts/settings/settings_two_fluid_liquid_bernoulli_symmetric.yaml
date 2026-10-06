@@ -1,0 +1,75 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# LIQUID-DOMINANT low-speed validation vs the analytic Bernoulli profile
+#     u_l(x) = u_in·A_in/A(x),   p(x) = p0 − ½ρ_l u_l²     (to O(Ma²)),
+# symmetric parabolic nozzle.
+#   liquid = water, subcooled table (dominant, α_g ≈ 1e-5)
+#   gas    = Air, perfect gas (ghost: analytic and unbounded, cannot leave a table)
+# Interphase drag + heat (sources.scale = 1) are required: without them the
+# ghost h_g is unstable.  At the no-slip, equal-T steady state both vanish, so
+# they do not bias the Bernoulli comparison.
+# Only what differs from defaults_liquid.yaml is listed here; the run log and the
+# settings_*.yaml copy in the run folder show every value used and its source.
+# ─────────────────────────────────────────────────────────────────────────────
+
+base: defaults_liquid.yaml
+
+fluid:
+  name: water        # global default; each eos section overrides per phase
+
+eos:
+  # ── GHOST gas: analytic perfect gas (no table, no bounds, explosion-proof) ──
+  gas:
+    fluid_name: Air
+    backend: perfect_gas        # → jxp.FluidPerfectGas
+    T_ref: 300.0                # constants fit at this reference state …
+    p_ref: 2000000.0            # … near the operating point (2 MPa, 300 K)
+  # ── DOMINANT liquid: real subcooled water table ──
+  liquid:
+    fluid_name: water
+    backend: HEOS
+    h_min: 1000.0     # J/kg   (water at ~2 MPa, 295 K subcooled → h ≈ 90 kJ/kg)
+    h_max: 140000.0   # J/kg
+    p_min: 10000.0    # Pa
+    p_max: 6000000.0  # Pa  (60 bar — well above the tiny Bernoulli dip)
+    N_h: 145
+    N_p: 200
+    table_dir: fluid_tables
+    gradient_method: forward
+    # metastable_phase omitted ⇒ ordinary subcooled-liquid table, no sat props.
+
+grid:
+  Nx: 1000
+  x1: 0.0
+  x2: 0.2                       # = L of the symmetric parabolic nozzle
+
+geometry:
+  function: get_symmetric_nozzle
+  roughness: 0.0
+
+sources:
+  bubble_number:  1.0e13
+  droplet_number: 1.0e11
+
+numerics:
+  CFL: 10.0
+  eps_ghost: 0.5
+
+ic:
+  type: restart                 # cold start: type bernoulli (analytic, uses u_in)
+  run: results_single_phase_validation\bernoulli_N500_muscl_van_albada_20260728_154326
+  u_in: 3.0                     # m/s — liquid inlet velocity (type bernoulli only)
+
+bc:
+  p0:            2000000.0      # Pa — reservoir (stagnation) pressure
+  T_g0:          300.0          # K  — gas    stagnation temperature
+  T_l0:          300.0          # K  — liquid stagnation temperature
+  void_fraction: 1.0e-5         # liquid dominant
+  p_out:         1.98e6         # Pa
+
+run:
+  print_every: 100
+  visualize_ic: true            # show the IC before solving
+
+save_options:
+  repo_main: results_single_phase_validation
+  repo_run: bernoulli

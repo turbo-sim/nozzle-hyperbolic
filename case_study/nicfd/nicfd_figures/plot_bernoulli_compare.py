@@ -32,7 +32,7 @@ ANCHOR  = "bc"        # 'bc'    = PREDICTIVE reference from the run's boundary
 if len(sys.argv) > 1:
     RUN_DIR = sys.argv[1]
 
-from config_loader import load_config
+from case_study.nicfd.nicfd_figures.config_loader import load_config
 import nozzle_hyperbolic.fvm_solver.geometry as _geom
 import CoolProp.CoolProp as CP
 

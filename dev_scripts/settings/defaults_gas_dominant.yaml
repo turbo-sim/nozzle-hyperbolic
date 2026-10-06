@@ -1,0 +1,24 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# GAS-DOMINANT family defaults: perfect-gas / air nozzle flow with a ghost
+# liquid, no phase change (isentropic, shock-in-nozzle and subsonic cases).
+# Builds on defaults.yaml; case files use `base: defaults_gas_dominant.yaml`
+# and override anything below.
+# ─────────────────────────────────────────────────────────────────────────────
+base: defaults.yaml
+
+sources:
+  mass_transfer: false       # two-component: drag + heat transfer only
+
+numerics:
+  newton_iter:     5
+  nc_form:         cell
+  eps_void:        0.02
+  lowmach_diss_bc: 1.0
+  du_blend_lo:     1.0e9     # zero-slip flux branch everywhere
+  du_blend_hi:     2.0e9
+
+time_control:
+  dp_max: 0.5
+
+run:
+  n_steps: 10000

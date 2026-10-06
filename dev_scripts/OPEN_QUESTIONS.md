@@ -6,19 +6,8 @@ things I resolved or should have silently "cleaned up". Each entry: claim →
 evidence → recommended action → probe to rerun (all probes already exist,
 no new ones needed).
 
-## 1. `nc_form` pairing correctness — UNRESOLVED
-
-`solver.py:822-824` (comment on the non-conservative correction):
-> "correctness is a PAIRING property with the area-source content —
-> discriminated by the α-contact step-map probe (`debug_nc_contact.py`)."
-
-Three branches exist (`'cell'` = "ours" = default, `'staedtke'` = book eq.
-8.38, `'wb'` = well-balanced 2026-07-15). No branch is declared a settled
-winner in-code. Production stays on `'cell'`.
-
-**Recommended action:** rerun `debug_nc_contact.py` if/when you want this
-settled; until then `'cell'` remains the default and the other two exist only
-for that probe.
+## 1. `nc_form` pairing correctness — RESOLVED
+cell is certified correct. It is possible to use wb for stability reasons, however it is a mathematical trick to improve convergence
 
 ## 2. Steady-state residual definition — `ssr_mode` is a workaround, not the fix
 
@@ -102,6 +91,8 @@ actual kwarg default is still `None` (fixed two-component-calibrated floors).
 the certifying probe already argues for it. Rerun
 `debug_wref_sensitivity.py` if you want to re-confirm before flipping.
 
+the auto otpion should be the correct one to always have a well posed problem
+
 ## 4. `eos_rows` (8-row E3-augmented system) — open/unresolved
 
 Self-labeled "prototype, 2026-07-15" at its definition. Fixes a measured
@@ -115,6 +106,8 @@ never used in `main_two_fluid.py`'s default config — only exercised from
 worth a decision on what's left before promoting it to default (the audit
 didn't find an explicit blocker, just that it never got promoted).
 
+eos_rows should be the default as said in the paper.
+
 ## 5. `eps_ghost_k2` doc/default drift — not a science question, just stale
 
 Inline comment at the filter's use site: *"k2 (default 4): for a 2Δx mode the
@@ -127,31 +120,7 @@ default (and `config_loader.py:215`) is `eps_ghost_k2=0.0`.
 recommendation? If 0.0 is intentional, the comment should say so instead of
 reading as an un-applied recommendation.
 
-## 6. `solver.py:2116` TODO — highest stakes, core time-marching
-
-Literal comment: *"TODO: check if the time stepping works correctly. Are we
-actually computing the correct pipeeline with W. Also we need Hnc and D at
-the timestep n+1!"*
-
-This is not a flag choice — it's an open question about the core
-time-marching residual itself (whether `W`, the non-conservative term `Hnc`,
-and `D` are evaluated at the correct time level). Unlike items 1-5, there's
-no existing probe named for this specifically.
-
-**Recommended action:** if/when you're about to seriously refactor the
-time-stepping/residual core, do a full, careful, single-sitting read of just
-that stepping function before touching it — this TODO is exactly the kind of
-thing a partial read risks missing.
-
-## 7. `bc_outlet='characteristic_old'` — not open, just documented here so it isn't mistaken for cleanup fodder
-
-Labeled "legacy" in its own comment, but actively selected by
-`dev_scripts/main_two_fluid.py:660` and
-`dev_scripts/sensitivity_test/sensitivity_closure.py:76-79` to reproduce old
-runs. The modern `'characteristic'` (eigenvector-projection rewrite) agrees
-with it to ~0.06% at steady state. **Intentionally retained as an A/B
-reference** — not dead code, do not delete without checking those two
-callers first.
+if we are not using it we should delete it...
 
 ---
 
