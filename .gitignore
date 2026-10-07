@@ -80,4 +80,12 @@ turboflow/Debug_plots/
 **/output/
 **/output*/
 **/results/
+**/results*/
 **/fluid_tables/
+
+# Profiling output
+*.prof
+dev_scripts/profiling/
+
+# JAX compilation cache
+.jax_cache/
