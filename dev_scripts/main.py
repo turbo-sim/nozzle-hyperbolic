@@ -35,6 +35,13 @@ with open(_here / SETTINGS_YAML, 'r') as file:
 
 hyp.print_dict(case_data)
 
+# cpu_affinity: e.g. "0-15" = P-cores only (unpinned runs can land on the
+# ~2x slower E-cores).  null = no pinning.
+_cpu_affinity = case_data["numerical_settings"].get("cpu_affinity", None)
+if _cpu_affinity not in (None, "", "none"):
+    from cpu_affinity import pin_cpus
+    pin_cpus(_cpu_affinity)
+
 
 ## Output directory
 _geo_fn   = case_data.get('geometry', {}).get('function', 'nozzle')
@@ -151,6 +158,15 @@ parameters = {
     "eps_filter":        float(case_data["numerical_settings"].get("eps_filter", 0.0)),
     "eps_filter_ucut":   case_data["numerical_settings"].get("eps_filter_ucut", None),
     "eps_filter_uwidth": case_data["numerical_settings"].get("eps_filter_uwidth", None),
+    # Speed-up switches (SPEEDUP_REPORT_FVS_SINGLE_PHASE.md).  The defaults
+    # below reproduce the original code bit-for-bit.
+    "linear_solver":   case_data["numerical_settings"].get("linear_solver", "dense"),
+    "newton_tol":      float(case_data["numerical_settings"].get("newton_tol", 0.0)),
+    "flux_local_jac":  bool(case_data["numerical_settings"].get("flux_local_jac", False)),
+    "cell_local_jac":  bool(case_data["numerical_settings"].get("cell_local_jac", False)),
+    "fast_increments": bool(case_data["numerical_settings"].get("fast_increments", False)),
+    "ser_beta":        float(case_data["numerical_settings"].get("ser_beta", 0.0)),
+    "ser_cfl_max":     float(case_data["numerical_settings"].get("ser_cfl_max", 50.0)),
 }
 if perfect_gas:
     parameters["gamma"] = cp / cv

@@ -27,7 +27,8 @@ numerical_settings:
   # fvs_newton  — Städtke FVS + full Newton-Raphson (JAX, real gas only)
   #                   Works in (p,u,h) primitives; flux_method is ignored.
   #                   Jacobian via jax.jacobian; 3 Newton iters/step.
-  #                   Keep Nx <= 500 (dense Jacobian). CFL can be raised to 5-10.
+  #                   linear_solver: banded makes the Newton solve O(N)
+  #                   (dense: O(N^3), keep Nx <= 500). CFL can be raised to 5-10.
   # time_discretization: implicit
   time_discretization: fvs_newton
 
@@ -54,6 +55,20 @@ numerical_settings:
   initialization: simple
 
   jacobian: colored 
+
+  # -- Speed-up switches (SPEEDUP_REPORT_FVS_SINGLE_PHASE.md) ---------------
+  # Key absent = original code path.  The values below change the result only
+  # at round-off (<= 1e-10); ser_beta > 0 changes the path to the steady state
+  # (steady cases only, never for transients).
+  linear_solver: banded     # dense | banded (O(N) block-tridiagonal LU)
+  newton_tol: 1.0e-8        # 0 = always newton_iter Newton iterations
+  flux_local_jac: true      # per-face local Jacobian (custom JVP)
+  cell_local_jac: true      # per-cell EOS local Jacobian (custom JVP)
+  fast_increments: true     # jitted dp/dh/du step check in the driver
+  ser_beta: 0.0             # 1.0 = SER CFL ramp CFL*(SSR_1/SSR)^beta
+  ser_cfl_max: 50.0         # cap of the ramp (500 cycled on HEM N=500)
+  cpu_affinity: "0-15"      # P-cores of this laptop; null = no pinning
+
  
 geometry:
   function: get_lettieri_nozzle
