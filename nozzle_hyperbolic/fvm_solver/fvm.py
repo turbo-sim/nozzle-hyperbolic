@@ -2,18 +2,21 @@
 1D finite-volume solver for quasi-1D compressible Euler equations.
 
 Governing equations (area-weighted conservative form):
-    d(QA)/dt + d(FA)/dx = S_A
 
-    Q = [rho, rho*u, rho*E]^T
-    F = [rho*u,  rho*u^2+p,  (rho*E+p)*u]^T
-    S_A = [0,  p*dA/dx - tau_w*4A/D_h,  0]^T
+d(QA)/dt + d(FA)/dx = S_A
 
-    The energy source is zero: at a no-slip adiabatic wall u_wall=0 so wall
-    friction does no work on the fluid. Total enthalpy H = h + u^2/2 is
-    conserved (consistent with Fanno-flow theory).
+Q = [rho, rho*u, rho*E]^T
+F = [rho*u,  rho*u^2+p,  (rho*E+p)*u]^T
+S_A = [0,  p*dA/dx - tau_w*4A/D_h,  0]^T
+
+The energy source is zero: at a no-slip adiabatic wall u_wall=0 so wall
+friction does no work on the fluid. Total enthalpy H = h + u^2/2 is
+conserved (consistent with Fanno-flow theory).
 
 Semi-discrete FVM (dividing by A_i*dx):
-    dQ_i/dt = -(FA)_{i+1/2} - (FA)_{i-1/2}) / (A_i*dx) + S_A,i / A_i
+
+dQ_i/dt = -(FA)_{i+1/2} - (FA)_{i-1/2}) / (A_i*dx) + S_A,i / A_i
+
 """
 
 import time as _time
@@ -176,8 +179,7 @@ def isentropic_initialization(x, A_nodes, parameters):
     Initial condition for the FVM solver.
 
     Perfect gas: analytical isentropic solution with shock detection.
-    Real gas: linear interpolation between inlet and outlet PT states (fast,
-              no per-cell EOS calls — the solver corrects the field quickly).
+    Real gas: linear interpolation between inlet and outlet PT states (fast, no per-cell EOS calls — the solver corrects the field quickly).
     """
     perfect_gas = parameters['perfect_gas']
     p_stag      = parameters['pT_stagnation'][0]

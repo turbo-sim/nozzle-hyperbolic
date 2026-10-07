@@ -9,18 +9,18 @@ repository = "https://github.com/turbo-sim/hyperbolic-nozzle"
 documentation = "https://to.be.completed.com"
 
 [tool.poetry.dependencies]
-python = "^3.12"
-numpy = "^1.26.4"
-scipy = "^1.14.1"
-matplotlib = "^3.9.2"
-pandas = "^2.2.3"
+python = ">=3.11,<3.14"
+numpy = "^2.4.0"
+scipy = "^1.17.1"
+matplotlib = "^3.10.0"
+pandas = "^2.2.0"
 openpyxl = "^3.1.2"
-CoolProp = "^6.6.0"
 PyYAML = "^6.0.1"
 toml = "^0.10.2"
 cycler = "^0.12.1"
 parse = "^1.20.2"
 pexpect = "^4.9.0"
+jaxprop = "^0.5.0"
 
 [tool.poetry.group.dev.dependencies]
 ipython = "^8.24.0"
@@ -37,6 +37,9 @@ sphinxawesome-theme = "^5.1.5"
 sphinx-design = "^0.6.0"
 sphinx-togglebutton = "^0.3.2"
 bump2version = "^1.0.1"
+myst-parser = "^3.0"
+linkify-it-py = "^2.0"
+sphinx-autobuild = "^2024.0"
 
 [build-system]
 requires = ["poetry-core"]
