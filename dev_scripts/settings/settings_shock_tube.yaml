@@ -34,6 +34,20 @@ numerical_settings:
   # true  = Haaland friction (default for nozzle cases)
   wall_friction: false
 
+  # -- Speed-up switches (SPEEDUP_REPORT_FVS_SINGLE_PHASE.md) ---------------
+  # Key absent = original code path.  The values below change the result only
+  # at round-off (<= 1e-10); ser_beta > 0 changes the path to the steady state
+  # (steady cases only, never for transients).
+  linear_solver: banded     # dense | banded (O(N) block-tridiagonal LU)
+  newton_tol: 1.0e-8        # 0 = always newton_iter Newton iterations
+  flux_local_jac: true      # per-face local Jacobian (custom JVP)
+  cell_local_jac: true      # per-cell EOS local Jacobian (custom JVP)
+  fast_increments: true     # jitted dp/dh/du step check in the driver
+  ser_beta: 0.0             # 1.0 = SER CFL ramp CFL*(SSR_1/SSR)^beta
+  ser_cfl_max: 50.0         # cap of the ramp (500 cycled on HEM N=500)
+  cpu_affinity: "0-15"      # P-cores of this laptop; null = no pinning
+
+
 geometry:
   function: get_shock_tube
   roughness: 0.0

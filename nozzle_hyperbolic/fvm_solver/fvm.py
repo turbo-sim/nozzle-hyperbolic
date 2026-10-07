@@ -1614,7 +1614,9 @@ def make_jax_stadtke_step(fluid, A, A_face, dAdx, D_h, roughness, dx, CFL, p_out
                            delta_factor=0.05, newton_iter=20, wall_friction=True,
                            transmissive_bc=False, recon='muscl_van_leer',
                            jacobian_mode='dense',
-                           eps_filter=0.0, eps_filter_ucut=None, eps_filter_uwidth=None):
+                           eps_filter=0.0, eps_filter_ucut=None, eps_filter_uwidth=None,
+                           linear_solver='dense', newton_tol=0.0,
+                           flux_local_jac=False, cell_local_jac=False):
     """
     Build a @jax.jit step function implementing the Städtke Newton implicit scheme.
 
@@ -1625,12 +1627,29 @@ def make_jax_stadtke_step(fluid, A, A_face, dAdx, D_h, roughness, dx, CFL, p_out
       - Newton-Raphson: Jacobian via jax.jacobian, solve via jnp.linalg.solve.
       - `newton_iter` iterations are unrolled inside @jax.jit.
 
+    Speed-up switches (dev_scripts/SPEEDUP_REPORT_FVS_SINGLE_PHASE.md).  The
+    defaults reproduce the original code bit-for-bit.
+      linear_solver  : 'dense' (default) — dense J + jnp.linalg.solve, O(N³);
+                       'banded' — 3×3 blocks read straight from the colored
+                       JVP columns (no dense matrix) and a block-tridiagonal LU
+                       on super-blocks of `stencil width` cells, O(N).  Same
+                       Newton step to ~1e-12.  Uses the colored compression
+                       whatever `jacobian_mode` says.
+      newton_tol     : 0.0 (default) = always `newton_iter` iterations.  > 0 stops
+                       once max|ΔU/U_ref| < newton_tol (lax.while_loop;
+                       newton_iter stays the cap).  Not reverse-differentiable.
+      flux_local_jac : custom JVP on the face flux: each face is linearized once
+                       (exact 3×6 block), each colored seed becomes a mat-vec.
+      cell_local_jac : same for the per-cell EOS outputs (ρ, a, μ; 3×3 block).
+
     step(U_n) → (U_new, dt, ssr)
       U_n   : (N, 3) — primitive state at time n
       U_new : (N, 3) — primitive state at time n+1
       dt    : scalar — time step used
       ssr   : scalar — max relative change (convergence metric)
     """
+    if linear_solver not in ('dense', 'banded'):
+        raise ValueError(f"linear_solver must be 'dense' or 'banded', got {linear_solver!r}")
     N      = len(A)
     A_j    = jnp.asarray(A,   dtype=jnp.float64)
     D_h_j  = jnp.asarray(D_h, dtype=jnp.float64)
@@ -1819,6 +1838,48 @@ def make_jax_stadtke_step(fluid, A, A_face, dAdx, D_h, roughness, dx, CFL, p_out
         # h_sub = 0.5 * (hlo[0] + hhi[0])
         # p_sub = pout_j
 
+    # ── SPEED-UP (flux_local_jac / cell_local_jac): local custom JVPs ────────
+    # The colored Jacobian pushes 15 seeds (9 for constant recon) through the
+    # residual.  Each face flux depends on 6 inputs and each cell's EOS outputs
+    # on 3, so linearizing them once (exact local block) and serving every seed
+    # as a small mat-vec replaces 15 tangent passes by 6 (faces) / 3 (cells).
+    # Chain rule regrouped: values unchanged, derivatives to ~1e-15.
+    def _flux_one(ul, ur):
+        return _jax_F_fvs_stadtke(ul[None], ur[None], fluid, delta_factor)[0]
+
+    def _flux_and_jac_one(ul, ur):
+        xf = jnp.concatenate([ul, ur])
+        F, lin = jax.linearize(lambda x_: _flux_one(x_[:3], x_[3:]), xf)
+        return F, jax.vmap(lin, out_axes=1)(jnp.eye(6, dtype=xf.dtype))   # (3,6)
+
+    @jax.custom_jvp
+    def _flux_faces_local(U_L, U_R):
+        return _jax_F_fvs_stadtke(U_L, U_R, fluid, delta_factor)
+
+    @_flux_faces_local.defjvp
+    def _flux_faces_local_jvp(primals, tangents):
+        (U_L, U_R), (dL, dR) = primals, tangents
+        F, Jx = jax.vmap(_flux_and_jac_one)(U_L, U_R)
+        return F, jnp.einsum('fij,fj->fi', Jx, jnp.concatenate([dL, dR], axis=1))
+
+    def _eos_cells(U):
+        st = fluid.get_state(jxp.HmassP_INPUTS, U[:, 2], U[:, 0])
+        return jnp.stack([st["rho"], st["a"], st["mu"]], axis=1)
+
+    @jax.custom_jvp
+    def _eos_cells_local(U):
+        return _eos_cells(U)
+
+    @_eos_cells_local.defjvp
+    def _eos_cells_local_jvp(primals, tangents):
+        (U,), (dU,) = primals, tangents
+
+        def one(u):
+            y, lin = jax.linearize(lambda v: _eos_cells(v[None])[0], u)
+            return y, jax.vmap(lin, out_axes=-1)(jnp.eye(3, dtype=u.dtype))
+        Y, Jc = jax.vmap(one)(U)
+        return Y, jnp.einsum('bij,bj->bi', Jc, dU)
+
     def _residual(U_int_flat, U_n_flat, dt):
         """
         Conservative residual for interior cells 1..N-2.
@@ -1835,14 +1896,26 @@ def make_jax_stadtke_step(fluid, A, A_face, dAdx, D_h, roughness, dx, CFL, p_out
         U   = _bc_inlet(U)
         U   = _bc_outlet(U)
 
-        V_new = _V_from_U(U)
+        if cell_local_jac:
+            E_U   = _eos_cells_local(U)                      # (N,3): ρ, a, μ
+            H_U   = U[:, 2] + 0.5 * U[:, 1]**2
+            V_new = jnp.stack([E_U[:, 0], E_U[:, 0] * U[:, 1],
+                               E_U[:, 0] * H_U - U[:, 0]], axis=1)
+        else:
+            V_new = _V_from_U(U)
         V_old = _V_from_U(U_n)
 
         U_L, U_R = _muscl_ph(U) if recon != 'constant' else (U[:-1], U[1:])
-        F_hat    = _jax_F_fvs_stadtke(U_L, U_R, fluid, delta_factor)  # (N-1, 3)
+        if flux_local_jac:
+            F_hat = _flux_faces_local(U_L, U_R)                         # (N-1, 3)
+        else:
+            F_hat = _jax_F_fvs_stadtke(U_L, U_R, fluid, delta_factor)  # (N-1, 3)
 
         # Source: area variation + wall friction — momentum only (theory §7.3)
-        st_U  = fluid.get_state(jxp.HmassP_INPUTS, U[:, 2], U[:, 0])
+        if cell_local_jac:
+            st_U = {"rho": E_U[:, 0], "a": E_U[:, 1], "mu": E_U[:, 2]}
+        else:
+            st_U = fluid.get_state(jxp.HmassP_INPUTS, U[:, 2], U[:, 0])
 
         # ── 4th-order (JST-type) background filter — port of the two-fluid
         #    eps_void filter (two_fluid/solver.py), 2026-07-14 ─────────────────
@@ -1908,7 +1981,7 @@ def make_jax_stadtke_step(fluid, A, A_face, dAdx, D_h, roughness, dx, CFL, p_out
 
     _jac_dense = jax.jacobian(_residual, argnums=0)
 
-    def _jac_colored(U_int_flat, U_n_flat, dt):
+    def _colored_columns(U_int_flat, U_n_flat, dt):
         m_loc = U_int_flat.shape[0]
         # Linearize once: the expensive nonlinear residual (EOS chain) runs a
         # single time; each colored seed is then a cheap linear JVP.
@@ -1916,7 +1989,11 @@ def make_jax_stadtke_step(fluid, A, A_face, dAdx, D_h, roughness, dx, CFL, p_out
         cols_idx  = jnp.arange(m_loc)
         color_ids = jnp.arange(_n_colors)
         S  = (cols_idx[None, :] % _stride == color_ids[:, None]).astype(U_int_flat.dtype)
-        Jc = jax.vmap(jvp_fn)(S)                       # (n_colors, m): summed columns
+        return jax.vmap(jvp_fn)(S)                     # (n_colors, m): summed columns
+
+    def _jac_colored(U_int_flat, U_n_flat, dt):
+        m_loc = U_int_flat.shape[0]
+        Jc    = _colored_columns(U_int_flat, U_n_flat, dt)
         # De-interleave: for each row r (cell lr=r//3), the in-band columns are
         # cells lr-sw..lr+sw × 3 vars; each has a unique color within the band,
         # so J[r, c] = Jc[color(c), r].
@@ -1934,6 +2011,99 @@ def make_jax_stadtke_step(fluid, A, A_face, dAdx, D_h, roughness, dx, CFL, p_out
         return J
 
     _jac_fn = _jac_colored if jacobian_mode == 'colored' else _jac_dense
+
+    # ── SPEED-UP (linear_solver='banded'): O(N) Newton solve ─────────────────
+    # The dense path builds a (3(N-2))² matrix and LU-factors it: O(N³), ~0.5 s
+    # per solve at N=500 (99 % of the step).  The Jacobian is block-banded with
+    # 3×3 blocks at cell offsets -sw..+sw, so:
+    #   1. read the blocks straight from the colored columns (no dense matrix);
+    #   2. group sw cells into one super-block (3sw×3sw) → block-TRIDIAGONAL;
+    #   3. block Thomas: one LU per super-block, [G_i | g_i] = D'_i⁻¹[U_i | b'_i],
+    #      back substitution x_i = g_i − G_i x_{i+1} (mat-vecs only).
+    # Pivoting happens inside each super-block only (no pivoting across
+    # blocks); matched the dense LU to ~1e-12 on every tested case, including
+    # SER at CFL 50.  The sparsity guard is the same as for the colored
+    # Jacobian (jacobian_validate).
+    _Nc   = N - 2                                 # interior cells
+    _sw   = _stencil_width
+    _D    = 2 * _sw + 1                           # block offsets per row
+    _s    = _sw                                   # cells per super-block
+    _M    = -(-_Nc // _s)                         # number of super-blocks
+    _Ncp  = _M * _s                               # padded cell count
+    _S3   = 3 * _s                                # super-block size
+
+    def _jac_blocks(U_int_flat, U_n_flat, dt):
+        """J_blk[i, d] = ∂R_i/∂U_{i+d-sw}  (Nc, D, 3, 3), from the colored columns."""
+        Jc  = _colored_columns(U_int_flat, U_n_flat, dt)
+        i   = jnp.arange(_Nc)
+        blk = []
+        for d in range(_D):
+            lc    = i + d - _sw
+            valid = (lc >= 0) & (lc <= _Nc - 1)
+            cols  = []
+            for vc in range(3):
+                col  = (lc * 3 + vc) % _stride
+                vals = jnp.stack([Jc[col, 3 * i + vr] for vr in range(3)], axis=1)
+                cols.append(jnp.where(valid[:, None], vals, 0.0))
+            blk.append(jnp.stack(cols, axis=2))         # (Nc, 3, 3)  [row var, col var]
+        return jnp.stack(blk, axis=1)                   # (Nc, D, 3, 3)
+
+    def _banded_solve(J_blk, R):
+        """Solve J dU = -R with J given as 3×3 blocks (block-tridiagonal LU)."""
+        Jp = jnp.pad(J_blk, ((0, _Ncp - _Nc), (0, 0), (0, 0), (0, 0)))
+        if _Ncp > _Nc:                                  # padded cells: identity rows
+            Jp = Jp.at[_Nc:, _sw].set(jnp.eye(3, dtype=Jp.dtype))
+        Dm = jnp.zeros((_M, _S3, _S3), Jp.dtype)        # diagonal super-blocks
+        Um = jnp.zeros((_M, _S3, _S3), Jp.dtype)        # upper  (super-block k+1)
+        Lm = jnp.zeros((_M, _S3, _S3), Jp.dtype)        # lower  (super-block k-1)
+        for a in range(_s):                             # local row cell
+            for d in range(_D):
+                off = a + d - _sw                       # local column cell
+                blk = Jp[a::_s, d]                      # (M, 3, 3)
+                if 0 <= off < _s:
+                    Dm = Dm.at[:, 3*a:3*a+3, 3*off:3*off+3].set(blk)
+                elif off >= _s:
+                    o = off - _s
+                    Um = Um.at[:, 3*a:3*a+3, 3*o:3*o+3].set(blk)
+                else:
+                    o = off + _s
+                    Lm = Lm.at[:, 3*a:3*a+3, 3*o:3*o+3].set(blk)
+        b = jnp.pad(-R, (0, 3 * (_Ncp - _Nc))).reshape(_M, _S3)
+
+        def fwd(carry, inp):
+            G_prev, g_prev = carry
+            D_i, U_i, L_i, b_i = inp
+            Dp = D_i - L_i @ G_prev
+            bp = b_i - L_i @ g_prev
+            Z  = jnp.linalg.solve(Dp, jnp.concatenate([U_i, bp[:, None]], axis=1))
+            return (Z[:, :-1], Z[:, -1]), (Z[:, :-1], Z[:, -1])
+
+        z0 = (jnp.zeros((_S3, _S3), Dm.dtype), jnp.zeros((_S3,), Dm.dtype))
+        _, (G, g) = jax.lax.scan(fwd, z0, (Dm, Um, Lm, b))
+
+        def bwd(x_next, inp):
+            G_i, g_i = inp
+            x_i = g_i - G_i @ x_next
+            return x_i, x_i
+        _, X = jax.lax.scan(bwd, jnp.zeros((_S3,), Dm.dtype), (G, g), reverse=True)
+        return X.reshape(-1)[:3 * _Nc]
+
+    def _newton_dU(U_k, U_n_flat, dt):
+        """One Newton update dU = -J⁻¹R."""
+        R_k = _residual(U_k, U_n_flat, dt)
+        if linear_solver == 'banded':
+            return _banded_solve(_jac_blocks(U_k, U_n_flat, dt), R_k)
+        J_k = _jac_fn(U_k, U_n_flat, dt)
+        return jnp.linalg.solve(J_k, -R_k)
+
+    def _newton_scale(U_k):
+        """Reference magnitudes for the newton_tol test: |p| per cell, global
+        max|u| + 1 m/s, global max|h| (h can be ~0 for some reference states)."""
+        U  = U_k.reshape(-1, 3)
+        return jnp.stack([jnp.abs(U[:, 0]),
+                          jnp.full_like(U[:, 1], jnp.max(jnp.abs(U[:, 1])) + 1.0),
+                          jnp.full_like(U[:, 2], jnp.max(jnp.abs(U[:, 2])))],
+                         axis=1).reshape(-1)
 
     @jax.jit
     def jac_diff(U_n, dt):
@@ -1961,12 +2131,26 @@ def make_jax_stadtke_step(fluid, A, A_face, dAdx, D_h, roughness, dx, CFL, p_out
         U_k       = U_n[1:-1].reshape(-1)              # (3*(N-2),) — initial Newton iterate
 
         # ── Newton iterations ─────────────────────────────────────────────
-        def body(_, U_k):
-            R_k = _residual(U_k, U_n_flat, dt)
-            J_k = _jac_fn(U_k, U_n_flat, dt)
-            return U_k + jnp.linalg.solve(J_k, -R_k)
+        if newton_tol > 0.0:
+            # SPEED-UP (newton_tol): stop once the relative update drops below
+            # newton_tol (remaining error ~newton_tol² by quadratic convergence).
+            # At CFL 0.5 Newton needs 5–6 iterations in transients and 1–3 near
+            # steady state; newton_iter stays the hard cap.
+            def _nt_cond(c):
+                return (c[0] < newton_iter) & (c[2] > newton_tol)
 
-        U_k = jax.lax.fori_loop(0, newton_iter, body, U_k)
+            def _nt_body(c):
+                dU = _newton_dU(c[1], U_n_flat, dt)
+                return (c[0] + 1, c[1] + dU,
+                        jnp.max(jnp.abs(dU) / (_newton_scale(c[1]) + 1e-300)))
+
+            _, U_k, _ = jax.lax.while_loop(
+                _nt_cond, _nt_body, (0, U_k, jnp.float64(jnp.inf)))
+        else:
+            def body(_, U_k):
+                return U_k + _newton_dU(U_k, U_n_flat, dt)
+
+            U_k = jax.lax.fori_loop(0, newton_iter, body, U_k)
 
         # ── Reconstruct full solution with updated BCs ────────────────────
         U_new = jnp.concatenate([U_n[:1], U_k.reshape(N - 2, 3), U_n[-1:]], axis=0)
@@ -2111,6 +2295,15 @@ def fvm_euler_1d(x, t, parameters):
         _eps_filter = float(parameters.get('eps_filter', 0.0))
         _ef_ucut    = parameters.get('eps_filter_ucut', None)
         _ef_uwidth  = parameters.get('eps_filter_uwidth', None)
+        # Speed-up switches (SPEEDUP_REPORT_FVS_SINGLE_PHASE.md); the defaults
+        # reproduce the original code path bit-for-bit.
+        _linear_solver  = str(parameters.get('linear_solver', 'dense'))
+        _newton_tol     = float(parameters.get('newton_tol', 0.0))
+        _flux_local_jac = bool(parameters.get('flux_local_jac', False))
+        _cell_local_jac = bool(parameters.get('cell_local_jac', False))
+        _fast_incr      = bool(parameters.get('fast_increments', False))
+        _ser_beta       = float(parameters.get('ser_beta', 0.0))
+        _ser_cfl_max    = float(parameters.get('ser_cfl_max', 50.0))
         _stadtke_step, _compute_dt, _jac_diff, _face_mass_flux = make_jax_stadtke_step(
             fluid, A_nodes, A_face, dAdx_nodes, D_hydraulic, roughness,
             dx, CFL, p_out, h0, s0, wall_friction=wall_friction,
@@ -2120,10 +2313,25 @@ def fvm_euler_1d(x, t, parameters):
             jacobian_mode=jacobian_mode,
             eps_filter=_eps_filter,
             eps_filter_ucut=None if _ef_ucut in (None, "", "none") else float(_ef_ucut),
-            eps_filter_uwidth=None if _ef_uwidth in (None, "", "none") else float(_ef_uwidth))
+            eps_filter_uwidth=None if _ef_uwidth in (None, "", "none") else float(_ef_uwidth),
+            linear_solver=_linear_solver, newton_tol=_newton_tol,
+            flux_local_jac=_flux_local_jac, cell_local_jac=_cell_local_jac)
         print(f"  Jacobian mode: {jacobian_mode}   eps_filter={_eps_filter}"
               + (f" (ucut={_ef_ucut})" if _ef_ucut not in (None, "", "none") else ""),
               flush=True)
+        print(f"  [Speed-up] linear_solver={_linear_solver}  newton_tol={_newton_tol:g}"
+              f"  flux_local_jac={_flux_local_jac}  cell_local_jac={_cell_local_jac}"
+              f"  fast_increments={_fast_incr}  ser_beta={_ser_beta:g}"
+              + (f" (CFL<={_ser_cfl_max:g})" if _ser_beta > 0.0 else ""), flush=True)
+
+        @jax.jit
+        def _increments_jit(U_old, U_new, a_c):
+            """Jitted twin of the eager dp/dh/du check below (fast_increments):
+            same formulas, one dispatch instead of ~20 eager ops."""
+            return jnp.stack([
+                jnp.max(jnp.abs(U_new[:, 0] - U_old[:, 0]) / (U_old[:, 0] + 1e-10)),
+                jnp.max(jnp.abs(U_new[:, 2] - U_old[:, 2]) / (jnp.abs(U_old[:, 2]) + 1e-10)),
+                jnp.max(jnp.abs(U_new[:, 1] - U_old[:, 1]) / (jnp.abs(U_old[:, 1]) + a_c + 1e-10))])
 
         U_jax = jnp.asarray(U0, dtype=jnp.float64)
 
@@ -2170,6 +2378,22 @@ def fvm_euler_1d(x, t, parameters):
         t0       = _time.perf_counter()
         # phase timers (s): where does the per-iteration time go?
         _tm = {'dt': 0.0, 'step': 0.0, 'check': 0.0}
+        # SER CFL ramp (ser_beta > 0, steady cases only — it gives up time
+        # accuracy): CFL_eff = CFL·clip((SSR_1/SSR)^β, 1, ser_cfl_max/CFL), the
+        # same pseudo-transient continuation as the two-fluid driver.  The
+        # increment checks / halvings below remain the safety net.
+        _ser_ref  = None    # SSR after the first step
+        _cfl_mult = 1.0     # current CFL multiplier (1 = plain CFL)
+
+        def _ser_cap(dt_cap):
+            nonlocal _ser_ref, _cfl_mult
+            if _ser_beta > 0.0 and math.isfinite(res):
+                if _ser_ref is None:
+                    _ser_ref = res
+                _cfl_mult = max(1.0, min(_ser_cfl_max / CFL,
+                                         (_ser_ref / max(res, 1e-300)) ** _ser_beta))
+                dt_cap *= _cfl_mult
+            return dt_cap
 
         try:
             while n < max_iter and t_phys < t_end:
@@ -2185,7 +2409,7 @@ def fvm_euler_1d(x, t, parameters):
                     # ── CFL cap for current state; grow dt toward it ──────────
                     _t_a = _time.perf_counter()
                     dt_max_j, a_j = _compute_dt(U_jax)
-                    dt = min(dt * _DT_GROW, float(dt_max_j))
+                    dt = min(dt * _DT_GROW, _ser_cap(float(dt_max_j)))
                     _tm['dt'] += _time.perf_counter() - _t_a
 
                     if dt < _DT_MIN:
@@ -2202,12 +2426,16 @@ def fvm_euler_1d(x, t, parameters):
                         _t_c = _time.perf_counter()
                         _tm['step'] += _t_c - _t_b
 
-                        dp = float(jnp.max(jnp.abs(U_new[:, 0] - U_jax[:, 0])
-                                           / (U_jax[:, 0] + 1e-10)))
-                        dh = float(jnp.max(jnp.abs(U_new[:, 2] - U_jax[:, 2])
-                                           / (jnp.abs(U_jax[:, 2]) + 1e-10)))
-                        du = float(jnp.max(jnp.abs(U_new[:, 1] - U_jax[:, 1])
-                                           / (jnp.abs(U_jax[:, 1]) + a_j + 1e-10)))
+                        if _fast_incr:
+                            dp, dh, du = (float(v) for v in jax.device_get(
+                                _increments_jit(U_jax, U_new, a_j)))
+                        else:
+                            dp = float(jnp.max(jnp.abs(U_new[:, 0] - U_jax[:, 0])
+                                               / (U_jax[:, 0] + 1e-10)))
+                            dh = float(jnp.max(jnp.abs(U_new[:, 2] - U_jax[:, 2])
+                                               / (jnp.abs(U_jax[:, 2]) + 1e-10)))
+                            du = float(jnp.max(jnp.abs(U_new[:, 1] - U_jax[:, 1])
+                                               / (jnp.abs(U_jax[:, 1]) + a_j + 1e-10)))
                         _tm['check'] += _time.perf_counter() - _t_c
 
                         if dp < _DP_MAX and dh < _DH_MAX and du < _DU_MAX:
@@ -2227,7 +2455,7 @@ def fvm_euler_1d(x, t, parameters):
                     # ── Limiter off: full CFL-capped dt, accept unconditionally ──
                     _t_a = _time.perf_counter()
                     dt_max_j, a_j = _compute_dt(U_jax)
-                    dt = float(dt_max_j)
+                    dt = _ser_cap(float(dt_max_j))
                     _tm['dt'] += _time.perf_counter() - _t_a
 
                     _t_b = _time.perf_counter()
@@ -2241,14 +2469,15 @@ def fvm_euler_1d(x, t, parameters):
                 n      += 1
                 res_hist = res_hist[1:] + [res]
 
+                _cfl_txt = f"  CFL_eff={CFL * _cfl_mult:.1f}" if _ser_beta > 0.0 else ""
                 if adaptive_dt and halvings > 0:
                     print(f"  Iter {n:5d}  t={t_phys:.3e}  dt={dt:.3e}  "
                           f"SSR={res:.3e}  [{halvings} halving(s), "
-                          f"dp={dp:.2f} dh={dh:.2f} du={du:.2f}]", flush=True)
+                          f"dp={dp:.2f} dh={dh:.2f} du={du:.2f}]{_cfl_txt}", flush=True)
                 elif n < 10 or (n < 100 and n % 10 == 0) or n % 50 == 0:
                     ms_iter = (_time.perf_counter() - t0) / n * 1e3
                     print(f"  Iter {n:5d}  t={t_phys:.3e}  dt={dt:.3e}  SSR={res:.3e}  "
-                          f"({ms_iter:.1f} ms/iter)", flush=True)
+                          f"({ms_iter:.1f} ms/iter){_cfl_txt}", flush=True)
 
         except KeyboardInterrupt:
             print("Interrupted — returning current solution.")
@@ -2302,6 +2531,12 @@ def fvm_euler_1d(x, t, parameters):
                   "mass_flow_diagnostic.md §4.", flush=True)
 
         Q_final = _puh_to_conservative(U_np, fluid)
+        # Primitive (p, u, h) result and run statistics for callers that want
+        # them without the conservative → primitive round trip.
+        parameters['U_puh_final'] = U_np
+        parameters['run_stats'] = dict(steps=n_done, wall_s=elapsed, ssr=res_done,
+                                       reason=reason, t_phys=t_done,
+                                       compile_s=compile_time)
 
         Q_out = np.zeros((N, Nj, 2))
         Q_out[:, :, 0] = Q_init
