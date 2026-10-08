@@ -50,12 +50,14 @@ SCHEMA = {
     "grid": ["Nx", "x1", "x2", "radius"],
     "numerics": [
         "CFL", "newton_iter", "delta_factor", "recon", "k_vm",
-        "va_eps_mode", "va_rel", "va_r0", "va_rm",
+        "va_eps_mode", "va_rel", "va_r0", "va_rm", "va_mean_stop_gradient",
         "jacobian", "linear_solve", "w_char", "eos_project", "alpha_eps",
-        "pin_ghost", "pin_ghost_momentum", "proj_s_ref", "eos_rows",
+        "pin_ghost", "pin_ghost_momentum", "pin_mom_alpha", "pin_mom_tau",
+        "proj_s_ref", "eos_rows",
         "eos_rows_banded", "jac_lag", "nc_form", "lowmach_diss",
         "lowmach_diss_bc", "nc_scale", "eps_void", "eps_void_ucut",
-        "eps_void_uwidth", "eps_void_scale", "eps_ghost", "eps_ghost_acut",
+        "eps_void_uwidth", "eps_void_scale", "eps_void_mass_acut",
+        "ghost_mass_upwind_acut", "eps_ghost", "eps_ghost_acut",
         "eps_ghost_awidth", "eps_ghost_k2", "eps_ghost_alo", "ssr_mode",
         "du_blend_lo", "du_blend_hi",
         "fast_wb_flux", "flux_single_branch", "flux_local_jac",
@@ -394,6 +396,9 @@ def load_config(yaml_path, overrides=None, override_label="override") -> types.S
     cfg.VA_REL       = _none_or(n["va_rel"], float)
     cfg.VA_R0        = float(n["va_r0"])   # smoothness-gate knee
     cfg.VA_RM        = int(n["va_rm"])     # smoothness-gate exponent
+    # 'magnitude' only: stop_gradient on the eps domain mean (same residual,
+    # colored Jacobian stays exact for thin ghosts); false = earlier code path.
+    cfg.VA_MEAN_STOP_GRADIENT = bool(n["va_mean_stop_gradient"])
     cfg.K_VM         = float(n["k_vm"])
     cfg.JACOBIAN          = str(n["jacobian"])          # dense | colored
     cfg.LINEAR_SOLVE      = str(n["linear_solve"])      # lstsq | normal_eq | normal_eq_banded | qr
@@ -428,6 +433,11 @@ def load_config(yaml_path, overrides=None, override_label="override") -> types.S
     # Ghost-GAS momentum pin (u_g → u_l), α-gated & saturation-free — serves both
     # flashing and Bernoulli ghost-gas cases.
     cfg.PIN_GHOST_MOMENTUM = bool(n["pin_ghost_momentum"])
+    # Thin-ghost switches (2026-10-08, solver docstring "THIN-GHOST SWITCHES");
+    # null = previous code path.  pin_mom_alpha: α of half release (null =
+    # 10·alpha_eps); pin_mom_tau [s]: dt-consistent pin (null = algebraic blend).
+    cfg.PIN_MOM_ALPHA = None if n["pin_mom_alpha"] is None else float(n["pin_mom_alpha"])
+    cfg.PIN_MOM_TAU   = None if n["pin_mom_tau"] is None else float(n["pin_mom_tau"])
     cfg.PROJ_S_REF        = float(n["proj_s_ref"])          # λ gate scale for 'damped'
     # (λ = s²/(s²+s_ref²); probe-calibrated: two-comp s≈0.36, ghost s≈9e-4)
     # E3-augmented system (2026-07-15, certified ×3): append the 2 EOS closures
@@ -504,6 +514,12 @@ def load_config(yaml_path, overrides=None, override_label="override") -> types.S
     # BAND-GATE floor: filter disengages below this α (hole = garbage fields;
     # touching them locks the hole open — let drag heal it).
     cfg.EPS_GHOST_ALO    = float(n["eps_ghost_alo"])
+    # Thin-ghost switches (null = previous code path): ghost mass row out of the
+    # eps_void filter below ~acut; upwind ghost mass flux at faces touching α < ~acut.
+    cfg.EPS_VOID_MASS_ACUT = (None if n["eps_void_mass_acut"] is None
+                              else float(n["eps_void_mass_acut"]))
+    cfg.GHOST_MASS_UPWIND_ACUT = (None if n["ghost_mass_upwind_acut"] is None
+                                  else float(n["ghost_mass_upwind_acut"]))
     # SSR row weighting: 'all' (legacy, every equation votes equally — a ghost
     # phase's shock-layer limit cycle can pin the residual far above tol) or
     # 'mass' (each phase's rows vote with the local mass fraction — the stop

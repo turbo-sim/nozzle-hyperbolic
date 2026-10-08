@@ -25,6 +25,11 @@ Restart options (ic.type: restart):
                            values: u_g = u_l, T_g = T_l (h_g = cp·T_l with cp fitted
                            from the run), α_g = its median (perfect-gas ghost)
 
+Stagnation option (ic.type: stagnation):
+    ic.alpha_floor: a      seed alpha_g = max(bc.void_fraction, a) in the domain; the
+                           inlet keeps bc.void_fraction.  Cold start with a thin
+                           inlet ghost (e.g. 1e-7): use a = 1e-3.
+
 nozzlex_initial_condition (used by debug scripts) runs the nozzlex space-marching
 solve live; the nozzlex package is imported only then.
 
@@ -966,9 +971,15 @@ def build_initial_condition(ic, *, x, A, p0, T_g0, T_l0, alpha_g, slip, H_g0, H_
               f"  u_g={u_g_in:.1f} m/s  u_l={u_l_in:.1f} m/s")
 
     elif kind == "stagnation":
-        U_h_0 = stagnation_ic(Nx, p0, alpha_g, H_g0, H_l0)
-        print(f"IC (stagnation):  at rest, p={p0/1e5:.1f} bar  alpha_g={alpha_g:.6f}"
-              f"  H_g0={H_g0/1e3:.1f}  H_l0={H_l0/1e3:.1f} kJ/kg")
+        # ic.alpha_floor lifts the seeded void fraction above bc.void_fraction; the
+        # inlet BC keeps bc.void_fraction and washes the thicker seed out as the
+        # flow develops.  Thin-ghost cold start (inlet 1e-7): alpha_floor 1e-3, so
+        # the first flashing during the ramp happens with real vapour present.
+        a_ic = max(alpha_g, float(ic.get("alpha_floor", 0.0)))
+        U_h_0 = stagnation_ic(Nx, p0, a_ic, H_g0, H_l0)
+        print(f"IC (stagnation):  at rest, p={p0/1e5:.1f} bar  alpha_g={a_ic:.6g}"
+              + (f" (floor; bc.void_fraction={alpha_g:.1e})" if a_ic > alpha_g else "")
+              + f"  H_g0={H_g0/1e3:.1f}  H_l0={H_l0/1e3:.1f} kJ/kg")
 
     elif kind == "simple":
         U_h_0 = simple_ic(Nx, p0, p_out, alpha_g, slip, H_g0, H_l0)

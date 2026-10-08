@@ -36,6 +36,8 @@ numerics:
   va_rel:       null         # null → mode-calibrated default
   va_r0:        0.5
   va_rm:        4
+  va_mean_stop_gradient: true  # magnitude only: drop the eps-mean derivative (same
+                               # answer; exact colored Jacobian with thin ghosts)
   # Newton / linear algebra: certified E3 stack (EOS closures as extra rows,
   # block-banded normal equations)
   jacobian:        colored
@@ -57,11 +59,18 @@ numerics:
   # Ghost-phase pins
   pin_ghost:          false
   pin_ghost_momentum: false
+  pin_mom_alpha:      null   # alpha of half release; null = 10*alpha_eps
+  pin_mom_tau:        null   # [s] dt-consistent momentum pin; null = algebraic blend
   # JST void filter (4th order) and ghost filter
   eps_void:         0.05
   eps_void_ucut:    null     # null = not velocity-gated
   eps_void_uwidth:  12.0
   eps_void_scale:   frozen
+  eps_void_mass_acut: null   # ghost mass row out of eps_void below this alpha; null = all rows
+  ghost_mass_upwind_acut: null  # upwind ghost mass flux at faces touching alpha < this; null = off
+  # Thin inlet ghost (alpha_in ~1e-7, tested on the SMD flashing case): set
+  # pin_ghost_momentum: true, pin_mom_alpha: 1e-4, pin_mom_tau: 1e-6,
+  # eps_void_mass_acut: 1e-4, ghost_mass_upwind_acut: 1e-4, alpha_eps ~ alpha_in/100.
   eps_ghost:        0.0
   eps_ghost_acut:   3.0e-3
   eps_ghost_awidth: 0.25

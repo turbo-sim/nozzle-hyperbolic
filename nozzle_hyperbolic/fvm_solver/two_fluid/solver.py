@@ -133,6 +133,7 @@ def make_two_fluid_step(
     va_rel=None,
     va_r0=0.5,
     va_rm=4,
+    va_mean_stop_gradient=True,
     sources_fn=None,
     lowmach_diss=0.0,
     lowmach_diss_bc=None,
@@ -141,6 +142,8 @@ def make_two_fluid_step(
     eps_void_ucut=None,
     eps_void_uwidth=None,
     eps_void_scale='wood',
+    eps_void_mass_acut=None,
+    ghost_mass_upwind_acut=None,
     eps_ghost=0.0,
     eps_ghost_acut=3e-3,
     eps_ghost_awidth=0.25,
@@ -180,6 +183,8 @@ def make_two_fluid_step(
     alpha_eps=_ALPHA_EPS,
     pin_ghost=False,
     pin_ghost_momentum=False,
+    pin_mom_alpha=None,
+    pin_mom_tau=None,
     fast_wb_flux=False,
     flux_single_branch=False,
     flux_local_jac=False,
@@ -344,6 +349,32 @@ def make_two_fluid_step(
                  only ever WIDEN toward 1, never narrow) that any future edit
                  must preserve.
 
+    THIN-GHOST SWITCHES (2026-10-08).  All default to None = the previous code
+    path.  Together they let a flashing inlet ghost sit at alpha ~1e-7 (tested:
+    SMD supersonic case, N300/N600, SSR < 1e-8); at alpha_in = 1e-3 they change
+    the solution by <= 2e-7 of each field's range.
+    ghost_mass_upwind_acut : float.  At faces where either side has alpha below
+                 ~acut (log-alpha gate), the ghost phase's MASS flux is the pure
+                 upwind alpha*rho*u instead of the FVS value, whose acoustic
+                 correction (built at the average face state) moves ghost mass
+                 ~alpha_R*rho*u across a front and empties the thin side.
+    eps_void_mass_acut : float.  Fades the eps_void 4th-order filter out of the
+                 ghost phase's mass row below ~acut (the filter is not
+                 positivity preserving and digs alpha holes across decades).
+    pin_mom_alpha : float.  alpha at which the ghost momentum pin is half
+                 released (default 10*alpha_eps).
+    pin_mom_tau : float [s].  Makes the momentum pin a relaxation source scaled
+                 by dt/pin_mom_tau, so the steady state is dt-independent where
+                 the pin is partly active (the algebraic blend leaves an SSR
+                 floor there).  ~1e-6 s (drag time of a 5 um bubble).
+    va_mean_stop_gradient : bool, default True.  va_eps_mode='magnitude' only:
+                 stop_gradient on the domain mean in the van Albada eps, so the
+                 Jacobian drops its global coupling instead of folding it into
+                 wrong in-band colored entries (error ∝ 1/alpha_ghost: 21-31% of
+                 the row max at alpha_in=1e-7).  Same residual, same converged
+                 state; only the Newton path changes.  False = the earlier code
+                 (bit-for-bit; set by defaults_legacy.yaml for legacy files).
+
     SPEED-UP SWITCHES (2026-10-05).  All default to the previous code path, so
     omitting them reproduces earlier runs exactly.  The first five leave the
     residual unchanged (values to ~1e-15, Jacobian to ~1e-13; an N600 restart
@@ -390,6 +421,8 @@ def make_two_fluid_step(
     # a thin liquid-side ghost should set ~1e-4..1e-3 so the solver cannot
     # re-thin α below the IC floor mid-march (h_g = E/(αρ) amplifier guard).
     alpha_eps = float(alpha_eps)
+    # Ghost momentum pin half-release alpha (historically tied to the floor).
+    _a_pin_mom = 10.0 * alpha_eps if pin_mom_alpha is None else float(pin_mom_alpha)
     # van Albada eps normalisation (see _muscl below).  'magnitude' is the
     # original behaviour and the default, so omitting these keys reproduces every
     # pre-2026-09-09 run exactly.  va_rel=None picks the value calibrated for the
@@ -970,8 +1003,21 @@ def make_two_fluid_step(
                 _va_scale = (jnp.max(U_h, axis=0) - jnp.min(U_h, axis=0)
                              + 1e-12 * jnp.mean(jnp.abs(U_h), axis=0))[None, :]
             else:                       # 'magnitude' and 'smoothness'
-                _va_scale = (jnp.abs(U_h[1:-1])
-                             + 0.1 * jnp.mean(jnp.abs(U_h), axis=0)[None, :])
+                _va_mean = jnp.mean(jnp.abs(U_h), axis=0)
+                if va_eps_mode == 'magnitude' and va_mean_stop_gradient:
+                    # The domain mean only sets an eps SCALE: keep its value,
+                    # drop its derivative.  That derivative couples every cell
+                    # to every other one (not representable in the banded/
+                    # colored Jacobian, which folds it into wrong in-band
+                    # entries), and through a ghost cell's h_g = E/(αρ) it grows
+                    # like 1/α_ghost: colored-vs-dense Jacobian error 3e-5 of the
+                    # row max at α_in=1e-3 but 21-31% at 1e-7, which held SER in
+                    # a limit cycle and blew up α_in=1e-8.  The residual is
+                    # unchanged, so converged states are too (to SSR tolerance);
+                    # only the Newton path differs.  ('smoothness' scales this
+                    # term by 1e-12 and needs no fix.)
+                    _va_mean = jax.lax.stop_gradient(_va_mean)
+                _va_scale = (jnp.abs(U_h[1:-1]) + 0.1 * _va_mean[None, :])
             eps  = _va_rel_eff * _va_scale
             s    = jnp.where(a * b > 0.0,
                              a * b * (a + b) / (a*a + b*b + eps*eps), 0.0)
@@ -1091,11 +1137,47 @@ def make_two_fluid_step(
         return F
 
     def _flux_one(ul, ur, lm):
-        return fvs_interface_flux(
+        F = fvs_interface_flux(
             ul, ur, fluid_g, fluid_l, k, delta_factor, lowmach_diss=lm,
             du_blend_lo=du_blend_lo, du_blend_hi=du_blend_hi,
             single_branch=flux_single_branch,
         )
+        if ghost_mass_upwind_acut is not None:
+            F = _ghost_mass_upwind(F, ul, ur)
+        return F
+
+    # ── Positivity-preserving ghost MASS flux (ghost_mass_upwind_acut) ────────
+    # The FVS acoustic correction (u−a wave) is built from the AVERAGE face
+    # state, so its ghost-mass component scales with (α_L+α_R)/2: across a front
+    # where α jumps by decades (flashing onset, change of inlet α) it moves ghost
+    # mass ~α_R·ρ·u through the face and empties the thin side (measured 6.5× the
+    # upwind flux at the onset face of the α_in=1e-7 SMD case → α hole → NaN).
+    # Where EITHER side is a thin ghost, the ghost phase's mass row becomes the
+    # pure upwind flux α·ρ·u (conservative, positivity preserving); the other
+    # five rows and all faces with α ≫ acut on both sides keep the FVS value.
+    # Reads only U_L, U_R → the colored Jacobian stays exact (jac_diff 1e-14).
+    if ghost_mass_upwind_acut is not None:
+        _c_gu = float(jnp.log10(ghost_mass_upwind_acut))
+
+        def _wghost(a):                       # 1 for a ≪ acut, 0 for a ≫ acut
+            return 0.5 * (1.0 - jnp.tanh(
+                (jnp.log10(jnp.clip(a, 1e-300, 1.0)) - _c_gu) / 0.25))
+
+        def _ghost_mass_upwind(F, ul, ur):
+            rgL = phase_props(fluid_g, ul[0], ul[4]).rho
+            rgR = phase_props(fluid_g, ur[0], ur[4]).rho
+            rlL = phase_props(fluid_l, ul[0], ul[5]).rho
+            rlR = phase_props(fluid_l, ur[0], ur[5]).rho
+            ug_f = 0.5 * (ul[1] + ur[1]);  ul_f = 0.5 * (ul[2] + ur[2])
+            sg = jnp.tanh(ug_f / 1e-3);    sl = jnp.tanh(ul_f / 1e-3)   # smooth sign
+            Fg_up = (0.5 * (1.0 + sg) * ul[3] * rgL * ul[1]
+                     + 0.5 * (1.0 - sg) * ur[3] * rgR * ur[1])
+            Fl_up = (0.5 * (1.0 + sl) * (1.0 - ul[3]) * rlL * ul[2]
+                     + 0.5 * (1.0 - sl) * (1.0 - ur[3]) * rlR * ur[2])
+            wg = 1.0 - (1.0 - _wghost(ul[3])) * (1.0 - _wghost(ur[3]))
+            wl = 1.0 - (1.0 - _wghost(1.0 - ul[3])) * (1.0 - _wghost(1.0 - ur[3]))
+            return (F.at[0].set(wg * Fg_up + (1.0 - wg) * F[0])
+                     .at[1].set(wl * Fl_up + (1.0 - wl) * F[1]))
 
     # flux_local_jac: each face flux depends on only 12 inputs (U_L, U_R); the
     # custom JVP linearizes it once per face (exact 6×12 block) and serves every
@@ -1312,8 +1394,24 @@ def make_two_fluid_step(
                 w_c    = 0.5 * (1.0 + jnp.tanh((u0 - umat_c) / du))  # 1 slow → 0 fast
                 w_face = 0.5 * (w_c[:-1] + w_c[1:])              # (N-1,)
                 r_face = r_face * w_face                         # gate the filter scale
+            third_v = third
+            if eps_void_mass_acut is not None:
+                # GHOST MASS ROW GATE (eps_void_mass_acut): a 4th-order filter is
+                # not positivity preserving — on the MASS row of a ghost whose α
+                # spans decades its undershoot exceeds α itself and digs α holes
+                # (same lesson as eps_ghost's "mass rows excluded" below).  Fade
+                # the ghost phase's mass row out below ~acut; the weight is the
+                # product over the face's 4-cell stencil (the cells `third` reads).
+                _cm  = jnp.log10(jnp.float64(eps_void_mass_acut))
+                _wgc = 0.5 * (1.0 + jnp.tanh(
+                    (jnp.log10(jnp.clip(U_h[:, 3], 1e-300, 1.0)) - _cm) / 0.25))
+                _wlc = 0.5 * (1.0 + jnp.tanh(
+                    (jnp.log10(jnp.clip(1.0 - U_h[:, 3], 1e-300, 1.0)) - _cm) / 0.25))
+                _wg4 = _wgc[:-3] * _wgc[1:-2] * _wgc[2:-1] * _wgc[3:]
+                _wl4 = _wlc[:-3] * _wlc[1:-2] * _wlc[2:-1] * _wlc[3:]
+                third_v = third * jnp.ones_like(third).at[:, 0].set(_wg4).at[:, 1].set(_wl4)
             d_face = jnp.zeros_like(F_hat).at[1:-1].set(
-                eps_void * r_face[1:-1, None] * third)           # +sign DAMPS (verified); 0 at bdry
+                eps_void * r_face[1:-1, None] * third_v)         # +sign DAMPS (verified); 0 at bdry
             F_hat  = F_hat + d_face
 
         # ── GHOST-phase 4th-order filter (eps_ghost) ──────────────────────────
@@ -1466,17 +1564,36 @@ def make_two_fluid_step(
         # not on liquid superheat.  This also makes it SATURATION-FREE (reads only
         # α_g) → it serves the Bernoulli ghost-gas case (no mass transfer) with the
         # same code path, and is independent of / composable with the energy pin.
-        #   w = 1 for α_g ≲ 10·alpha_eps (ghost), → 0 by ~100·alpha_eps (real gas).
+        #   w = 1 for α_g ≲ a_pin/10 (ghost), → 0 by ~10·a_pin (real gas), with
+        #   a_pin = pin_mom_alpha (default 10·alpha_eps — which switches the pin
+        #   off exactly when alpha_eps is lowered for a thin inlet ghost).
         # NO-DEADLOCK: touches ONLY row 2 (gas momentum); continuity rows 0/1 and
         # the α-growth chain are untouched, so α grows through the tier and the pin
         # releases BECAUSE α grew.
+        #
+        # pin_mom_tau (dt-CONSISTENT pin): the algebraic blend mixes a dt-scaled
+        # conservation residual with a NON-dt-scaled pin, so where 0 < w < 1 the
+        # converged state depends on dt and the dt=1 steady residual cannot reach
+        # zero (measured SSR stuck at 1.4e-8, all in mom_g of the onset cells).
+        # With pin_mom_tau the pin is a relaxation source ×dt/τ instead.
         if pin_ghost_momentum:
             ag_c  = U_h[1:-1, 3]                                   # α_g interior
-            w_mom = 0.5 * (1.0 - jnp.tanh(
-                jnp.log(ag_c / (10.0 * alpha_eps)) / 0.5))
+            _z    = jnp.log(ag_c / _a_pin_mom) / 0.5
             pin_u = W_int[:, 2] * (U_h[1:-1, 1] - U_h[1:-1, 2])    # m_g·(u_g − u_l)
-            R = R.at[:, 2].set((1.0 - w_mom) * R[:, 2]
-                               + w_mom * Vc[:, 0] * pin_u)
+            if pin_mom_tau is None:
+                # Original algebraic blend (bit-for-bit with earlier runs).
+                w_mom = 0.5 * (1.0 - jnp.tanh(_z))
+                R = R.at[:, 2].set((1.0 - w_mom) * R[:, 2]
+                                   + w_mom * Vc[:, 0] * pin_u)
+            else:
+                # Weight through its complement w_free = sigmoid(2z) = 1 − w_mom:
+                # deep in the ghost the tanh form's derivative 1 − tanh² keeps only
+                # ~4 digits (colored vs dense Jacobian differed by 1e-6 of the row
+                # max there; with this form they agree to 1e-14).
+                w_free = jax.nn.sigmoid(2.0 * _z)
+                w_mom  = 1.0 - w_free
+                R = R.at[:, 2].set(w_free * R[:, 2]
+                                   + w_mom * (dt / pin_mom_tau) * Vc[:, 0] * pin_u)
 
         return R.flatten()   # (6*(N-2),)
 
