@@ -26,6 +26,7 @@ numerics:
   va_rel:             null
   va_r0:              0.5
   va_rm:              4
+  va_mean_stop_gradient: false
   jacobian:           dense
   linear_solve:       lstsq
   w_char:             null
@@ -33,6 +34,8 @@ numerics:
   alpha_eps:          1.0e-6
   pin_ghost:          false
   pin_ghost_momentum: false
+  pin_mom_alpha:      null
+  pin_mom_tau:        null
   proj_s_ref:         0.02
   eos_rows:           false
   eos_rows_banded:    false
@@ -45,6 +48,8 @@ numerics:
   eps_void_ucut:      null
   eps_void_uwidth:    null
   eps_void_scale:     wood
+  eps_void_mass_acut: null
+  ghost_mass_upwind_acut: null
   eps_ghost:          0.0
   eps_ghost_acut:     3.0e-3
   eps_ghost_awidth:   0.25
