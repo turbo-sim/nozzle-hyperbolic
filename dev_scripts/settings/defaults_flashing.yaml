@@ -10,7 +10,7 @@ sources:
   mass_transfer: true        # phase change ON (evaporation source, saturation props)
 
 numerics:
-  CFL:             2.0
+  CFL:             0.5
   pin_ghost:       true      # ghost vapor h_g pinned to saturation before onset
   ssr_mode:        mass      # convergence measured on the phases carrying mass
   lowmach_diss_bc: 0.0

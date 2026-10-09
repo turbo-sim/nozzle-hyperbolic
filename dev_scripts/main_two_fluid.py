@@ -52,6 +52,7 @@ from nozzle_hyperbolic.fvm_solver.two_fluid.sources import (
 # Settings files live in dev_scripts/settings/ (paths relative to dev_scripts/).
 # SETTINGS_FILE = "settings/settings_two_fluid_nozzle_validation_two_component_test_static.yaml"
 SETTINGS_FILE = "settings/settings_flashing_smd_supersonic_test.yaml"
+SETTINGS_FILE = "settings/settings_flashing_nitrogen_simoneau.yaml"
 SETTINGS_YAML = os.environ.get("SETTINGS_YAML",SETTINGS_FILE)
 # SETTINGS_YAML = os.environ.get("SETTINGS_YAML","settings/settings_two_fluid_liquid_bernoulli_symmetric.yaml")
 _here = pathlib.Path(__file__).parent
