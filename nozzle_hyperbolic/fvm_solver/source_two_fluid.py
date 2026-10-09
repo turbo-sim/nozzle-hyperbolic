@@ -31,6 +31,7 @@ def calculate_drag_force_one_component(
 ):
     """
     Regime-dependent drag force per unit volume for the one-component case.
+    The function is based on the Schiller and Naumann model
 
     Convention: phase 1 = vapor (gas), phase 2 = liquid.
       F > 0 means force on vapor in the direction of u2 - u1.
@@ -82,7 +83,7 @@ def calculate_drag_force_one_component(
 
 def interfacial_area(
     alpha,
-    alpha_b=0.3, # 0.3 was the original
+    alpha_b=0.3, 
     alpha_d=0.7,
     Nb=1e10,
     Nd=1e10,

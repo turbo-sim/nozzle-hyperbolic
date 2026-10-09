@@ -1,0 +1,32 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# FLASHING COLD-START defaults: start a flashing case from rest (no previous
+# solution) and refine on a sequence of grids.
+#
+#   python main_two_fluid_grid_sequence.py settings/<case file>.yaml
+#
+# Level 1 (coarsest grid): fluid at rest at reservoir conditions, outlet
+# back-pressure lowered from p0 to bc.p_out over p_out_ramp_steps steps.  Each
+# finer level restarts from the previous converged solution with the ramp off
+# (main_two_fluid_grid_sequence.py does that).  Builds on defaults_flashing.yaml; a case
+# file uses `base: defaults_flashing_cold_start.yaml` and can override anything.
+#
+# Running such a case file directly with main_two_fluid.py does a cold start on
+# grid.Nx itself — the ramp below is sized for the coarse first level, so do that
+# only on a coarse grid.
+# ─────────────────────────────────────────────────────────────────────────────
+base: defaults_flashing.yaml
+
+ic:
+  type: stagnation           # at rest, p = p0, stagnation enthalpies
+  alpha_floor: 1.0e-3        # thick vapor ghost in the IC (alpha = max(void_fraction,
+                             # floor)); the inlet void fraction then flushes it.  A thin
+                             # IC ghost crashes at the first flashing onset.
+
+bc:
+  p_out_ramp_steps: 1000     # outlet p0 → p_out over the first 1000 steps (sized for
+                             # N≈100; shorter ramps blew up on the SMD case)
+  p_out_ramp_shape: linear
+
+grid_sequence:
+  Nx:      [100, 300, 600]
+  ssr_tol: [1.0e-6, 1.0e-6, 1.0e-8]

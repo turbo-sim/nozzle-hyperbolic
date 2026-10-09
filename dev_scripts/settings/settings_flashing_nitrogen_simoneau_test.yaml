@@ -1,0 +1,88 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# FLASHING nozzle — subcooled liquid nitrogen through the Simoneau nozzle.
+# Reservoir 19.5 bar / 94.8 K (T_sat(19.5 bar) = 115.1 K → 20 K subcooled);
+# p_sat(94.8 K) = 5.3 bar, so the liquid flashes before the 4 bar outlet.
+#   liquid = nitrogen metastable LIQUID (dominant)
+#   gas    = nitrogen metastable VAPOR  (ghost at the inlet, grows by flashing)
+#
+# Cold start + grid sequencing (N100 → N300 → N600, see the defaults file):
+#   python run_grid_sequence.py settings/settings_flashing_nitrogen_simoneau.yaml
+# Only what differs from defaults_flashing_cold_start.yaml is listed here; the run
+# log and the settings_*.yaml copy in the run folder show every value used.
+# ─────────────────────────────────────────────────────────────────────────────
+
+base: defaults_flashing_cold_start.yaml
+
+fluid:
+  name: nitrogen
+
+eos:
+  gas:                              # nitrogen metastable VAPOR (the ghost that grows)
+    fluid_name: nitrogen
+    backend: HEOS
+    h_min: 1000.0    # J/kg
+    h_max: 160000.0   # J/kg
+    p_min: 30000.0      # Pa
+    p_max: 2000000.0   # Pa
+    N_h: 90
+    N_p: 90
+    N_p_sat: 150
+    table_dir: fluid_tables
+    metastable_phase: vapor         # extends into subcooled (metastable) vapor
+    gradient_method: forward
+  liquid:                           # nitrogen metastable LIQUID (the dominant flashing phase)
+    fluid_name: nitrogen
+    backend: HEOS
+    h_min: -145000.0     # J/kg
+    h_max: -1000.0    # J/kg
+    p_min: 30000.0      # Pa
+    p_max: 2000000.0   # Pa
+    N_h: 90
+    N_p: 90
+    N_p_sat: 150
+    table_dir: fluid_tables
+    metastable_phase: liquid        # extends into superheated (metastable) liquid
+    gradient_method: forward
+
+grid:
+  Nx: 600                           # final grid (grid_sequence sets each level's Nx)
+  x1: 0.0
+  x2: 0.311        # m
+
+geometry:
+  function: get_nozzle_simoneau
+  roughness: 0.0
+
+sources:
+  bubble_number:  1.0e12          # physics (from the demo), not a tuning knob
+  droplet_number: 1.0e10
+
+numerics:
+  newton_iter: 8
+  eps_void: 0.15
+  eps_ghost: 0.15
+  # Thin inlet vapor (void_fraction 1e-7): solver clip floor well below it, plus
+  # the four thin-ghost switches (recipe found on the SMD water case).
+  alpha_eps:              1.0e-9
+  pin_ghost_momentum:     true
+  pin_mom_alpha:          1.0e-4
+  pin_mom_tau:            1.0e-6
+  eps_void_mass_acut:     1.0e-4
+  ghost_mass_upwind_acut: 1.0e-4
+
+bc:
+  p0:            1950000.0        # Pa — 19.5 bar
+  T_g0:          94.80            # K
+  T_l0:          94.80            # K
+  void_fraction: 1.0e-7           # inlet vapor fraction
+  p_out:         400000.0         # Pa — 4 bar
+
+time_control:
+  ser_beta:     1.0
+
+run:
+  cpu_affinity: "0-15"            # P-cores only on this laptop (null = no pinning)
+
+save_options:
+  repo_main: results_nitrogen
+  repo_run: case007

@@ -339,7 +339,7 @@ def get_nozzle_smd_divergent_smooth(
     return Geometry(A=area, dAdx=area_slope, D_h=radius*2, roughness=float(roughness))
 
 
-def get_nozzle_simoneau_bspline(
+def get_nozzle_simoneau(
     length,
     roughness=0.0,
     convergent_length=79.65e-3,
@@ -367,6 +367,8 @@ def get_nozzle_simoneau_bspline(
     Note: bspline_in_convergent_length must be large enough so that the first
     B-spline control point (P1) stays above radius_throat.  With the default
     geometry, values >= ~10 mm are safe; 30 mm gives a comfortable margin.
+
+    NB: This is the b-spline version of the Simoneau nozzle
     """
 
     x_blend_start = convergent_length - bspline_in_convergent_length
@@ -427,6 +429,65 @@ def get_nozzle_simoneau_bspline(
             length >= x_throat_exit,
         ]
         idx = jnp.sum(jnp.array(conds))   # 0 → convergent, 1 → bspline, 2 → divergent
+        area, area_slope, perimeter, radius = jax.lax.switch(idx, funcs, length)
+        return area, area_slope, radius
+
+    area, area_slope, radius = jax.vmap(_scalar)(jnp.asarray(length, dtype=jnp.float64))
+    return Geometry(A=area, dAdx=area_slope, D_h=radius*2, roughness=float(roughness))
+
+
+def get_nozzle_simoneau_sharp(
+    length,
+    roughness=0.0,
+    convergent_length=79.65e-3,
+    divergent_length=220e-3,
+    radius_in=11.26e-3,
+    radius_throat=1.78e-3,
+    radius_out=16.31e-3,
+    throat_length=11.35e-3,
+):
+    """
+    Simoneau nozzle with SHARP corners (the geometry of the nozzlex
+    space-marching solutions): linear convergent, constant-area throat, linear
+    divergent, with slope discontinuities at the throat entry and exit.
+
+    Sections:
+        0: Linear convergent,   x in [0, convergent_length]
+        1: Constant throat,     x in [convergent_length, convergent_length + throat_length]
+        2: Linear divergent,    x in [convergent_length + throat_length, total_length]
+    """
+
+    def region_convergent(length):
+        radius = radius_in + ((radius_throat - radius_in) / convergent_length) * length
+        area = jnp.pi * radius ** 2
+        perimeter = 2.0 * jnp.pi * radius
+        area_slope = perimeter * ((radius_throat - radius_in) / convergent_length)
+        return area, area_slope, perimeter, radius
+
+    def region_throat(length):
+        radius = radius_throat + 0.0 * length
+        area = jnp.pi * radius ** 2
+        perimeter = 2.0 * jnp.pi * radius
+        area_slope = 0.0 * length
+        return area, area_slope, perimeter, radius
+
+    def region_divergent(length):
+        l = length - convergent_length - throat_length
+        radius = radius_throat + ((radius_out - radius_throat) / divergent_length) * l
+        area = jnp.pi * radius ** 2
+        perimeter = 2.0 * jnp.pi * radius
+        area_slope = perimeter * ((radius_out - radius_throat) / divergent_length)
+        return area, area_slope, perimeter, radius
+
+    funcs = [region_convergent, region_throat, region_divergent]
+
+    # lax.switch needs a scalar index → build the scalar core and vmap it over the array.
+    def _scalar(length):
+        conds = [
+            length >= convergent_length,
+            length >= convergent_length + throat_length,
+        ]
+        idx = jnp.sum(jnp.array(conds))   # 0 → convergent, 1 → throat, 2 → divergent
         area, area_slope, perimeter, radius = jax.lax.switch(idx, funcs, length)
         return area, area_slope, radius
 
