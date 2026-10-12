@@ -26,6 +26,7 @@ import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from source_two_fluid import (
     calculate_drag_force_one_component,
+    calculate_heat_transfer_one_component,
     calculate_mass_transfer_lv,
     interfacial_area,
     ranz_marshall_htc_two_fluid,
@@ -130,7 +131,9 @@ def two_fluid_closure(
     alpha_b=0.3,           # TA-BD transition void fractions
     alpha_d=0.7,
     mass_transfer=True,
-    gate_dT= 1e-3, # 0.5,           # smooth-gate temperature width [K].  NOTE 2026-07-21:
+    regime_htc=False,      # True → regime-dependent HTC (bubbly/transition/droplet);
+                           # False → NICFD closure (bubbly-regime HTC at every α)
+    gate_dT= 1e-3, # 0.5,          # smooth-gate temperature width [K].  NOTE 2026-07-21:
                            # widening to 2.0 K (onset spread ~4-8 cells) was
                            # PROBED and is NEGATIVE — died EARLIER (step 292 vs
                            # 386, dt collapse at t=5.9e-4 vs 1.55e-3 s).  The
@@ -142,7 +145,8 @@ def two_fluid_closure(
 
     Uses:
       - interfacial_area    → dispersed-structure diameter d and area ai
-      - ranz_marshall_htc_two_fluid  → HTC for each phase
+      - ranz_marshall_htc_two_fluid  → HTC for each phase (NICFD, regime_htc=False)
+      - calculate_heat_transfer_one_component  → HTC for each phase (regime_htc=True)
       - calculate_drag_force_one_component  → Fv_g
       - calculate_mass_transfer_lv  → sigma_Mg
 
@@ -161,6 +165,9 @@ def two_fluid_closure(
     Q_g, Q_l : wall heat sources [W/m^3]
     Nb, Nd   : number densities for TA-BD interfacial area model
     alpha_b, alpha_d : TA-BD transition void fractions
+    regime_htc : False → NICFD HTC (internal Nu on the vapor side + Ranz-Marshall
+                 with liquid continuous, at every α); True → same for α ≤ alpha_b,
+                 mirrored droplet closure for α ≥ alpha_d, linear blend in between
     """
     p, u_g, u_l, ag, h_g, h_l = U_h
     al = 1.0 - ag
@@ -249,26 +256,42 @@ def two_fluid_closure(
 
         # ── Heat transfer coefficients (Ranz-Marshall, continuous phase) ─────────
         du_abs = jnp.abs(u_g - u_l)
-        # Gas-phase HTC: continuous phase depends on flow regime (use liquid as
-        # continuous in bubbly, gas in droplet; transition blended).
-        # For simplicity use liquid-continuous HTC for gas bubbles.
-        # htc_g = ranz_marshall_htc_two_fluid(
-        #     {k: v[0] for k, v in stl_ex.items()},   # liquid as continuous
-        #     du_abs, d,
-        # )
+        Nu_g, Nu_l = 120.0, 12.0
 
-        Nu_g = 120
-        htc_g = (k_g * Nu_g) / d
+        if regime_htc:
+            # Regime-dependent HTC: bubbly (α ≤ alpha_b) identical to the NICFD
+            # closure below, droplet (α ≥ alpha_d) mirrored with vapor continuous,
+            # linear blend in between (as done for the drag).
+            htc_g, htc_l = calculate_heat_transfer_one_component(
+                ag,
+                {"rho": stg_ex["rho"][0], "mu": stg_ex["mu"][0],
+                 "k": stg_ex["k"][0], "cp": stg_ex["cp"][0]},
+                {"rho": stl_ex["rho"][0], "mu": stl_ex["mu"][0],
+                 "k": stl_ex["k"][0], "cp": stl_ex["cp"][0]},
+                u_g, u_l, d, Nu1_int=Nu_g, Nu2_int=Nu_l,
+                alpha_b=alpha_b, alpha_d=alpha_d,
+            )
+        else:
+            # NICFD closure: bubbly-regime HTC at every α.
+            # Gas-phase HTC: continuous phase depends on flow regime (use liquid as
+            # continuous in bubbly, gas in droplet; transition blended).
+            # For simplicity use liquid-continuous HTC for gas bubbles.
+            # htc_g = ranz_marshall_htc_two_fluid(
+            #     {k: v[0] for k, v in stl_ex.items()},   # liquid as continuous
+            #     du_abs, d,
+            # )
 
-        htc_l = ranz_marshall_htc_two_fluid(
-            {                                         # liquid as continuous (bubbly regime)
-                "rho": stl_ex["rho"][0],             # FluidState alias → density
-                "mu":  stl_ex["mu"][0],              # FluidState alias → viscosity
-                "k":   stl_ex["k"][0],               # FluidState alias → conductivity
-                "cp":  stl_ex["cp"][0],              # FluidState alias → isobaric_heat_capacity
-            },
-            du_abs, d,
-        )
+            htc_g = (k_g * Nu_g) / d
+
+            htc_l = ranz_marshall_htc_two_fluid(
+                {                                         # liquid as continuous (bubbly regime)
+                    "rho": stl_ex["rho"][0],             # FluidState alias → density
+                    "mu":  stl_ex["mu"][0],              # FluidState alias → viscosity
+                    "k":   stl_ex["k"][0],               # FluidState alias → conductivity
+                    "cp":  stl_ex["cp"][0],              # FluidState alias → isobaric_heat_capacity
+                },
+                du_abs, d,
+            )
 
         # # ── Interfacial heat transfer rates ──────────────────────────────────────
         # Qvi = htc_g * ai * (T_sat - T_g)    # heat from interface to gas [W/m^3]
@@ -306,6 +329,7 @@ def two_fluid_closure(
         # (scaling σ alone would create/destroy interfacial energy).
         _Qvi = htc_g * ai * (T_sat - T_g)
         _Qli = htc_l * ai * (T_sat - T_l)
+
         _sMg = calculate_mass_transfer_lv(
             T_l, T_g, T_sat, htc_l, htc_g, ai, h_sat_l, h_sat_g, h_l, h_g, _Qvi, _Qli,
         )
@@ -345,26 +369,42 @@ def two_fluid_closure(
 
         # ── Heat transfer coefficients (Ranz-Marshall, continuous phase) ─────────
         du_abs = jnp.abs(u_g - u_l)
-        # Gas-phase HTC: continuous phase depends on flow regime (use liquid as
-        # continuous in bubbly, gas in droplet; transition blended).
-        # For simplicity use liquid-continuous HTC for gas bubbles.
-        # htc_g = ranz_marshall_htc_two_fluid(
-        #     {k: v[0] for k, v in stl_ex.items()},   # liquid as continuous
-        #     du_abs, d,
-        # )
-
         Nu_g = 12
-        htc_g = (k_g * Nu_g) / d
 
-        htc_l = ranz_marshall_htc_two_fluid(
-            {                                         # liquid as continuous (bubbly regime)
-                "rho": stl_ex["rho"][0],             # FluidState alias → density
-                "mu":  stl_ex["mu"][0],              # FluidState alias → viscosity
-                "k":   stl_ex["k"][0],               # FluidState alias → conductivity
-                "cp":  stl_ex["cp"][0],              # FluidState alias → isobaric_heat_capacity
-            },
-            du_abs, d,
-        )
+        if regime_htc:
+            # Regime-dependent HTC: bubbly (α ≤ alpha_b) identical to the NICFD
+            # closure below, droplet (α ≥ alpha_d) mirrored with vapor continuous,
+            # linear blend in between (as done for the drag).
+            htc_g, htc_l = calculate_heat_transfer_one_component(
+                ag,
+                {"rho": stg_ex["rho"][0], "mu": stg_ex["mu"][0],
+                 "k": stg_ex["k"][0], "cp": stg_ex["cp"][0]},
+                {"rho": stl_ex["rho"][0], "mu": stl_ex["mu"][0],
+                 "k": stl_ex["k"][0], "cp": stl_ex["cp"][0]},
+                u_g, u_l, d,
+                Nu1_int=Nu_g, alpha_b=alpha_b, alpha_d=alpha_d,
+            )
+        else:
+            # NICFD closure: bubbly-regime HTC at every α.
+            # Gas-phase HTC: continuous phase depends on flow regime (use liquid as
+            # continuous in bubbly, gas in droplet; transition blended).
+            # For simplicity use liquid-continuous HTC for gas bubbles.
+            # htc_g = ranz_marshall_htc_two_fluid(
+            #     {k: v[0] for k, v in stl_ex.items()},   # liquid as continuous
+            #     du_abs, d,
+            # )
+
+            htc_g = (k_g * Nu_g) / d
+
+            htc_l = ranz_marshall_htc_two_fluid(
+                {                                         # liquid as continuous (bubbly regime)
+                    "rho": stl_ex["rho"][0],             # FluidState alias → density
+                    "mu":  stl_ex["mu"][0],              # FluidState alias → viscosity
+                    "k":   stl_ex["k"][0],               # FluidState alias → conductivity
+                    "cp":  stl_ex["cp"][0],              # FluidState alias → isobaric_heat_capacity
+                },
+                du_abs, d,
+            )
 
         htc = 1 / (1/htc_g + 1/htc_l)
 

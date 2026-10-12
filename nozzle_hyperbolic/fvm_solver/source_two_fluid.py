@@ -80,6 +80,72 @@ def calculate_drag_force_one_component(
     )
 
 
+def calculate_heat_transfer_one_component(
+    alpha1, state1, state2, u1, u2, d,
+    Nu1_int=120.0, Nu2_int=2.0 * jnp.pi**2 / 3.0,
+    alpha_b=0.3, alpha_d=0.7,
+):
+    """
+    Regime-dependent interfacial heat transfer coefficients for the
+    one-component case, blended across the transition as in
+    calculate_drag_force_one_component.
+
+    Convention: phase 1 = vapor (gas), phase 2 = liquid.
+    On each side of the interface:
+      - continuous phase: Ranz-Marshall, Nu = 2 + 0.6 Re^1/2 Pr^1/3
+        (continuous-phase properties, actual slip |u1 - u2|)
+      - dispersed phase:  constant internal Nusselt, htc = k * Nu_int / d
+
+      bubbly  (alpha1 <= alpha_b): vapor dispersed in liquid
+          htc1 = k1 * Nu1_int / d,              htc2 = RM(liquid continuous)
+      droplet (alpha1 >= alpha_d): liquid dispersed in vapor
+          htc1 = RM(vapor continuous),          htc2 = k2 * Nu2_int / d
+      transition: linear blend in alpha1 of the two regimes, both evaluated
+          at the current d and slip (continuous at alpha_b and alpha_d).
+
+    Parameters
+    ----------
+    alpha1         : vapor volume fraction
+    state1, state2 : dicts with "rho", "mu", "k", "cp" of vapor / liquid
+                     (same format as ranz_marshall_htc_two_fluid)
+    u1, u2         : velocities (vapor, liquid)
+    d              : characteristic diameter of dispersed structures
+    Nu1_int        : Nusselt number inside a bubble (vapor side, bubbly regime)
+    Nu2_int        : Nusselt number inside a droplet (liquid side, droplet regime);
+                     default 2*pi^2/3 ≈ 6.58 is the conduction-limited sphere value
+    alpha_b        : upper bound of bubbly regime (vapor fraction)
+    alpha_d        : lower bound of droplet regime (vapor fraction)
+
+    Returns
+    -------
+    htc1, htc2 : interfacial HTCs of vapor and liquid [W/(m^2 K)]
+    """
+    u_rel_abs = jnp.abs(u1 - u2)
+
+    def bubbly(_):
+        # Vapor dispersed in liquid: internal Nu on the vapor side, liquid continuous
+        htc1 = state1["k"] * Nu1_int / d
+        htc2 = ranz_marshall_htc_two_fluid(state2, u_rel_abs, d)
+        return htc1, htc2
+
+    def droplet(_):
+        # Liquid dispersed in vapor: vapor continuous, internal Nu on the liquid side
+        htc1 = ranz_marshall_htc_two_fluid(state1, u_rel_abs, d)
+        htc2 = state2["k"] * Nu2_int / d
+        return htc1, htc2
+
+    def transition(_):
+        htc1_b, htc2_b = bubbly(None)
+        htc1_d, htc2_d = droplet(None)
+        w = (alpha1 - alpha_b) / (alpha_d - alpha_b)
+        return htc1_b + (htc1_d - htc1_b) * w, htc2_b + (htc2_d - htc2_b) * w
+
+    return jax.lax.cond(
+        alpha1 <= alpha_b,
+        bubbly,
+        lambda _: jax.lax.cond(alpha1 >= alpha_d, droplet, transition, None),
+        None,
+    )
 
 def interfacial_area(
     alpha,
