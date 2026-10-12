@@ -445,17 +445,43 @@ def get_nozzle_simoneau_sharp(
     radius_throat=1.78e-3,
     radius_out=16.31e-3,
     throat_length=11.35e-3,
+    entry_blend_length=0.0,
+    exit_blend_length=0.0,
 ):
     """
     Simoneau nozzle with SHARP corners (the geometry of the nozzlex
     space-marching solutions): linear convergent, constant-area throat, linear
     divergent, with slope discontinuities at the throat entry and exit.
 
-    Sections:
-        0: Linear convergent,   x in [0, convergent_length]
-        1: Constant throat,     x in [convergent_length, convergent_length + throat_length]
-        2: Linear divergent,    x in [convergent_length + throat_length, total_length]
+    Optional ROUNDED corners: entry_blend_length / exit_blend_length [m] replace
+    the corner at the throat entry / exit by a parabolic blend of that length,
+    centred on the corner and tangent to both straight walls (C¹ radius, constant
+    curvature ≈ a circular fillet of radius ≈ blend_length / Δslope, with
+    Δslope = 0.119 at the entry and 0.066 at the exit).  0.0 (default) → the
+    sharp corner, bit-for-bit.  The blend never goes below radius_throat.
+
+    Sections (blend sections have zero length when the blend length is 0):
+        0: Linear convergent,   x < x_entry - L_entry/2
+        1: Entry blend,         x in [x_entry - L_entry/2, x_entry + L_entry/2]
+        2: Constant throat,     x in [x_entry + L_entry/2, x_exit - L_exit/2]
+        3: Exit blend,          x in [x_exit - L_exit/2, x_exit + L_exit/2]
+        4: Linear divergent,    x > x_exit + L_exit/2
+    with x_entry = convergent_length, x_exit = convergent_length + throat_length.
     """
+    x_entry = convergent_length
+    x_exit = convergent_length + throat_length
+    s_conv = (radius_throat - radius_in) / convergent_length      # wall slope dr/dx
+    s_div = (radius_out - radius_throat) / divergent_length
+
+    def _blend(length, x_c, s1, s2, L):
+        # r = r_t + s1 (x - x_c) + (s2 - s1)(x - x_c + L/2)^2 / (2 L)
+        L = jnp.maximum(L, 1e-30)                    # branch unused when L = 0
+        xi = length - x_c
+        radius = radius_throat + s1 * xi + (s2 - s1) * (xi + 0.5 * L) ** 2 / (2.0 * L)
+        dr_dx = s1 + (s2 - s1) * (xi + 0.5 * L) / L
+        area = jnp.pi * radius ** 2
+        perimeter = 2.0 * jnp.pi * radius
+        return area, perimeter * dr_dx, perimeter, radius
 
     def region_convergent(length):
         radius = radius_in + ((radius_throat - radius_in) / convergent_length) * length
@@ -464,12 +490,18 @@ def get_nozzle_simoneau_sharp(
         area_slope = perimeter * ((radius_throat - radius_in) / convergent_length)
         return area, area_slope, perimeter, radius
 
+    def region_entry_blend(length):
+        return _blend(length, x_entry, s_conv, 0.0, entry_blend_length)
+
     def region_throat(length):
         radius = radius_throat + 0.0 * length
         area = jnp.pi * radius ** 2
         perimeter = 2.0 * jnp.pi * radius
         area_slope = 0.0 * length
         return area, area_slope, perimeter, radius
+
+    def region_exit_blend(length):
+        return _blend(length, x_exit, 0.0, s_div, exit_blend_length)
 
     def region_divergent(length):
         l = length - convergent_length - throat_length
@@ -479,15 +511,18 @@ def get_nozzle_simoneau_sharp(
         area_slope = perimeter * ((radius_out - radius_throat) / divergent_length)
         return area, area_slope, perimeter, radius
 
-    funcs = [region_convergent, region_throat, region_divergent]
+    funcs = [region_convergent, region_entry_blend, region_throat,
+             region_exit_blend, region_divergent]
 
     # lax.switch needs a scalar index → build the scalar core and vmap it over the array.
     def _scalar(length):
         conds = [
-            length >= convergent_length,
-            length >= convergent_length + throat_length,
+            length >= x_entry - 0.5 * entry_blend_length,
+            length >= x_entry + 0.5 * entry_blend_length,
+            length >= x_exit - 0.5 * exit_blend_length,
+            length >= x_exit + 0.5 * exit_blend_length,
         ]
-        idx = jnp.sum(jnp.array(conds))   # 0 → convergent, 1 → throat, 2 → divergent
+        idx = jnp.sum(jnp.array(conds))   # 0 conv, 1 entry blend, 2 throat, 3 exit blend, 4 div
         area, area_slope, perimeter, radius = jax.lax.switch(idx, funcs, length)
         return area, area_slope, radius
 
