@@ -331,3 +331,51 @@ triplets agreeing, phi_ext consistent to 0.02%) and smd 15 bar in the interior
 `magnitude` but go oscillatory under `smoothness` (same eps21-collapse cause), so
 the study's choice of `magnitude` is the configuration in which they are
 measurable.
+
+## 11. Smooth regime blending in drag and heat transfer (smoothstep option) — TODO
+
+**Claim.** The interphase closures switch regime with kinks at `alpha_b = 0.3`
+and `alpha_d = 0.7`. `calculate_drag_force_one_component`
+(`source_two_fluid.py`) is a nested `jax.lax.cond`: bubbly for alpha <= alpha_b,
+droplet for alpha >= alpha_d, LINEAR blend in between. The force is continuous
+there but its slope in alpha jumps. The regime-dependent HTC (`regime_htc=True`)
+uses the same linear blend. A kink at a point inside the domain can keep Newton
+from converging.
+
+**Evidence (2026-10-14, CO2 design case 4, new polynomial interfacial area,
+thick ghost alpha_eps 1e-3, N=400).** The stage stops on an SSR plateau
+(5.1e-6). Restarting from it for 60 steps, the state drifts at constant rate;
+the drifting band sits at alpha = 0.67-0.70 (x = 0.71-0.73 m), just below
+alpha_d. Not proven to be the kink -- see also section 12 for the other part
+of the plateau.
+
+**Action.** Add a `blend` option (`linear` = current | `smoothstep`) to the drag
+and to the regime HTC: weight w = smoothstep((alpha - alpha_b)/(alpha_d - alpha_b))
+(C1, zero slope at both ends) instead of the linear w, and the bubbly/droplet
+branches blended through it rather than switched by `lax.cond`. Expose it in
+the settings (`sources.blend`). Default `linear` until A/B'd.
+
+**Probe.** Restart the N400 thick-ghost case-4 solution
+(`case_study/data_assimilation/results/thick_N400_thick_N400_muscl_van_albada_20261014_172944`)
+with each option and compare the plateau SSR and where the remaining drift sits.
+
+## 12. Thick-ghost stages plateau at SSR ~1e-5: the algebraic momentum pin — TODO
+
+**Claim.** With `pin_ghost_momentum: true` and `pin_mom_tau: null` (the
+algebraic blend), the solver's own comment says the steady residual cannot
+reach zero where the pin weight is between 0 and 1. With alpha_eps = 1e-3 the
+pin releases around pin_mom_alpha = 10*alpha_eps = 1e-2, i.e. right in the
+flashing-onset range, so a wide band of cells is partially pinned.
+
+**Evidence (2026-10-14, case 4).** Plateaus scale with the ghost: thick ghost
+(alpha_eps 1e-3, void 3e-3) 1.4e-5 / 8.5e-6 / 6.4e-6 / 5.1e-6 at N = 100 /
+200 / 300 / 400; thinner ghost (alpha_eps 1e-6, void 1e-4) 3.9e-8 at N = 200.
+At N=100 the plateau is an EXACT fixed point: 60 steps from it change the state
+by ~1e-10 (round-off) while the SSR stays at 1.419e-5.
+
+**Action.** Rerun a thick-ghost stage with `pin_mom_tau` set (defaults.yaml
+suggests 1e-6) and check whether the plateau disappears.
+
+**Probe.** Restart from
+`case_study/data_assimilation/results/verify_S1_N100_muscl_van_albada_20261014_164504`
+(cheap, N=100) with `numerics.pin_mom_tau: 1.0e-6`.

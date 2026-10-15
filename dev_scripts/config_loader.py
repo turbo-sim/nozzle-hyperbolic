@@ -46,7 +46,8 @@ LEGACY_DEFAULTS = SETTINGS_DIR / "defaults_legacy.yaml"
 # chain (KeyError otherwise); keys not listed are rejected in new-style files.
 SCHEMA = {
     "sources": ["bubble_number", "droplet_number", "mass_transfer", "scale",
-                "area_source"],
+                "area_source", "p_phase_change_max", "regime_htc",
+                "interfacial_area", "interfacial_area_params"],
     "grid": ["Nx", "x1", "x2", "radius"],
     "numerics": [
         "CFL", "newton_iter", "delta_factor", "recon", "k_vm",
@@ -358,6 +359,22 @@ def load_config(yaml_path, overrides=None, override_label="override") -> types.S
     cfg.SRC_SCALE      = float(src["scale"])
     # Area (quasi-1D wall-pressure) source term on/off (diagnostic).
     cfg.AREA_SRC       = bool(src["area_source"])
+    # No phase change above this pressure, as a FRACTION of the critical pressure
+    # (null = no cut-off).  For supercritical inlets: the saturation table ends at
+    # 0.98 p_crit and is clamped above.  Converted to Pa in main_two_fluid.py.
+    # .get: resolved settings saved by runs before this key existed (base: none,
+    # no defaults to fall back on) still load, with the cut-off off.
+    cfg.P_PHASE_CHANGE_MAX = _none_or(src.get("p_phase_change_max"), float)
+    # Interphase heat transfer: false = NICFD closure (bubbly-regime HTC at every
+    # alpha); true = regime-dependent (bubbly / linear blend / droplet).  .get:
+    # resolved settings of runs older than this key load with the NICFD closure.
+    cfg.REGIME_HTC = bool(src.get("regime_htc", False))
+    # Interfacial area law by name (source_two_fluid.INTERFACIAL_AREA_LAWS:
+    # original | polynomial | parabola) and an optional dict of keyword overrides
+    # for it (e.g. {d_min: 6.5e-5}).  .get: older resolved settings load with the
+    # law the code used before this key existed (polynomial, its own defaults).
+    cfg.INTERFACIAL_AREA = str(src.get("interfacial_area", "polynomial"))
+    cfg.INTERFACIAL_AREA_PARAMS = dict(src.get("interfacial_area_params") or {})
 
     # ── Grid ─────────────────────────────────────────────────────────────────
     g = sec("grid")

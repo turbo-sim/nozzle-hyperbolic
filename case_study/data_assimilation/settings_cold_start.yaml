@@ -1,0 +1,106 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# CO2 expansion through the inverse-designed nozzle, design CASE 4 - cold start
+# from the HEM design, six-equation two-fluid model.
+#
+# Case file of main_cold_start.py: it holds the CASE (fluid, tables, geometry,
+# reservoir, closure).  The per-stage grid / numerics / IC are set by the STAGES
+# table in main_cold_start.py on top of this file.
+#
+#   design     nozzlex inverse design (HEM, frictionless), case 4:
+#              120 bar / 295 K -> 20 bar, exported as a circular nozzle,
+#              L = 1 m, throat r = 10 mm at x = 0.545 m
+#   start      HEM design profile (make_hem_seed.py --design design_case4
+#              --T0 295.0 --smooth 10 --alpha 3e-3) -> design_case4/hem_seed_s10_a3e-3.csv
+#
+#     python main_cold_start.py            (from this folder, poetry venv)
+# ─────────────────────────────────────────────────────────────────────────────
+base: defaults_flashing_cold_start.yaml   # -> defaults_flashing -> defaults
+
+fluid:
+  name: CO2
+
+# ── EOS tables (built into ./fluid_tables on the first run) ──────────────────
+eos:
+  gas:                              # CO2 metastable VAPOUR (the ghost that grows)
+    fluid_name: CO2
+    backend: HEOS
+    h_min: 250000.0     # J/kg
+    h_max: 480000.0     # J/kg
+    p_min: 1000000.0    # Pa  (10 bar)
+    p_max: 13000000.0   # Pa  (130 bar)
+    N_h: 90
+    N_p: 90
+    N_p_sat: 150
+    table_dir: fluid_tables
+    metastable_phase: vapor
+    gradient_method: forward
+  liquid:                           # CO2 metastable LIQUID (the dominant flashing phase)
+    fluid_name: CO2
+    backend: HEOS
+    h_min: 100000.0     # J/kg
+    h_max: 320000.0     # J/kg
+    p_min: 1000000.0    # Pa  (10 bar)
+    p_max: 13000000.0   # Pa  (130 bar)
+    N_h: 90
+    N_p: 90
+    N_p_sat: 150
+    table_dir: fluid_tables
+    metastable_phase: liquid
+    gradient_method: forward
+
+# ── Grid (Nx is set per stage) ────────────────────────────────────────────────
+grid:
+  Nx: 100
+  x1: 0.0
+  x2: 1.0                           # m - the exported geometry spans [0, 1] m
+
+# ── Geometry ──────────────────────────────────────────────────────────────────
+geometry:
+  function: get_nozzle_from_csv
+  file_path: design_case4/nozzle_geometry_case_4.csv   # relative to this folder
+  roughness: 0.0                    # smooth wall, as in the frictionless design
+
+# ── Interphase closure ────────────────────────────────────────────────────────
+# interfacial_area: original | polynomial | parabola (source_two_fluid.py).
+# bubble_number / droplet_number are used only by 'original'; the polynomial
+# law sets its own number density through d_ctrl / d_min.  d_min 65 um is the
+# floor that converges case 4 (10 um blows up at the flashing front, 33 um in
+# the cold start) - see main_cold_start.py.
+sources:
+  bubble_number:  1.0e13
+  droplet_number: 1.0e10
+  p_phase_change_max: 0.95          # x p_crit = 70.1 bar: no phase change above
+  interfacial_area: polynomial
+  interfacial_area_params:
+    d_min: 6.5e-5                   # m, nucleation floor
+
+numerics:
+  pin_ghost_momentum: true
+  eps_void: 0.2
+
+# ── Stage-1 initial condition: the HEM design (stages 2+ restart) ─────────────
+ic:
+  type: nozzlex_csv
+  run: design_case4/hem_seed_s10_a3e-3.csv    # relative to this folder
+  alpha_floor: 3.0e-3
+
+# ── Boundary conditions ───────────────────────────────────────────────────────
+bc:
+  p0:            12000000.0
+  T_g0:          295.0
+  T_l0:          295.0
+  void_fraction: 3.0e-3             # set per stage
+  p_out:         2000000.0
+  p_out_ramp_steps: 0               # the HEM seed already sits at p_out: no ramp
+  p_out_relax: 1.0
+
+run:
+  n_steps: 40000
+  cpu_affinity: "0-15"
+  plateau_window: 2000              # stop once SSR stays within 1% for 2000 steps
+                                    # (default 4000; true plateaus here are flat to
+                                    # <1%, transient stalls wander by ~10%)
+
+save_options:
+  repo_main: ../case_study/data_assimilation/results
+  repo_run: c4_cold
