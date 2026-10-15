@@ -182,6 +182,7 @@ def make_two_fluid_step(
     return_debug=False,
     alpha_eps=_ALPHA_EPS,
     pin_ghost=False,
+    p_mt_max=None,
     pin_ghost_momentum=False,
     pin_mom_alpha=None,
     pin_mom_tau=None,
@@ -348,6 +349,11 @@ def make_two_fluid_step(
                  not break" contract at their implementation site (the pin may
                  only ever WIDEN toward 1, never narrow) that any future edit
                  must preserve.
+    p_mt_max   : float [Pa] or None. No phase change at p >= p_mt_max: the
+                 evaporation weight is 0 there, so the ghost pin stays on.  Pass
+                 the SAME value to two_fluid_closure in sources_fn.  For a
+                 supercritical inlet (saturation table ends at 0.98 p_crit).
+                 None (default) → no cut-off.
 
     THIN-GHOST SWITCHES (2026-10-08).  All default to None = the previous code
     path.  Together they let a flashing inlet ghost sit at alpha ~1e-7 (tested:
@@ -1523,7 +1529,12 @@ def make_two_fluid_step(
         # α, and the pin releases.  Nothing in the α-growth chain is gated.
         #
         # Limitation: needs p < p_crit (saturation curve exists) — tables end
-        # at 130 bar << 220.6 bar for water, fine for this tier.
+        # at 130 bar << 220.6 bar for water, fine for this tier.  Above the
+        # saturation table (0.98 p_crit) the lookup is clamped, and p_mt_max
+        # forces w = 0 there.  That narrows w, but only on p, which the pin
+        # does not control, so it cannot deadlock: below p_mt_max the chain
+        # above is unchanged.  p_mt_max must sit above the pressure where
+        # flashing can physically start (h_sat_l(p) = reservoir h_l).
         #
         # α-availability gate (shock-wave cases, see TODO_two_phase.md): pure
         # superheat gating re-pins REAL vapor after a recompression shock (liquid
@@ -1540,7 +1551,8 @@ def make_two_fluid_step(
                 sat_l_c = fluid_l.get_state_saturation(u_h[0])
                 w_ev = evaporation_weight(u_h[5], eos_l_c.T,
                                           sat_l_c["enthalpy"],
-                                          sat_l_c["temperature"], u_h[3])
+                                          sat_l_c["temperature"], u_h[3],
+                                          p=u_h[0], p_max=p_mt_max)
                 pin  = m_g_c * (u_h[4] - sat_g_c["enthalpy"])
                 return w_ev, pin
             if cell_local_jac:
