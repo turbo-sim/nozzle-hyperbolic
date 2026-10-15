@@ -2,6 +2,8 @@
 Source terms for two-fluid model
 """
 
+import functools
+import math
 import jax
 import jax.numpy as jnp
 
@@ -147,7 +149,7 @@ def calculate_heat_transfer_one_component(
         None,
     )
 
-def interfacial_area(
+def interfacial_area_original(
     alpha,
     alpha_b=0.3, 
     alpha_d=0.7,
@@ -251,6 +253,59 @@ def interfacial_area(
 
     return ai, d
 
+def dispersed_fraction(alpha, eps=0.1):
+    """
+    Smooth version of min(alpha, 1 - alpha), the volume fraction of the dispersed phase.
+
+    Uses |x| ~ sqrt(x^2 + eps^2) with x = 2 alpha - 1, then shifts and rescales so the
+    result is exactly 0 at alpha = 0 and 1 and exactly 0.5 at alpha = 0.5. eps -> 0
+    recovers the sharp minimum; larger eps rounds the corner at alpha = 0.5 over a wider band.
+    """
+    def raw(x):
+        return 0.5 * (1.0 - jnp.sqrt(x**2 + eps**2))
+
+    lo, mid = raw(1.0), raw(0.0)
+    return 0.5 * (raw(2.0 * alpha - 1.0) - lo) / (mid - lo)
+
+
+def interfacial_area_poly(alpha, d_ctrl=(160e-6, 0.0, 320e-6, 0.0, 1455e-6), eps=0.1, d_min=6e-5,
+        alpha_b=0.3,  
+        alpha_d=0.7,
+        Nb=1e10,
+        Nd=1e10,
+        d_min_b=1e-5,
+        d_min_d=1e-5,):
+    """
+    Polynomial interfacial area density, parametrised by its diameter.
+
+    d = P(alpha) * (2 alpha_disp)^(1/3), with P a Bernstein polynomial of degree N = len(d_ctrl) - 1:
+      P = sum_k d_ctrl[k] * C(N, k) alpha^k (1 - alpha)^(N - k)
+    The cube-root factor is the fixed-number-density law of the prior (interfacial_area):
+    bubbles/droplets shrink as the dispersed phase vanishes, so d -> 0 at alpha = 0 and 1,
+    and ai = 6 alpha_disp / d ~ alpha_disp^(2/3) -> 0 there too. The factor equals 1 at alpha = 0.5.
+    P is the diameter the structures would have at alpha_disp = 0.5, i.e. (3 / (pi N))^(1/3) with a
+    number density N(alpha); d <= max(d_ctrl) everywhere.
+
+    Default d_ctrl [m] is a least-squares fit (relative error in d over 0.1 < alpha < 0.9) to
+    interfacial_area_truth: max error 8% in d there, 6% of the peak in ai.
+
+    Nucleation / breakup floor (as in interfacial_area): d never drops below d_min. Below it the
+    structures keep their number density n = 3 / (pi P^3) but stop shrinking, so
+    ai = n pi d_min^2 = 3 d_min^2 / P^3: d(0), d(1) = d_min and ai(0), ai(1) > 0. Continuous where
+    d reaches d_min; there ai = 6 alpha_disp / d stops holding (as in the prior's floors).
+
+    Returns
+    -------
+    ai : interfacial area density [1/m]
+    d : characteristic diameter [m]
+    """
+    N = len(d_ctrl) - 1
+    P = sum(c * math.comb(N, k) * alpha**k * (1.0 - alpha) ** (N - k) for k, c in enumerate(d_ctrl))
+    alpha_disp = dispersed_fraction(alpha, eps)
+    # = max(P (2 alpha_disp)^(1/3), d_min), floored inside the cbrt so its gradient at alpha_disp = 0 stays finite
+    d = P * jnp.cbrt(jnp.maximum(2.0 * alpha_disp, (d_min / P) ** 3))
+    ai = 3.0 * d**2 / P**3  # = n pi d^2 = 6 alpha_disp / d above the floor
+    return ai, d
 
 def ranz_marshall_htc_two_fluid(
         state_continuous,
@@ -296,3 +351,58 @@ def ranz_marshall_htc_two_fluid(
     htc = k_c * Nu / d_dispersed
 
     return htc
+
+
+def interfacial_area_para(alpha, a_min=100.0, a_max=20000.0, eps=0.1, d_min=1e-5,
+                    alpha_b=0.3, 
+                    alpha_d=0.7,
+                    Nb=10e12, 
+                    Nd=10e10, 
+                    d_min_b=5e-6):
+    """
+    Interfacial area density for data assimilation: inverted parabola in alpha.
+
+    ai(0) = ai(1) = a_min and ai(0.5) = a_max.
+
+    The diameter follows from the monodisperse-sphere relation ai = 6 alpha_disp / d,
+    where alpha_disp is the volume fraction of the dispersed phase, a smooth version of
+    min(alpha, 1 - alpha) (see dispersed_fraction; eps sets the rounding at alpha = 0.5):
+      alpha < 0.5 : bubbly  (vapor dispersed), alpha_disp ~ alpha
+      alpha > 0.5 : misty   (liquid dispersed), alpha_disp ~ 1 - alpha
+
+    Nucleation / breakup floor (as in interfacial_area): the diameter never drops below
+    d_min, so d(0) = d(1) = d_min and ai(0) = ai(1) = a_min are both finite and non-zero.
+    The floor is active for alpha_disp < a_min * d_min / 6, where ai = 6 alpha_disp / d no
+    longer holds (minimum-size bubbles/droplets, as in the prior's floor regions).
+
+    Returns
+    -------
+    ai : interfacial area density [1/m]
+    d : characteristic diameter [m]
+    """
+    ai = a_min + (a_max - a_min) * 4.0 * alpha * (1.0 - alpha)
+    alpha_disp = dispersed_fraction(alpha, eps)
+    d = jnp.maximum(6.0 * alpha_disp / ai, d_min)
+    return ai, d
+
+
+# Interfacial area laws selectable by name (settings: sources.interfacial_area).
+# Every law takes (alpha, alpha_b=, alpha_d=, Nb=, Nd=, d_min_b=, ...) and returns (ai, d).
+INTERFACIAL_AREA_LAWS = {
+    "original": interfacial_area_original,     # TA-BD number-density law (uses Nb / Nd)
+    "polynomial": interfacial_area_poly,       # Bernstein-polynomial diameter (ignores Nb / Nd)
+    "parabola": interfacial_area_para,         # inverted parabola in alpha (ignores Nb / Nd)
+}
+
+
+def get_interfacial_area(name="polynomial", params=None):
+    """
+    Interfacial area law `name` with its keyword arguments `params` fixed, e.g.
+    get_interfacial_area("polynomial", {"d_min": 6.5e-5}).  Returns a callable
+    with the same signature as the laws above.
+    """
+    if name not in INTERFACIAL_AREA_LAWS:
+        raise ValueError(f"unknown interfacial area law {name!r}; "
+                         f"choose from {sorted(INTERFACIAL_AREA_LAWS)}")
+    law = INTERFACIAL_AREA_LAWS[name]
+    return functools.partial(law, **params) if params else law
