@@ -66,7 +66,7 @@ class TwoFluidClosure(NamedTuple):
 # ---------------------------------------------------------------------------
 
 def evaporation_weight(h_l, T_l, h_sat_l, T_sat, ag, gate_dT=0.5, gate_dh=2.0e3,
-                       dh_gate=1.0, dT_gate=0.001):
+                       dh_gate=1.0, dT_gate=0.001, p=None, p_max=None):
     """Evaporation-gate weight in [0, 1] — liquid superheat OR appreciable α.
 
     w → 1 where the liquid is superheated (h AND T criteria), w → 0 where
@@ -91,7 +91,18 @@ def evaporation_weight(h_l, T_l, h_sat_l, T_sat, ag, gate_dT=0.5, gate_dh=2.0e3,
     a subcooled region with real vapor the closure now returns σ < 0 — the
     CONDENSATION branch is active there (intended for shocks; it was previously
     suppressed by the evaporation-only choice).
+
+    PRESSURE CUT-OFF (p, p_max): with p_max given, w = 0 wherever p >= p_max —
+    no phase change at all (neither clause) and the ghost pin stays on.  For a
+    supercritical inlet: the saturation table ends at 0.98 p_crit, above it the
+    lookup is clamped, and the clamped T_sat/h_sat must not drive phase change.
+    Valid when the vapor above p_max is a ghost: a REAL vapor (α > 5%) there
+    would be pinned to the clamped h_sat_g.  p_max = None → no cut-off.
     """
+    if p_max is not None:
+        w = evaporation_weight(h_l, T_l, h_sat_l, T_sat, ag, gate_dT=gate_dT,
+                               gate_dh=gate_dh, dh_gate=dh_gate, dT_gate=dT_gate)
+        return jnp.where(p < p_max, w, 0.0)
     # BINARY on/off gate (2026-07-21 A/B, nozzlex parity): hard switch on the
     # same h-AND-T criterion.  Flips BOTH the σ gate and the ghost pin weight
     # (1−w) together — pre-onset: σ=0 & fully pinned; post-onset: σ on & free.
@@ -138,7 +149,9 @@ def two_fluid_closure(
                            # PROBED and is NEGATIVE — died EARLIER (step 292 vs
                            # 386, dt collapse at t=5.9e-4 vs 1.55e-3 s).  The
                            # front-cell blow-up is not a σ(x) sharpness problem.
-    gate_dh= 0.5 #2.0e3,         # smooth-gate enthalpy width [J/kg]  (~cp_l·gate_dT)
+    gate_dh= 0.5, #2.0e3,         # smooth-gate enthalpy width [J/kg]  (~cp_l·gate_dT)
+    p_mt_max=None,         # [Pa] no phase change at p >= p_mt_max (see
+                           # evaporation_weight); None → no cut-off
 ) -> TwoFluidClosure:
     """
     Assemble a TwoFluidClosure from state + saturation properties.
@@ -210,8 +223,9 @@ def two_fluid_closure(
         # can_condense  = (h_g < h_sat_g - dh_gate) & (T_g < T_sat - dT_gate)
         # is_two_phase  = can_evaporate | can_condense
         # Shared helper — SAME weight the solver's ghost-vapor pin uses as 1−w.
-        w_evap  = evaporation_weight(h_l, T_l, h_sat_l, T_sat, ag, 
-                                     gate_dT=gate_dT, gate_dh=gate_dh)
+        w_evap  = evaporation_weight(h_l, T_l, h_sat_l, T_sat, ag,
+                                     gate_dT=gate_dT, gate_dh=gate_dh,
+                                     p=p, p_max=p_mt_max)
         # EVAPORATION-ONLY (2026-07-21, nozzlex parity) — nozzlex gates with
         # is_two_phase = (hl >= h_sat_l) & (Tl >= Tsat): NO condensation branch.
         # Our condensation weight half-opens AT the saturation line, so the
