@@ -45,6 +45,7 @@ from nozzle_hyperbolic.fvm_solver.two_fluid.sources import (
     D_VE_algebric,
     D_VE_algebric_two_component, 
     D_VE_area,
+    get_interfacial_area,
 )
 
 # Settings file for this test (two-fluid format: gas=Air, liquid=water ghost,
@@ -63,6 +64,9 @@ _env_over = ({"sources.scale": float(os.environ["SRC_SCALE"])}
              if "SRC_SCALE" in os.environ else None)
 cfg   = load_config(_here / SETTINGS_YAML, overrides=_env_over,
                     override_label="env SRC_SCALE")
+# Interfacial area law (sources.interfacial_area / interfacial_area_params) — the
+# same one two_fluid_closure uses; built here so a bad name fails before the run.
+_area_law = get_interfacial_area(cfg.INTERFACIAL_AREA, cfg.INTERFACIAL_AREA_PARAMS)
 
 
 def _pin_cpus(spec):
@@ -263,6 +267,7 @@ def _plot_state(U_h_arr, title, out_png):
         jxp.HmassP_INPUTS, jnp.array(h_d), jnp.array(p))["temperature"])
 
     M = np.empty(U.shape[0], dtype=float)
+    area_inter = np.empty(U.shape[0], dtype=float)
     for i in range(U.shape[0]):
         p_i = float(U[i, 0])
         ag_i = float(U[i, 3])
@@ -300,8 +305,12 @@ def _plot_state(U_h_arr, title, out_png):
         M[i] = u_mix_i / a_i if a_i > 0.0 else np.nan
         # M[i] = a_sq_i
 
+        # Interfacial area calculations
+        area_inter[i], _ = _area_law(ag_i, Nb=cfg.BUBBLE_NUMBER, Nd=cfg.DROPLET_NUMBER)
+
     du = U[:, 1] - U[:, 2]                       # slip velocity u_g - u_l
-    fig, ax = plt.subplots(7, 1, figsize=(5, 14), sharex=True)
+    fig, ax = plt.subplots(4, 2, figsize=(5, 14), sharex=True)
+    ax = ax.flatten()
     fig.suptitle(title, fontsize=9)
     ax[0].plot(x, A, color="black", lw=1.0, marker="o", markersize=2)
     ax[0].set_ylabel(r"Area $A$ [m$^2$]")
@@ -323,6 +332,9 @@ def _plot_state(U_h_arr, title, out_png):
     ax[6].plot(x, M, color="blue", lw=1.0, marker="o", markersize=3)
     ax[6].set_ylabel("Mach number")
     ax[6].set_xlabel("x [m]")
+    ax[7].plot(x, area_inter, color="green", lw=1.0, marker=".", markersize=3)
+    ax[7].set_ylabel(r"$a_i$ [1/m]")
+    ax[7].set_xlabel(r"$\alpha_g$ [-]")
     ax[2].legend()
     plt.tight_layout()
     fig.savefig(out_png, dpi=150, bbox_inches="tight")
@@ -357,17 +369,34 @@ rho_g0 = float(_stg0["density"][0]);  rho_l0 = float(_stl0["density"][0])
 # (fluid_vapor.get_state_saturation(p0)); do the same when the PT gas state
 # falls outside the vapor table.  Gas-DOMINANT cases (superheated T_g0) give
 # H_g0 above h_min → untouched.
+#
+# SUPERCRITICAL reservoir (p0 above the saturation table, which ends at
+# 0.98 p_crit): the PT gas state is the same supercritical fluid as the liquid,
+# while the ghost pin drives h_g to h_sat_g(p) — clamped at the table top — in
+# every cell.  So a GHOST vapor (liquid-dominant flashing) takes the same
+# saturated-vapor state at the inlet: get_state_saturation(p0) returns the
+# values at the table top, consistent with the pin.
 _hg_min = float(getattr(fluid_g, "h_min", -np.inf))
-if H_g0 < _hg_min and not _pg_g:
+_lp_sat = getattr(fluid_g, "logP_sat_vals", None)
+_p_sat_top = float(np.exp(_lp_sat[-1])) if _lp_sat is not None else np.inf
+_ghost_supercrit = (cfg.MASS_TRANSFER and dom == "liquid" and P0 >= _p_sat_top)
+if (H_g0 < _hg_min or _ghost_supercrit) and not _pg_g:
     # get_state_saturation returns CANONICAL names only (entropy, not the 's' alias).
     _satg0 = fluid_g.get_state_saturation(jnp.array([P0]))
     H_g0   = float(_satg0["enthalpy"][0])
     s_g0   = float(_satg0["entropy"][0])
     rho_g0 = float(_satg0["density"][0])
-    print(f"  [ghost-vapor fix] PT gas state h={float(_stg0['enthalpy'][0])/1e3:.1f} "
-          f"kJ/kg < vapor table floor {_hg_min/1e3:.1f} kJ/kg (subcooled reservoir)\n"
-          f"                    → using SATURATED VAPOR at p0: H_g0={H_g0/1e3:.1f} kJ/kg "
-          f"s_g0={s_g0:.2f} J/kg/K  (matches nozzlex demo)")
+    if _ghost_supercrit:
+        _why = (f"p0={P0/1e5:.2f} bar is above the saturation table "
+                f"(top {_p_sat_top/1e5:.2f} bar = 0.98 p_crit)")
+        _at = f"the table top ({_p_sat_top/1e5:.2f} bar)"
+    else:
+        _why = (f"PT gas state h={float(_stg0['enthalpy'][0])/1e3:.1f} kJ/kg < vapor "
+                f"table floor {_hg_min/1e3:.1f} kJ/kg (subcooled reservoir)")
+        _at = "p0"
+    print(f"  [ghost-vapor fix] {_why}\n"
+          f"                    → using SATURATED VAPOR at {_at}: H_g0={H_g0/1e3:.1f} kJ/kg "
+          f"s_g0={s_g0:.2f} J/kg/K  rho_g0={rho_g0:.1f} kg/m3")
 
 # Composition: void_fraction OR quality (derive the other via the slip relation
 #   α = 1/(1 + ((1−x)/x)(ρ_g/ρ_l)S) ).
@@ -395,6 +424,34 @@ print(f"  H_g0={H_g0/1e3:.1f} kJ/kg  s_g0={s_g0:.2f}  H_l0={H_l0/1e3:.1f} kJ/kg 
 print(f"  alpha_g={ALPHA_G:.6f}  quality={QUALITY:.6f}  slip={SLIP:.3f}")
 print(f"  dominant phase = {dom}  [{_dom_src}]  -> p closed on {dom} isentrope")
 print(f"  SRC_SCALE={SRC_SCALE} (physical sources)   AREA_SRC={AREA_SRC} (area term under test)")
+
+# ── Phase-change pressure cut-off (sources.p_phase_change_max) ─────────────────
+# No phase change at p >= P_MT_MAX (fraction of p_crit → Pa).  Passed to the
+# closure (σ, interphase heat) and to the solver (ghost pin) — same value.
+# Check: the liquid can only superheat where h_sat_l(p) < H_l0 (adiabatic flow,
+# h_l <= H_l0), so above the highest such p no phase change is possible anyway;
+# a cut-off below it would suppress real flashing.
+P_MT_MAX = None
+if cfg.P_PHASE_CHANGE_MAX is not None and cfg.MASS_TRANSFER:
+    _cp = getattr(fluid_l, "critical_point", None)
+    if _cp is not None:
+        _p_crit = float(_cp["pressure"])
+    else:
+        import CoolProp.CoolProp as _CP
+        _p_crit = float(_CP.PropsSI("pcrit", fluid_liquid_name))
+    P_MT_MAX = cfg.P_PHASE_CHANGE_MAX * _p_crit
+    print(f"  phase-change cut-off: no phase change at p >= {P_MT_MAX/1e5:.2f} bar "
+          f"({cfg.P_PHASE_CHANGE_MAX:g} p_crit, p_crit = {_p_crit/1e5:.2f} bar)")
+    if dom == "liquid" and _lp_sat is not None:
+        _pg = np.exp(np.linspace(float(_lp_sat[0]), float(_lp_sat[-1]), 2000))
+        _hsl = np.asarray(fluid_l.get_state_saturation(jnp.asarray(_pg))["enthalpy"])
+        _ok = np.flatnonzero(_hsl < H_l0)
+        if _ok.size:
+            _p_on = float(_pg[_ok[-1]])
+            print(f"    flashing possible only below {_p_on/1e5:.2f} bar "
+                  f"(h_sat_l = H_l0 = {H_l0/1e3:.1f} kJ/kg)"
+                  + ("" if _p_on < P_MT_MAX else
+                     "   WARNING: cut-off is BELOW this - it suppresses real flashing"))
 
 # ── Reservoir isentrope for the stagnation-inlet pressure closure ─────────────
 # The solver needs h_dom(p) ON the dominant-phase isentrope s_dom(p,h)=s_dom0.
@@ -490,6 +547,10 @@ def _sources_fn(u_h, eos_g, eos_l, cq, dlnA, sat_g, sat_l):
             Nb      = cfg.BUBBLE_NUMBER,
             Nd      = cfg.DROPLET_NUMBER,
             mass_transfer = cfg.MASS_TRANSFER,
+            p_mt_max = P_MT_MAX,
+            regime_htc = cfg.REGIME_HTC,
+            area_law = cfg.INTERFACIAL_AREA,
+            area_params = cfg.INTERFACIAL_AREA_PARAMS,
         )
         if cfg.MASS_TRANSFER:
             D = D + SRC_SCALE * D_VE_algebric(u_h, cq, closure, eos_g, eos_l, cfg.K_VM)
@@ -585,6 +646,7 @@ _ret = make_two_fluid_step(
     w_char        = cfg.W_CHAR,
     alpha_eps     = cfg.ALPHA_EPS,
     pin_ghost     = cfg.PIN_GHOST,
+    p_mt_max      = P_MT_MAX,
     pin_ghost_momentum = cfg.PIN_GHOST_MOMENTUM,
     pin_mom_alpha      = cfg.PIN_MOM_ALPHA,
     pin_mom_tau        = cfg.PIN_MOM_TAU,
@@ -907,6 +969,10 @@ if cfg.MASS_TRANSFER and SRC_SCALE != 0.0:
             Nb      = cfg.BUBBLE_NUMBER,
             Nd      = cfg.DROPLET_NUMBER,
             mass_transfer = True,
+            p_mt_max = P_MT_MAX,
+            regime_htc = cfg.REGIME_HTC,
+            area_law = cfg.INTERFACIAL_AREA,
+            area_params = cfg.INTERFACIAL_AREA_PARAMS,
         )
         return (cl.sigma_Mg, cl.sigma_Qg, cl.sigma_Ql,
                 sat_g_c["temperature"], eos_l_c.T)
@@ -963,3 +1029,5 @@ _plot_state(U_h_f, f"FINAL solution (dominant={dom})  "
                    f"{cfg.GEO_FUNCTION}  N={cfg.Nx}  steps={n}",
             out_dir / "single_phase_limit.png")
 plt.show()
+
+# %%

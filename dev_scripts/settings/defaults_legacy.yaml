@@ -17,6 +17,10 @@ sources:
   mass_transfer:  true
   scale:          1.0          # was the SRC_SCALE constant in main_two_fluid.py
   area_source:    true         # was the AREA_SRC constant in main_two_fluid.py
+  p_phase_change_max: null     # no phase change above this fraction of p_crit
+  regime_htc:     false        # NICFD interphase HTC (bubbly-regime HTC at every alpha)
+  interfacial_area: polynomial # original | polynomial | parabola (source_two_fluid.py)
+  interfacial_area_params: null
 
 grid:
   radius: 0.005                # only used when there is no geometry block
