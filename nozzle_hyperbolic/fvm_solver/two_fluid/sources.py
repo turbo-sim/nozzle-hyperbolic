@@ -28,7 +28,7 @@ from source_two_fluid import (
     calculate_drag_force_one_component,
     calculate_heat_transfer_one_component,
     calculate_mass_transfer_lv,
-    interfacial_area,
+    get_interfacial_area,
     ranz_marshall_htc_two_fluid,
 )
 
@@ -152,6 +152,9 @@ def two_fluid_closure(
     gate_dh= 0.5, #2.0e3,         # smooth-gate enthalpy width [J/kg]  (~cp_l·gate_dT)
     p_mt_max=None,         # [Pa] no phase change at p >= p_mt_max (see
                            # evaporation_weight); None → no cut-off
+    area_law="polynomial", # interfacial area law: original | polynomial | parabola
+                           # (source_two_fluid.INTERFACIAL_AREA_LAWS)
+    area_params=None,      # dict of keyword overrides for that law, e.g. {"d_min": 6.5e-5}
 ) -> TwoFluidClosure:
     """
     Assemble a TwoFluidClosure from state + saturation properties.
@@ -181,6 +184,8 @@ def two_fluid_closure(
     regime_htc : False → NICFD HTC (internal Nu on the vapor side + Ranz-Marshall
                  with liquid continuous, at every α); True → same for α ≤ alpha_b,
                  mirrored droplet closure for α ≥ alpha_d, linear blend in between
+    area_law, area_params : interfacial area law by name and its keyword overrides
+                 (get_interfacial_area); Nb / Nd only matter for 'original'
     """
     p, u_g, u_l, ag, h_g, h_l = U_h
     al = 1.0 - ag
@@ -255,7 +260,7 @@ def two_fluid_closure(
 
         # ── Interfacial area and dispersed-structure diameter ────────────────────
         # d_min_b=5e-5 matches nozzlex (nozzle_two_fluid_one_component_autonomous).
-        ai, d = interfacial_area(ag, alpha_b=alpha_b, alpha_d=alpha_d,
+        ai, d = get_interfacial_area(area_law, area_params)(ag, alpha_b=alpha_b, alpha_d=alpha_d,
                                 Nb=Nb, Nd=Nd, d_min_b=5e-6)
         # ai, d = 100, 5e-5
         # ── Drag force on gas per unit volume (sign: F > 0 accelerates gas) ─────
@@ -368,7 +373,7 @@ def two_fluid_closure(
 
         # ── Interfacial area and dispersed-structure diameter ────────────────────
         # d_min_b=5e-5 matches nozzlex (nozzle_two_fluid_one_component_autonomous).
-        ai, d = interfacial_area(ag, alpha_b=alpha_b, alpha_d=alpha_d,
+        ai, d = get_interfacial_area(area_law, area_params)(ag, alpha_b=alpha_b, alpha_d=alpha_d,
                                 Nb=Nb, Nd=Nd, d_min_b=5e-6)
         # ai, d = 100, 5e-5
         # ── Drag force on gas per unit volume (sign: F > 0 accelerates gas) ─────
