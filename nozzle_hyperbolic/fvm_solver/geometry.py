@@ -95,6 +95,37 @@ def get_lettieri_nozzle(x, roughness=0.0, file_path="Lettieri_nozzle.xlsx",
 
     return Geometry(A=A, dAdx=dAdx, D_h=D_h, roughness=float(roughness))
 
+def get_nozzle_from_csv(x, roughness=0.0, file_path="nozzle_geometry.csv"):
+    """
+    Axisymmetric nozzle from a tabulated wall radius r(x), e.g. the geometry
+    exported by the nozzlex inverse design (examples/inverse_design/run_design.py).
+
+    file_path : CSV with a header row and at least the columns 'x' and 'r' [m]
+                (extra columns such as D, A are ignored).
+
+    r(x) is fitted with a C2 cubic spline, so A and the analytic dA/dx are
+    smooth across the table points.  Outside the tabulated range r is held at
+    its end value (dA/dx = 0); set the grid to [x_first, x_last] of the table.
+    """
+    from scipy.interpolate import CubicSpline
+
+    x = np.asarray(x, dtype=float)
+    data = np.genfromtxt(file_path, delimiter=",", names=True)
+    x_tab = np.asarray(data["x"], dtype=float)
+    r_tab = np.asarray(data["r"], dtype=float)
+
+    spline = CubicSpline(x_tab, r_tab)
+    inside = (x >= x_tab[0]) & (x <= x_tab[-1])
+    x_c = np.clip(x, x_tab[0], x_tab[-1])
+    r = spline(x_c)
+    drdx = np.where(inside, spline(x_c, 1), 0.0)
+
+    A    = np.pi * r**2
+    dAdx = 2.0 * np.pi * r * drdx
+    D_h  = 2.0 * r
+    return Geometry(A=A, dAdx=dAdx, D_h=D_h, roughness=float(roughness))
+
+
 # Nakagawa geometry
 def get_nozzle_nakagawa(
     x,
