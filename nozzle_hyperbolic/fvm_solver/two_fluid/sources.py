@@ -144,6 +144,8 @@ def two_fluid_closure(
     mass_transfer=True,
     regime_htc=False,      # True → regime-dependent HTC (bubbly/transition/droplet);
                            # False → NICFD closure (bubbly-regime HTC at every α)
+    regime_blend="linear", # transition alpha_b..alpha_d of the drag and of the
+                           # regime HTC: 'linear' | 'smoothstep' (C1, regime_weight)
     gate_dT= 1e-3, # 0.5,          # smooth-gate temperature width [K].  NOTE 2026-07-21:
                            # widening to 2.0 K (onset spread ~4-8 cells) was
                            # PROBED and is NEGATIVE — died EARLIER (step 292 vs
@@ -184,6 +186,8 @@ def two_fluid_closure(
     regime_htc : False → NICFD HTC (internal Nu on the vapor side + Ranz-Marshall
                  with liquid continuous, at every α); True → same for α ≤ alpha_b,
                  mirrored droplet closure for α ≥ alpha_d, linear blend in between
+    regime_blend : 'linear' | 'smoothstep' weight across alpha_b..alpha_d for the
+                 drag and (with regime_htc) the HTC; smoothstep makes both C1
     area_law, area_params : interfacial area law by name and its keyword overrides
                  (get_interfacial_area); Nb / Nd only matter for 'original'
     """
@@ -270,7 +274,7 @@ def two_fluid_closure(
         # Drag force per unit volume: F > 0 means force on gas in direction of u_l - u_g
         Fv_g = -calculate_drag_force_one_component(
             ag, al, rg, rl, mu_g, mu_l, u_g, u_l, d,
-            alpha_b=alpha_b, alpha_d=alpha_d,
+            alpha_b=alpha_b, alpha_d=alpha_d, blend=regime_blend,
         )
 
         # ── Heat transfer coefficients (Ranz-Marshall, continuous phase) ─────────
@@ -288,7 +292,7 @@ def two_fluid_closure(
                 {"rho": stl_ex["rho"][0], "mu": stl_ex["mu"][0],
                  "k": stl_ex["k"][0], "cp": stl_ex["cp"][0]},
                 u_g, u_l, d, Nu1_int=Nu_g, Nu2_int=Nu_l,
-                alpha_b=alpha_b, alpha_d=alpha_d,
+                alpha_b=alpha_b, alpha_d=alpha_d, blend=regime_blend,
             )
         else:
             # NICFD closure: bubbly-regime HTC at every α.
@@ -383,7 +387,7 @@ def two_fluid_closure(
         # Drag force per unit volume: F > 0 means force on gas in direction of u_l - u_g
         Fv_g = -calculate_drag_force_one_component(
             ag, al, rg, rl, mu_g, mu_l, u_g, u_l, d,
-            alpha_b=alpha_b, alpha_d=alpha_d,
+            alpha_b=alpha_b, alpha_d=alpha_d, blend=regime_blend,
         )
 
         # ── Heat transfer coefficients (Ranz-Marshall, continuous phase) ─────────
@@ -401,7 +405,7 @@ def two_fluid_closure(
                 {"rho": stl_ex["rho"][0], "mu": stl_ex["mu"][0],
                  "k": stl_ex["k"][0], "cp": stl_ex["cp"][0]},
                 u_g, u_l, d,
-                Nu1_int=Nu_g, alpha_b=alpha_b, alpha_d=alpha_d,
+                Nu1_int=Nu_g, alpha_b=alpha_b, alpha_d=alpha_d, blend=regime_blend,
             )
         else:
             # NICFD closure: bubbly-regime HTC at every α.

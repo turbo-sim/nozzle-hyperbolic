@@ -7,6 +7,27 @@ import math
 import jax
 import jax.numpy as jnp
 
+# Weight laws across the bubbly -> droplet transition (alpha_b < alpha < alpha_d),
+# used by the drag and by the regime-dependent heat transfer.
+REGIME_BLENDS = ("linear", "smoothstep")
+
+
+def regime_weight(alpha1, alpha_b, alpha_d, blend="linear"):
+    """
+    Droplet-regime weight s in [0, 1]: 0 for alpha1 <= alpha_b, 1 for alpha1 >= alpha_d.
+
+    linear     : s = w,              w = (alpha1 - alpha_b) / (alpha_d - alpha_b);
+                 the slope of a blended closure jumps at alpha_b and alpha_d.
+    smoothstep : s = w^2 (3 - 2 w);  zero slope at both ends, so a closure blended
+                 as (1 - s) * bubbly + s * droplet is C1 across the transition.
+    """
+    w = jnp.clip((alpha1 - alpha_b) / (alpha_d - alpha_b), 0.0, 1.0)
+    if blend == "smoothstep":
+        return w * w * (3.0 - 2.0 * w)
+    if blend == "linear":
+        return w
+    raise ValueError(f"unknown regime blend {blend!r}; choose from {REGIME_BLENDS}")
+
 def calculate_mass_transfer_lv(T_l, T_v, T_sat, htc_l, htc_v, A_i, h_sat_l, h_sat_v, h_l, h_v, Qvi, Qli):
     """
     Interphase mass transfer from Rane & He (2021), Eq. (4).
@@ -29,7 +50,7 @@ def calculate_mass_transfer_lv(T_l, T_v, T_sat, htc_l, htc_v, A_i, h_sat_l, h_sa
 
 def calculate_drag_force_one_component(
     alpha1, alpha2, rho1, rho2, mu1, mu2, u1, u2, d,
-    alpha_b=0.3, alpha_d=0.7,
+    alpha_b=0.3, alpha_d=0.7, blend="linear",
 ):
     """
     Regime-dependent drag force per unit volume for the one-component case.
@@ -47,6 +68,12 @@ def calculate_drag_force_one_component(
     d              : characteristic diameter of dispersed structures
     alpha_b        : upper bound of bubbly regime (vapor fraction)
     alpha_d        : lower bound of droplet regime (vapor fraction)
+    blend          : transition between alpha_b and alpha_d (regime_weight).
+                     'linear' (default): linear interpolation between the bubbly
+                     force frozen at alpha_b and the droplet force frozen at alpha_d;
+                     continuous, but its slope jumps at both ends.
+                     'smoothstep': (1 - s) * bubbly + s * droplet, both laws at the
+                     actual alpha, s = smoothstep -> C1 across the transition.
     """
     u_rel = u1 - u2
     u_rel_abs = jnp.abs(u_rel)
@@ -74,6 +101,10 @@ def calculate_drag_force_one_component(
         w = (alpha1 - alpha_b) / (alpha_d - alpha_b)
         return F_b + (F_d - F_b) * w
 
+    if blend != "linear":
+        s = regime_weight(alpha1, alpha_b, alpha_d, blend)
+        return (1.0 - s) * bubbly(None) + s * droplet(None)
+
     return jax.lax.cond(
         alpha1 <= alpha_b,
         bubbly,
@@ -85,7 +116,7 @@ def calculate_drag_force_one_component(
 def calculate_heat_transfer_one_component(
     alpha1, state1, state2, u1, u2, d,
     Nu1_int=120.0, Nu2_int=2.0 * jnp.pi**2 / 3.0,
-    alpha_b=0.3, alpha_d=0.7,
+    alpha_b=0.3, alpha_d=0.7, blend="linear",
 ):
     """
     Regime-dependent interfacial heat transfer coefficients for the
@@ -117,6 +148,8 @@ def calculate_heat_transfer_one_component(
                      default 2*pi^2/3 ≈ 6.58 is the conduction-limited sphere value
     alpha_b        : upper bound of bubbly regime (vapor fraction)
     alpha_d        : lower bound of droplet regime (vapor fraction)
+    blend          : transition weight (regime_weight): 'linear' (default) or
+                     'smoothstep' (zero slope at alpha_b and alpha_d -> C1 HTCs)
 
     Returns
     -------
@@ -142,6 +175,12 @@ def calculate_heat_transfer_one_component(
         w = (alpha1 - alpha_b) / (alpha_d - alpha_b)
         return htc1_b + (htc1_d - htc1_b) * w, htc2_b + (htc2_d - htc2_b) * w
 
+    if blend != "linear":
+        s = regime_weight(alpha1, alpha_b, alpha_d, blend)
+        htc1_b, htc2_b = bubbly(None)
+        htc1_d, htc2_d = droplet(None)
+        return htc1_b + (htc1_d - htc1_b) * s, htc2_b + (htc2_d - htc2_b) * s
+
     return jax.lax.cond(
         alpha1 <= alpha_b,
         bubbly,
@@ -157,6 +196,7 @@ def interfacial_area_original(
     Nd=1e10,
     d_min_b=1e-5,
     d_min_d=1e-5,
+    d_min=1e-5,
 ):
     """
     TA-BD interfacial area density with nucleation and breakup floors.
@@ -268,7 +308,7 @@ def dispersed_fraction(alpha, eps=0.1):
     return 0.5 * (raw(2.0 * alpha - 1.0) - lo) / (mid - lo)
 
 
-def interfacial_area_poly(alpha, d_ctrl=(160e-6, 0.0, 320e-6, 0.0, 1455e-6), eps=0.1, d_min=6e-5,
+def interfacial_area_poly(alpha, d_ctrl=(160e-6, 0.0, 320e-6, 0.0, 1455e-6), eps=0.1, d_min=1e-5,
         alpha_b=0.3,  
         alpha_d=0.7,
         Nb=1e10,
@@ -386,12 +426,65 @@ def interfacial_area_para(alpha, a_min=100.0, a_max=20000.0, eps=0.1, d_min=1e-5
     return ai, d
 
 
+def interfacial_area_segments(alpha,
+                              alpha_pts=(0.0, 0.05, 0.25, 0.7, 0.9, 1.0),
+                              ai_pts=(100.0, 3900.0, 15000.0, 24000.0, 20000.0, 100.0),
+                              corner=0.0, eps=0.1, d_min=1e-5,
+                              alpha_b=0.3,
+                              alpha_d=0.7,
+                              Nb=10e12,
+                              Nd=10e10,
+                              d_min_b=5e-6):
+    """
+    Interfacial area density for data assimilation: piecewise linear in alpha.
+
+    ai is linear between the control points (alpha_pts[k], ai_pts[k]); alpha_pts must be
+    strictly increasing and span [0, 1], ai_pts > 0.  Any shape, e.g. non-symmetric.
+    corner > 0 rounds every interior corner over a width ~corner in alpha (each slope
+    change becomes a softplus ramp, C-infinity; the segments are unchanged away from the
+    corners); corner = 0 is exact linear interpolation.
+
+    The diameter follows from ai = 6 alpha_disp / d with the nucleation / breakup floor
+    d >= d_min, as in interfacial_area_para (alpha_disp: dispersed_fraction, eps).
+
+    Default points: a shape skewed to the vapor side (peak 24000 1/m at alpha = 0.7,
+    parabola-like area up to alpha ~ 0.25) that runs the case-4 ladder of
+    main_ladder.py / settings_ladder.yaml unattended to N = 400, inlet void 1e-5
+    (tested 2026-10-16, see LADDER_HISTORY.md).
+
+    Returns
+    -------
+    ai : interfacial area density [1/m]
+    d : characteristic diameter [m]
+    """
+    xs = tuple(float(v) for v in alpha_pts)
+    ys = tuple(float(v) for v in ai_pts)
+    if len(xs) != len(ys) or len(xs) < 2:
+        raise ValueError("interfacial_area_segments: alpha_pts and ai_pts need the same length >= 2")
+    if any(b <= a for a, b in zip(xs, xs[1:])) or xs[0] > 0.0 or xs[-1] < 1.0:
+        raise ValueError("interfacial_area_segments: alpha_pts must increase strictly from 0 to 1")
+    if min(ys) <= 0.0:
+        raise ValueError("interfacial_area_segments: ai_pts must be > 0")
+    if corner > 0.0:
+        slopes = [(y1 - y0) / (x1 - x0) for x0, x1, y0, y1 in zip(xs, xs[1:], ys, ys[1:])]
+        ai = ys[0] + slopes[0] * (alpha - xs[0])
+        for xk, s0, s1 in zip(xs[1:-1], slopes, slopes[1:]):
+            ai = ai + (s1 - s0) * corner * jax.nn.softplus((alpha - xk) / corner)
+        ai = jnp.maximum(ai, min(ys))
+    else:
+        ai = jnp.interp(alpha, jnp.asarray(xs), jnp.asarray(ys))
+    alpha_disp = dispersed_fraction(alpha, eps)
+    d = jnp.maximum(6.0 * alpha_disp / ai, d_min)
+    return ai, d
+
+
 # Interfacial area laws selectable by name (settings: sources.interfacial_area).
 # Every law takes (alpha, alpha_b=, alpha_d=, Nb=, Nd=, d_min_b=, ...) and returns (ai, d).
 INTERFACIAL_AREA_LAWS = {
     "original": interfacial_area_original,     # TA-BD number-density law (uses Nb / Nd)
     "polynomial": interfacial_area_poly,       # Bernstein-polynomial diameter (ignores Nb / Nd)
     "parabola": interfacial_area_para,         # inverted parabola in alpha (ignores Nb / Nd)
+    "segments": interfacial_area_segments,     # piecewise linear in alpha (ignores Nb / Nd)
 }
 
 
