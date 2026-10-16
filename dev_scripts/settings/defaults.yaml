@@ -24,6 +24,8 @@ sources:
                              # (null = off; e.g. 0.95 for a supercritical inlet)
   regime_htc:  false         # interphase HTC: false = NICFD closure (bubbly HTC at
                              # every alpha); true = bubbly / blend / droplet by regime
+  regime_blend: linear       # drag + regime HTC across alpha_b..alpha_d: linear (slope
+                             # kinks at both ends) | smoothstep (C1)
   interfacial_area: polynomial   # original (TA-BD, uses bubble/droplet_number) |
                                  # polynomial | parabola  (source_two_fluid.py)
   interfacial_area_params: null  # keyword overrides of that law, e.g. {d_min: 6.5e-5}

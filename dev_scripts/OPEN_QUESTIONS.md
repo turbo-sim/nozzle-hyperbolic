@@ -332,7 +332,7 @@ triplets agreeing, phi_ext consistent to 0.02%) and smd 15 bar in the interior
 the study's choice of `magnitude` is the configuration in which they are
 measurable.
 
-## 11. Smooth regime blending in drag and heat transfer (smoothstep option) — TODO
+## 11. Smooth regime blending in drag and heat transfer (smoothstep option) — IMPLEMENTED, A/B DONE: NO GAIN
 
 **Claim.** The interphase closures switch regime with kinks at `alpha_b = 0.3`
 and `alpha_d = 0.7`. `calculate_drag_force_one_component`
@@ -354,6 +354,28 @@ and to the regime HTC: weight w = smoothstep((alpha - alpha_b)/(alpha_d - alpha_
 (C1, zero slope at both ends) instead of the linear w, and the bubbly/droplet
 branches blended through it rather than switched by `lax.cond`. Expose it in
 the settings (`sources.blend`). Default `linear` until A/B'd.
+
+**Implemented (2026-10-15).** `sources.regime_blend: linear | smoothstep`
+(default `linear`, bit-for-bit the old behaviour) -> `two_fluid_closure(regime_blend=)`
+-> `blend=` of `calculate_drag_force_one_component` and
+`calculate_heat_transfer_one_component` (`source_two_fluid.regime_weight`).
+smoothstep blends the FULL bubbly and droplet laws at the actual alpha with
+s = w^2 (3 - 2 w), so value and slope are continuous at alpha_b and alpha_d
+(checked: linear drag slope jumps +1.3e8 -> -8.6e7 at alpha_b, smoothstep
++1.275e8 on both sides). The HTC blend only matters with `regime_htc: true`.
+
+**A/B result (2026-10-15, case 4, polynomial area d_min 65 um, main_cold_start.py).**
+- Cold start from the HEM seed: linear N100 plateaus at 1.42e-5 (~4500 steps) and
+  N200 at 3.85e-8; smoothstep N100 stalls at ~2.4e-3 (wanders 2.3-2.5e-3 for
+  5000+ steps, killed) -- clearly WORSE as a cold start.
+- Restart from the linear N100 plateau with smoothstep: SSR rises to 1.4e-4, then
+  relaxes to a plateau of 1.420e-5 (2413 steps) -- the SAME as linear (1.419e-5).
+  So the kink is not what holds the N100 plateau (consistent with section 12).
+- smoothstep is a different drag in the transition, not just a smoother one
+  (~1.7x larger mid-band: full laws at the actual alpha vs end-point-frozen), and
+  the change is carried downstream (u_g ~1% at alpha 0.76-0.80).
+Keep `linear` as default. Not yet tested: smoothstep at N400, where the drift
+sat just below alpha_d.
 
 **Probe.** Restart the N400 thick-ghost case-4 solution
 (`case_study/data_assimilation/results/thick_N400_thick_N400_muscl_van_albada_20261014_172944`)
@@ -379,3 +401,31 @@ suggests 1e-6) and check whether the plateau disappears.
 **Probe.** Restart from
 `case_study/data_assimilation/results/verify_S1_N100_muscl_van_albada_20261014_164504`
 (cheap, N=100) with `numerics.pin_mom_tau: 1.0e-6`.
+
+## 13. `segments` area law: move the first control point (slope at small alpha) — TODO, next test
+
+**Claim.** We might need to change the position of the first control point of the
+`segments` law (`interfacial_area_segments`, source_two_fluid.py) to get a different
+slope of a_i at small alpha, i.e. a different interface at the flashing onset. This is
+where the next test should start from.
+
+**Evidence (2026-10-16, case 4, main_ladder.py / settings_ladder.yaml).** The default
+points (SgG: 0:100, 0.05:3900, 0.25:15000, 0.7:24000, 0.9:20000, 1:100) run the whole
+ladder unattended to N = 400, inlet void 1e-5 (run `results/segments_*`). Its first
+segment, 0 -> 0.05, has slope 76000 1/m per unit alpha, close to the parabola's 79600.
+The onset is the most sensitive part found so far: shapes with 20-60 % less area than
+the parabola at alpha <= 0.2 (SgB: 0.05:3000; SgE: no point before 0.7) fail in N80 at
+t ~ 6e-4 s, while SgG and SgC (0.05:4500) converge. Full record: LADDER_HISTORY.md,
+section "Other area laws through the ladder".
+
+**Action.** Start from SgG and move only the first point, to map the admissible slope
+range at the onset before touching the rest of the shape: its alpha (e.g. 0.02, 0.05,
+0.1) and its a_i (e.g. 3000-5000 at alpha 0.05). Stage 1 (N80 from the HEM seed) decides
+it, so test `--stages 1` first, without SER (SgG's SER attempt fails and only its no-SER
+retry converges).
+
+**Probe.**
+`python main_ladder.py --stages 1 --tag seg_p1 --set sources.interfacial_area=segments
+--set time_control.ser_beta=0.0 --set "sources.interfacial_area_params={alpha_pts:
+[0.0, 0.03, 0.25, 0.7, 0.9, 1.0], ai_pts: [100.0, 2500.0, 15000.0, 24000.0, 20000.0, 100.0]}"`
+(from case_study/data_assimilation; vary the second entries of both lists).

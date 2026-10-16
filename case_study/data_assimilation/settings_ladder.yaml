@@ -1,0 +1,187 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# CO2 design case 4 - from the HEM design to the N = 400 thin-ghost solution
+#
+# Settings of main_ladder.py.  Two parts:
+#   * the CASE (fluid, tables, geometry, closure, reservoir): an ordinary settings
+#     file on defaults_flashing.yaml - the same physics as the hand-made chain of
+#     2026-10-15 (settings.yaml, runs test_cold_start_manual_N80/N200/N400_*);
+#   * the `ladder:` block: the stages.  Each stage holds ordinary settings overrides
+#     (grid / numerics / bc / time_control / run ...) applied on top of the case;
+#     stage 1 starts from the case's ic (the HEM seed), every later stage restarts
+#     from the previous one.  Edit / add / comment out stages here to test.
+#
+#     python main_ladder.py                                    # all stages
+#     python main_ladder.py --stages 3-4 --restart results/<N200 run folder>
+#     python main_ladder.py --stages 4 --restart results/<N400 run> --set numerics.CFL=8
+#
+# Measured 2026-10-15 with this ladder (steps): N80 647, N200 876, N400 387,
+# 1e-3 -> 1e-5 1020; ~6 min in total.  Background: LADDER_HISTORY.md.
+# ─────────────────────────────────────────────────────────────────────────────
+base: defaults_flashing.yaml   # -> defaults
+
+fluid:
+  name: CO2
+
+# ── EOS tables (built into ./fluid_tables on the first run) ──────────────────
+eos:
+  gas:                              # CO2 metastable VAPOUR (the ghost that grows)
+    fluid_name: CO2
+    backend: HEOS
+    h_min: 250000.0     # J/kg
+    h_max: 480000.0     # J/kg
+    p_min: 1000000.0    # Pa  (10 bar)
+    p_max: 13000000.0   # Pa  (130 bar)
+    N_h: 90
+    N_p: 90
+    N_p_sat: 150
+    table_dir: fluid_tables
+    metastable_phase: vapor
+    gradient_method: forward
+  liquid:                           # CO2 metastable LIQUID (the dominant flashing phase)
+    fluid_name: CO2
+    backend: HEOS
+    h_min: 100000.0     # J/kg
+    h_max: 320000.0     # J/kg
+    p_min: 1000000.0    # Pa  (10 bar)
+    p_max: 13000000.0   # Pa  (130 bar)
+    N_h: 90
+    N_p: 90
+    N_p_sat: 150
+    table_dir: fluid_tables
+    metastable_phase: liquid
+    gradient_method: forward
+
+# ── Grid (Nx is set per stage) ────────────────────────────────────────────────
+grid:
+  Nx: 80
+  x1: 0.0
+  x2: 1.0                           # m - the exported geometry spans [0, 1] m
+
+# ── Geometry ──────────────────────────────────────────────────────────────────
+geometry:
+  function: get_nozzle_from_csv
+  file_path: design_case4/nozzle_geometry_case_4.csv   # relative to this folder
+  roughness: 0.0
+
+# ── Interphase closure ────────────────────────────────────────────────────────
+# interfacial_area: original | polynomial | parabola | segments (source_two_fluid.py).
+# interfacial_area_params: null = the law's code defaults; for parabola that is
+# a_min 100, a_max 20000 1/m, eps 0.1, d_min 1e-5 m (10 um).  To change, e.g.:
+#   interfacial_area_params: {d_min: 6.5e-5}
+# 'original' takes Nb / Nd from bubble_number / droplet_number only (Nb / Nd in
+# interfacial_area_params are overridden by sources.py); Nd 3e11-3e12 passes N80,
+# Nd 1e10 does not (droplets ~350 um, vapor supercools to the EOS table edge).
+# 'segments': ai linear between control points (alpha_pts, ai_pts), d = 6 alpha_disp / ai
+# (floor d_min), optional corner: width to round the corners.  Both shapes below ran the
+# whole ladder unattended (2026-10-16, LADDER_HISTORY.md); the first is the code default:
+#   interfacial_area: segments           # skewed to the vapor side, peak at alpha 0.7
+#   interfacial_area_params:
+#     alpha_pts: [0.0, 0.05, 0.25, 0.7, 0.9, 1.0]
+#     ai_pts:    [100.0, 3900.0, 15000.0, 24000.0, 20000.0, 100.0]
+#   interfacial_area: segments           # skewed to the liquid side, peak at alpha 0.35
+#   interfacial_area_params:             # (stage 4 needs one automatic split)
+#     alpha_pts: [0.0, 0.05, 0.35, 0.7, 0.9, 1.0]
+#     ai_pts:    [100.0, 4500.0, 20000.0, 12000.0, 6000.0, 100.0]
+sources:
+  bubble_number:  1.0e12            # used only by 'original'
+  droplet_number: 1.0e10
+  p_phase_change_max: 0.95          # x p_crit = 70.1 bar: no phase change above
+  interfacial_area: original        # original | polynomial | parabola | segments
+  regime_htc: true
+  regime_blend: smoothstep
+  interfacial_area_params:            # only the keys you change; null = code defaults
+    d_min: 1.0e-5
+    Nd: 1e12
+    Nb: 1e13
+    # a_max: 15000.0
+
+# ── Case numerics (per-stage numerics are in the ladder below) ────────────────
+numerics:
+  pin_ghost_momentum: true
+  lowmach_diss_bc: 0.0
+  eps_void: 0.25
+  eps_ghost: 0.25
+
+# ── Stage-1 initial condition: the HEM design ─────────────────────────────────
+ic:
+  type: nozzlex_csv
+  run: design_case4/hem_seed_s10_a3e-3.csv    # relative to this folder
+
+bc:
+  p0:            12000000.0
+  T_g0:          295.0
+  T_l0:          295.0
+  void_fraction: 1.0e-3             # set per stage
+  p_out:         2000000.0
+
+run:
+  n_steps: 20000
+  ssr_tol: 1.0e-8
+
+save_options:
+  repo_main: ../case_study/data_assimilation/results
+  repo_run: ladder                  # results/ladder_S<i>_..._N<Nx>_<recon>_<time>
+
+# ── The ladder ────────────────────────────────────────────────────────────────
+# Stage keys: name, the settings sections to override, and optionally
+#   retry: {...}   overrides for ONE rerun if the stage fails
+#   split: true    if the stage fails, insert the geometric mean of the previous
+#                  and the target inlet void (2 significant digits) and try again,
+#                  up to max_splits times
+# A stage counts as converged when it stops with SSR < run.ssr_tol, or at t_end /
+# plateau / n_steps with SSR < accept_ssr.  It fails on NaN, a crash, or
+# divergence (SSR > 1e-2 and > 1e3 x its best: the stage is killed).
+#
+# Ghost numerics: "thick" = alpha_eps 1e-6, eps_ghost_alo 1e-5, pin_mom_alpha null
+# (code defaults, for the 1e-3 ghost); "thin" = 1e-8, 1e-8, 1e-4 (inlet void <= 7e-4).
+# Thin-ghost runs never reach SSR 1e-8 (the ghost momentum pin leaves a floor:
+# 7.7e-8 at 1e-4, 1.5e-8 at 1e-5), so the thinning stages stop at t_end: the void
+# front takes ~0.035-0.045 s to cross the nozzle, whatever the jump or the CFL.
+ladder:
+  accept_ssr: 1.0e-6
+  max_splits: 2
+  stages:
+    - name: N80                     # HEM seed, coarse grid, thick ghost
+      grid:         {Nx: 80}
+      bc:           {void_fraction: 1.0e-3}
+      numerics:     {recon: muscl_van_albada, CFL: 0.2,
+                     alpha_eps: 1.0e-6, eps_ghost_alo: 1.0e-5, pin_mom_alpha: null}
+      time_control: {ser_beta: 1.0}
+      run:          {n_steps: 20000, ssr_tol: 1.0e-8, t_end: null}
+      retry:        {time_control: {ser_beta: 0.0}}
+
+    - name: N200                    # CFL 2 here ends in NaN (N80 checkerboard): keep 0.5
+      grid:         {Nx: 200}
+      bc:           {void_fraction: 1.0e-3}
+      numerics:     {recon: muscl_van_albada, CFL: 0.5,
+                     alpha_eps: 1.0e-6, eps_ghost_alo: 1.0e-5, pin_mom_alpha: null}
+      time_control: {ser_beta: 1.0}
+      run:          {n_steps: 15000, ssr_tol: 1.0e-8, t_end: null}
+      retry:        {time_control: {ser_beta: 0.0}}
+
+    - name: N400
+      grid:         {Nx: 400}
+      bc:           {void_fraction: 1.0e-3}
+      numerics:     {recon: muscl_van_albada, CFL: 2.0,
+                     alpha_eps: 1.0e-6, eps_ghost_alo: 1.0e-5, pin_mom_alpha: null}
+      time_control: {ser_beta: 1.0}
+      run:          {n_steps: 15000, ssr_tol: 1.0e-8, t_end: null}
+      retry:        {numerics: {CFL: 0.5}, time_control: {ser_beta: 0.0}}
+
+    - name: v1e-5                   # 1e-3 -> 1e-5 in one jump, thin ghost
+      grid:         {Nx: 400}
+      bc:           {void_fraction: 1.0e-5}
+      numerics:     {recon: muscl_van_albada, CFL: 4.0,
+                     alpha_eps: 1.0e-8, eps_ghost_alo: 1.0e-8, pin_mom_alpha: 1.0e-4}
+      time_control: {ser_beta: 1.0}
+      run:          {n_steps: 20000, ssr_tol: 1.0e-8, t_end: 0.05}
+      split:        true
+
+    # - name: v3e-6                 # one step further (tested: 315 steps)
+    #   grid:         {Nx: 400}
+    #   bc:           {void_fraction: 3.0e-6}
+    #   numerics:     {recon: muscl_van_albada, CFL: 4.0,
+    #                  alpha_eps: 1.0e-8, eps_ghost_alo: 1.0e-8, pin_mom_alpha: 1.0e-4}
+    #   time_control: {ser_beta: 1.0}
+    #   run:          {n_steps: 20000, ssr_tol: 1.0e-8, t_end: 0.05}
+    #   split:        true

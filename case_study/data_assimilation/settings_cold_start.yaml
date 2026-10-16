@@ -3,8 +3,10 @@
 # from the HEM design, six-equation two-fluid model.
 #
 # Case file of main_cold_start.py: it holds the CASE (fluid, tables, geometry,
-# reservoir, closure).  The per-stage grid / numerics / IC are set by the STAGES
-# table in main_cold_start.py on top of this file.
+# reservoir, interphase closure incl. the interfacial area law).  Grid, CFL, SER,
+# ghost numerics, inlet void and IC of every stage are set by main_cold_start.py
+# on top of this file, so swapping the area law here (or with --area) runs the new
+# law through the same refine-then-thin ladder.
 #
 #   design     nozzlex inverse design (HEM, frictionless), case 4:
 #              120 bar / 295 K -> 20 bar, exported as a circular nozzle,
@@ -12,9 +14,15 @@
 #   start      HEM design profile (make_hem_seed.py --design design_case4
 #              --T0 295.0 --smooth 10 --alpha 3e-3) -> design_case4/hem_seed_s10_a3e-3.csv
 #
+# Physics = the hand-made chain of 2026-10-15 (settings.yaml, runs
+# test_cold_start_manual_N80/N200/N400_*): parabola area law with the code
+# default d_min, Nb 1e12, regime HTC with smoothstep blend.  (Until 2026-10-15 this
+# file held the polynomial/parabola d_min 65 um, Nb 1e13, eps_void 0.2 case on
+# defaults_flashing_cold_start.yaml - see git history.)
+#
 #     python main_cold_start.py            (from this folder, poetry venv)
 # ─────────────────────────────────────────────────────────────────────────────
-base: defaults_flashing_cold_start.yaml   # -> defaults_flashing -> defaults
+base: defaults_flashing.yaml   # -> defaults
 
 fluid:
   name: CO2
@@ -50,7 +58,7 @@ eos:
 
 # ── Grid (Nx is set per stage) ────────────────────────────────────────────────
 grid:
-  Nx: 100
+  Nx: 80
   x1: 0.0
   x2: 1.0                           # m - the exported geometry spans [0, 1] m
 
@@ -61,45 +69,40 @@ geometry:
   roughness: 0.0                    # smooth wall, as in the frictionless design
 
 # ── Interphase closure ────────────────────────────────────────────────────────
-# interfacial_area: original | polynomial | parabola (source_two_fluid.py).
-# bubble_number / droplet_number are used only by 'original'; the polynomial
-# law sets its own number density through d_ctrl / d_min.  d_min 65 um is the
-# floor that converges case 4 (10 um blows up at the flashing front, 33 um in
-# the cold start) - see main_cold_start.py.
+# interfacial_area: original | polynomial | parabola (source_two_fluid.py),
+# interfacial_area_params: {d_min: ..., ...} (null = code defaults).
+# bubble_number / droplet_number are used only by 'original'.
 sources:
-  bubble_number:  1.0e13
+  bubble_number:  1.0e12
   droplet_number: 1.0e10
   p_phase_change_max: 0.95          # x p_crit = 70.1 bar: no phase change above
-  interfacial_area: polynomial
-  interfacial_area_params:
-    d_min: 6.5e-5                   # m, nucleation floor
+  interfacial_area: parabola
+  regime_htc: true
+  regime_blend: smoothstep
 
+# ── Case numerics (the per-stage ones are in main_cold_start.py) ──────────────
 numerics:
   pin_ghost_momentum: true
-  eps_void: 0.2
+  lowmach_diss_bc: 0.0
+  eps_void: 0.25
+  eps_ghost: 0.25
 
 # ── Stage-1 initial condition: the HEM design (stages 2+ restart) ─────────────
 ic:
   type: nozzlex_csv
   run: design_case4/hem_seed_s10_a3e-3.csv    # relative to this folder
-  alpha_floor: 3.0e-3
 
 # ── Boundary conditions ───────────────────────────────────────────────────────
 bc:
   p0:            12000000.0
   T_g0:          295.0
   T_l0:          295.0
-  void_fraction: 3.0e-3             # set per stage
+  void_fraction: 1.0e-3             # set per stage
   p_out:         2000000.0
-  p_out_ramp_steps: 0               # the HEM seed already sits at p_out: no ramp
-  p_out_relax: 1.0
 
 run:
-  n_steps: 40000
-  cpu_affinity: "0-15"
-  plateau_window: 2000              # stop once SSR stays within 1% for 2000 steps
-                                    # (default 4000; true plateaus here are flat to
-                                    # <1%, transient stalls wander by ~10%)
+  n_steps: 20000
+  ssr_tol: 1.0e-8
 
 save_options:
   repo_main: ../case_study/data_assimilation/results

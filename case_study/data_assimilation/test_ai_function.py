@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
+from nozzle_hyperbolic.fvm_solver.source_two_fluid import interfacial_area_para, interfacial_area_segments
 
 
 def interfacial_area(
@@ -349,6 +349,8 @@ if __name__ == "__main__":
     ai_tr, d_tr = (np.asarray(x) for x in interfacial_area_truth(a))
     ai_po, d_po = (np.asarray(x) for x in interfacial_area_poly(a))
     ai_pp, d_pp = (np.asarray(x) for x in interfacial_area_poly_prior(a))
+    ai_par, d_par = (np.asarray(x) for x in interfacial_area_para(a, d_min=1e-5))
+    ai_seg, d_seg = (np.asarray(x) for x in interfacial_area_segments(a, d_min=1e-5))
 
     # --- Diameter checks: d = 6 alpha_disp / ai in the two dispersed regimes ---
     alpha_hard = np.minimum(alpha, 1.0 - alpha)
@@ -397,10 +399,12 @@ if __name__ == "__main__":
         fig.tight_layout()
         fig.savefig(os.path.join(here, filename), dpi=200)
 
-    make_figure("Prior", [("Prior", "-", ai_p, d_p)], "prior.png")
-    make_figure("DA", [("Prior", "-", ai_p, d_p), ("DA", "--", ai_po, d_po)], "DA.png") #("DA asymmetric", ":", ai_as, d_as)], "DA.png")
-    make_figure("DA", [("Truth", "--", ai_tr, d_tr), ("Polynomial", "-", ai_po, d_po)], "truth.png")
-    make_figure("Prior polynomial", [("Prior", "-", ai_p, d_p), ("Polynomial", "--", ai_pp, d_pp)], "prior_poly.png")
+    # make_figure("Prior", [("Prior", "-", ai_p, d_p)], "prior.png")
+    # make_figure("DA", [("Prior", "-", ai_p, d_p), ("DA", "--", ai_po, d_po)], "DA.png") #("DA asymmetric", ":", ai_as, d_as)], "DA.png")
+    # make_figure("DA", [("Truth", "--", ai_tr, d_tr), ("Polynomial", "-", ai_po, d_po)], "truth.png")
+    # make_figure("Prior polynomial", [("Prior", "-", ai_p, d_p), ("Polynomial", "--", ai_pp, d_pp)], "prior_poly.png")
+    make_figure("Parabola", [("Parabola", "-", ai_par, d_par)], "parabola.png")
+    make_figure("DA", [("Truth", "--", ai_par, d_par), ("Segments", "-", ai_seg, d_seg)], "DA_test.png")
 
     # --- Two-field interfacial area (bubbly + droplet field) vs. points read by eye from the reference figure ---
     ai_tf, ai_tf_b, ai_tf_d = (np.asarray(x) for x in interfacial_area_two_field(a))

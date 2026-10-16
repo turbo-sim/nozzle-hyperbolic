@@ -19,6 +19,7 @@ sources:
   area_source:    true         # was the AREA_SRC constant in main_two_fluid.py
   p_phase_change_max: null     # no phase change above this fraction of p_crit
   regime_htc:     false        # NICFD interphase HTC (bubbly-regime HTC at every alpha)
+  regime_blend:   linear       # drag / regime-HTC transition weight: linear | smoothstep
   interfacial_area: polynomial # original | polynomial | parabola (source_two_fluid.py)
   interfacial_area_params: null
 

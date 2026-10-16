@@ -66,7 +66,7 @@ eos:
 
 # ── Grid ──────────────────────────────────────────────────────────────────────
 grid:
-  Nx: 200                           # cold start: the p_out ramp is sized for N ~ 100
+  Nx: 400                           # cold start: the p_out ramp is sized for N ~ 100
   x1: 0.0
   x2: 1.0                           # m - the exported geometry spans [0, 1] m
 
@@ -81,13 +81,23 @@ sources:
   bubble_number:  1.0e12            # same as the SMD / nitrogen flashing cases
   droplet_number: 1.0e10
   p_phase_change_max: 0.95          # x p_crit = 70.1 bar: no phase change above
+  interfacial_area: parabola
+  interfacial_area_params:
+    d_min: 1.0e-5
+  regime_htc: true
+  regime_blend: smoothstep
 
 # ── Numerics: cold-start defaults, plus the ghost momentum pin every recent
 #    flashing case uses ─────────────────────────────────────────────────────────
 numerics:
   pin_ghost_momentum: true
-  lowmach_diss_bc: 1.0
-  CFL: 2.0
+  lowmach_diss_bc: 0.0
+  CFL: 4.0
+  eps_void: 0.25
+  eps_ghost: 0.25
+  alpha_eps: 1.0e-8
+  eps_ghost_alo: 1.0e-8
+  pin_mom_alpha: 1.0e-4
 
 # ── Boundary conditions ───────────────────────────────────────────────────────
 # Inherited: stagnation inlet, characteristic outlet, ramp p0 -> p_out over 1000
@@ -98,6 +108,7 @@ bc:
   T_l0:          295.0
   void_fraction: 1.0e-5
   p_out:         2000000.0
+  # p_out_ramp_steps: 5000
 
 # ── Run control ───────────────────────────────────────────────────────────────
 run:
@@ -109,12 +120,15 @@ run:
 # results in ./results of this folder.
 save_options:
   repo_main: ../case_study/data_assimilation/results
-  repo_run: test_new_area
+  repo_run: test_cold_start_manual
 
 time_control:
   ser_beta:     0.7
 
 
 ic:
+  # type: nozzlex_csv
+  # run: design_case4/hem_seed_s10_a3e-3.csv
   type: restart
-  run: ../case_study/data_assimilation/results/test_new_area_N200_muscl_van_albada_20261014_161335
+  run: results/test_cold_start_manual_N400_muscl_van_albada_20261015_161224   # relative to this folder (main.py runs from here)
+  alpha_floor: 1.0e-8

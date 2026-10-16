@@ -309,7 +309,7 @@ def _plot_state(U_h_arr, title, out_png):
         area_inter[i], _ = _area_law(ag_i, Nb=cfg.BUBBLE_NUMBER, Nd=cfg.DROPLET_NUMBER)
 
     du = U[:, 1] - U[:, 2]                       # slip velocity u_g - u_l
-    fig, ax = plt.subplots(4, 2, figsize=(5, 14), sharex=True)
+    fig, ax = plt.subplots(4, 2, figsize=(10, 14), sharex=True)
     ax = ax.flatten()
     fig.suptitle(title, fontsize=9)
     ax[0].plot(x, A, color="black", lw=1.0, marker="o", markersize=2)
@@ -549,6 +549,7 @@ def _sources_fn(u_h, eos_g, eos_l, cq, dlnA, sat_g, sat_l):
             mass_transfer = cfg.MASS_TRANSFER,
             p_mt_max = P_MT_MAX,
             regime_htc = cfg.REGIME_HTC,
+            regime_blend = cfg.REGIME_BLEND,
             area_law = cfg.INTERFACIAL_AREA,
             area_params = cfg.INTERFACIAL_AREA_PARAMS,
         )
@@ -971,6 +972,7 @@ if cfg.MASS_TRANSFER and SRC_SCALE != 0.0:
             mass_transfer = True,
             p_mt_max = P_MT_MAX,
             regime_htc = cfg.REGIME_HTC,
+            regime_blend = cfg.REGIME_BLEND,
             area_law = cfg.INTERFACIAL_AREA,
             area_params = cfg.INTERFACIAL_AREA_PARAMS,
         )

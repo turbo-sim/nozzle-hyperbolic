@@ -46,7 +46,7 @@ LEGACY_DEFAULTS = SETTINGS_DIR / "defaults_legacy.yaml"
 # chain (KeyError otherwise); keys not listed are rejected in new-style files.
 SCHEMA = {
     "sources": ["bubble_number", "droplet_number", "mass_transfer", "scale",
-                "area_source", "p_phase_change_max", "regime_htc",
+                "area_source", "p_phase_change_max", "regime_htc", "regime_blend",
                 "interfacial_area", "interfacial_area_params"],
     "grid": ["Nx", "x1", "x2", "radius"],
     "numerics": [
@@ -369,6 +369,12 @@ def load_config(yaml_path, overrides=None, override_label="override") -> types.S
     # alpha); true = regime-dependent (bubbly / linear blend / droplet).  .get:
     # resolved settings of runs older than this key load with the NICFD closure.
     cfg.REGIME_HTC = bool(src.get("regime_htc", False))
+    # Weight across the bubbly -> droplet transition (alpha_b..alpha_d) of the
+    # drag and of the regime HTC: linear (kinked slope at both ends) | smoothstep
+    # (C1).  .get: older resolved settings load with the linear blend.
+    cfg.REGIME_BLEND = str(src.get("regime_blend", "linear"))
+    if cfg.REGIME_BLEND not in ("linear", "smoothstep"):
+        raise ValueError(f"sources.regime_blend = {cfg.REGIME_BLEND!r}: use linear | smoothstep")
     # Interfacial area law by name (source_two_fluid.INTERFACIAL_AREA_LAWS:
     # original | polynomial | parabola) and an optional dict of keyword overrides
     # for it (e.g. {d_min: 6.5e-5}).  .get: older resolved settings load with the
