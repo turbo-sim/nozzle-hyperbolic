@@ -1,0 +1,58 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# RESTART ladder: CO2 design case 4 from the truth solution, for a new closure
+#
+# Starts from the converged truth (parabola area law, N = 400, inlet void 1e-3)
+# instead of the HEM design, so a new closure (e.g. an interfacial area law, set in
+# settings_case4.yaml or overridden below / with --set) does not have to go through
+# the cold start-up:  N200 1e-3  ->  N400 1e-3  ->  N400 1e-5,  SER on (ser_beta 0.5).
+# Stage 1 interpolates the truth onto its grid; every later stage restarts from the
+# previous one.  The case (physics, closure, reservoir) is settings_case4.yaml.
+#
+#     python main_ladder.py settings_ladder_restart.yaml
+#     python main_ladder.py settings_ladder_restart.yaml \
+#         --set "sources.interfacial_area_params={ai_pts: [100.0, 3900.0, 15000.0, 24000.0, 20000.0, 100.0]}"
+# ─────────────────────────────────────────────────────────────────────────────
+base: settings_case4.yaml
+
+# The truth: parabola law, N400, void 1e-3, SSR 9.75e-9 (main_ladder.py, 2026-10-16;
+# identical to results/c4_cold_S3_N400_muscl_van_albada_20261015_190609).
+ic:
+  type: restart
+  run: results/ladder_S3_N400_muscl_van_albada_20261016_112644   # relative to this folder
+
+save_options:
+  repo_run: restart                 # results/restart_S<i>_..._N<Nx>_<recon>_<time>
+
+# ── The ladder (stage keys and acceptance as in settings_ladder_cold.yaml) ─────
+# Same grids, CFLs, ghost numerics and retries as the matching cold-ladder stages;
+# SER on with ser_beta 0.5 in every stage.
+ladder:
+  accept_ssr: 1.0e-6
+  max_splits: 2
+  stages:
+    - name: N200                    # truth interpolated N400 -> N200, thick ghost
+      grid:         {Nx: 200}
+      bc:           {void_fraction: 1.0e-3}
+      numerics:     {recon: muscl_van_albada, CFL: 0.5,
+                     alpha_eps: 1.0e-6, eps_ghost_alo: 1.0e-5, pin_mom_alpha: null}
+      time_control: {ser_beta: 0.5}
+      run:          {n_steps: 15000, ssr_tol: 1.0e-8, t_end: null}
+      retry:        {time_control: {ser_beta: 0.0}}
+
+    - name: N400
+      grid:         {Nx: 400}
+      bc:           {void_fraction: 1.0e-3}
+      numerics:     {recon: muscl_van_albada, CFL: 2.0,
+                     alpha_eps: 1.0e-6, eps_ghost_alo: 1.0e-5, pin_mom_alpha: null}
+      time_control: {ser_beta: 0.5}
+      run:          {n_steps: 15000, ssr_tol: 1.0e-8, t_end: null}
+      retry:        {numerics: {CFL: 0.5}, time_control: {ser_beta: 0.0}}
+
+    - name: v1e-5                   # 1e-3 -> 1e-5 in one jump, thin ghost
+      grid:         {Nx: 400}
+      bc:           {void_fraction: 1.0e-5}
+      numerics:     {recon: muscl_van_albada, CFL: 4.0,
+                     alpha_eps: 1.0e-8, eps_ghost_alo: 1.0e-8, pin_mom_alpha: 1.0e-4}
+      time_control: {ser_beta: 0.5}
+      run:          {n_steps: 20000, ssr_tol: 1.0e-8, t_end: 0.05}
+      split:        true

@@ -1,17 +1,21 @@
 """
-Interfacial area along the nozzle, two runs in one figure.
-==========================================================
+Interfacial area of several runs: along the nozzle, and as a function of alpha.
+=================================================================================
 
 Each run's area law is rebuilt from the run's own resolved settings
 (sources.interfacial_area / interfacial_area_params / bubble_number / droplet_number,
 called the way sources.py calls it) and evaluated on the run's converged alpha_g(x).
+The FIRST run is the reference (e.g. the parabola "truth"); every run keeps the same
+colour in both figures.
 
-    python plot_interfacial_area_compare.py                       # parabola vs segments (defaults below)
-    python plot_interfacial_area_compare.py RUN_A RUN_B           # any two run folders
-    python plot_interfacial_area_compare.py RUN_A RUN_B --out ai.png --show
+    python plot_interfacial_area_compare.py                    # the three default runs below
+    python plot_interfacial_area_compare.py REF RUN2 [RUN3 ...] --labels "truth" "case 2" ...
+    python plot_interfacial_area_compare.py ... --out cases_x.png --out-alpha cases_alpha.png --show
 
-Panels: a_i(x) of both runs; the ratio a_i(B) / a_i(A) on A's grid; alpha_g(x) of both
-(the a_i difference comes from both the law and the different void profile); p(x) of both.
+Figure 1 (--out), along x: a_i; a_i / a_i(reference) on the reference grid; alpha_g; p
+(with a zoom on the two-phase part).
+Figure 2 (--out-alpha): a_i(alpha) of each law over 0..1, with the control points of
+'segments' laws and the alpha range the runs do not reach shaded.
 Note: interfacial_area_params: null means the law's CURRENT code defaults - if they
 changed after the run, the plot no longer shows what the run used.
 """
@@ -33,11 +37,16 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[1]))
 from nozzle_hyperbolic.fvm_solver.source_two_fluid import get_interfacial_area  # noqa: E402
 
-DEFAULT_A = "results/c4_cold_S4_v1e-05_N400_*"         # parabola, N400, inlet void 1e-5
-DEFAULT_B = "results/segments_S4_v1e-5_N400_*"         # segments, N400, inlet void 1e-5
+DEFAULT_RUNS = [
+    ("results/rsA_parabola_S3_v1e-5_N400_*", "parabola (truth)"),
+    # ("results/rsC_sgG_S3_v1e-5_N400_*", "segments, original points"),
+    # ("results/cold_S4_v1e-5_N400_muscl_van_albada_20261021_193548", "polynomial-cold"),
+    ("results/restart_S3_v1e-5_N400_muscl_van_albada_20261021_201402", "polynomial-restart"),
+    # ("results/rsB500_S3_v1e-5_N500_*", "segments"),
+]
 
-# Reference palette (dataviz skill): categorical slots 1-2, surface and ink tokens.
-SERIES = ("#2a78d6", "#eb6834")
+# Reference palette (dataviz skill): categorical slots in fixed order, surface and ink tokens.
+SERIES = ("#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300")
 SURFACE, INK, INK_2, GRID = "#fcfcfb", "#0b0b0b", "#52514e", "#e4e3df"
 
 
@@ -48,12 +57,13 @@ def resolve_run(spec):
     return pathlib.Path(hits[-1])
 
 
-def load_run(run_dir):
-    """x, alpha_g, a_i, d and a label for one run folder."""
+def load_run(run_dir, label=None):
+    """Solution, area law (callable on alpha arrays) and metadata of one run folder."""
     with open(run_dir / "run_info.yaml", encoding="utf-8") as f:
         name = (yaml.safe_load(f).get("settings") or {}).get("resolved_file")
     with open(run_dir / name, encoding="utf-8") as f:
-        src = yaml.safe_load(f)["sources"]
+        cfg = yaml.safe_load(f)
+    src = cfg["sources"]
     law_name = src["interfacial_area"]
     params = src.get("interfacial_area_params") or {}
     law = get_interfacial_area(law_name, params)
@@ -63,9 +73,18 @@ def load_run(run_dir):
     sol = np.genfromtxt(run_dir / "solution.csv", delimiter=",", names=True)
     x, ag = np.asarray(sol["x"]), np.asarray(sol["alpha_g"])
     ai, d = (np.asarray(v) for v in ev(jnp.asarray(ag)))
-    label = law_name + ("" if params else " (code defaults)")
-    return dict(x=x, ag=ag, ai=ai, d=d, p=np.asarray(sol["p"]) / 1e5,
-                label=label, law=law_name, dir=run_dir)
+    mdot = ((sol["alpha_g"] * sol["rho_g"] * sol["u_g"]
+             + (1 - sol["alpha_g"]) * sol["rho_l"] * sol["u_l"]) * sol["A"])[1:-1].mean()
+    pts = None
+    if law_name == "segments":
+        from nozzle_hyperbolic.fvm_solver.source_two_fluid import interfacial_area_segments
+        import inspect
+        dflt = inspect.signature(interfacial_area_segments).parameters
+        pts = (np.asarray(params.get("alpha_pts", dflt["alpha_pts"].default), float),
+               np.asarray(params.get("ai_pts", dflt["ai_pts"].default), float))
+    return dict(x=x, ag=ag, ai=ai, d=d, p=np.asarray(sol["p"]) / 1e5, mdot=mdot, ev=ev,
+                pts=pts, law=law_name, label=label or law_name, dir=run_dir,
+                nx=int(cfg["grid"]["Nx"]))
 
 
 def style_axes(ax):
@@ -83,94 +102,118 @@ def style_axes(ax):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("run_a", nargs="?", default=DEFAULT_A, help="reference run folder (glob ok)")
-    ap.add_argument("run_b", nargs="?", default=DEFAULT_B, help="compared run folder (glob ok)")
-    ap.add_argument("--out", default="interfacial_area_compare.png", help="output PNG (relative to this folder)")
-    ap.add_argument("--show", action="store_true", help="also open the figure window")
+    ap.add_argument("runs", nargs="*", help="run folders (glob ok); the first is the reference")
+    ap.add_argument("--labels", nargs="*", help="one label per run (default: law names)")
+    ap.add_argument("--out", default="interfacial_area_cases_x.png",
+                    help="figure along x (PNG, relative to this folder)")
+    ap.add_argument("--out-alpha", default="interfacial_area_cases_alpha.png",
+                    help="figure a_i(alpha) (PNG, relative to this folder)")
+    ap.add_argument("--show", action="store_true", help="also open the figure windows")
     cli = ap.parse_args()
     if not cli.show:
         matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    A, B = load_run(resolve_run(cli.run_a)), load_run(resolve_run(cli.run_b))
-    ai_b_on_a = np.interp(A["x"], B["x"], B["ai"])
-    ratio = ai_b_on_a / A["ai"]
+    if cli.runs:
+        specs = cli.runs
+        labels = cli.labels or [None] * len(specs)
+    else:
+        specs = [s for s, _ in DEFAULT_RUNS]
+        labels = cli.labels or [lab for _, lab in DEFAULT_RUNS]
+    if len(specs) < 2 or len(labels) != len(specs) or len(specs) > len(SERIES):
+        raise SystemExit(f"give 2..{len(SERIES)} runs and as many labels")
+    runs = [load_run(resolve_run(s), lab) for s, lab in zip(specs, labels)]
+    ref = runs[0]
+    for k, r in enumerate(runs):
+        r["color"] = SERIES[k]
 
-    fig, axes = plt.subplots(4, 1, figsize=(8.0, 11.0), sharex=True,
+    # ── Figure 1: along the nozzle ─────────────────────────────────────────
+    fig, axes = plt.subplots(4, 1, figsize=(8.6, 11.0), sharex=True,
                              gridspec_kw={"height_ratios": [1.6, 1.0, 1.0, 1.3]})
     fig.patch.set_facecolor(SURFACE)
     for ax in axes:
         style_axes(ax)
 
-    # 1 - interfacial area
     ax = axes[0]
-    for run, c in zip((A, B), SERIES):
-        ax.plot(run["x"], run["ai"], color=c, linewidth=1.6, label=run["label"])
-        ax.annotate(run["law"], xy=(run["x"][-1], run["ai"][-1]), xytext=(6, 0),
-                    textcoords="offset points", va="center", fontsize=9, color=INK_2)
+    for r in runs:
+        ax.plot(r["x"], r["ai"], color=r["color"], linewidth=1.6, label=r["label"])
     ax.set_ylabel(r"$a_i$  [1/m]")
     ax.legend(frameon=False, fontsize=9, labelcolor=INK, loc="upper left")
     ax.set_title("Interfacial area along the nozzle", loc="left", fontsize=11, color=INK)
 
-    # 2 - ratio
     ax = axes[1]
     ax.axhline(1.0, color=INK_2, linewidth=0.8, linestyle=(0, (4, 3)))
-    ax.plot(A["x"], ratio, color=INK, linewidth=1.6)
-    i_max, i_min = int(np.argmax(ratio)), int(np.argmin(ratio))
-    lo, hi = min(ratio.min(), 1.0), max(ratio.max(), 1.0)
-    pad = 0.15 * (hi - lo) + 1e-3
-    ax.set_ylim(lo - pad, hi + pad)
-    for i, dy in ((i_max, 6), (i_min, -14)):
-        right = A["x"][i] > A["x"][0] + 0.75 * (A["x"][-1] - A["x"][0])
-        ax.annotate(f"{ratio[i]:.2f} at x = {A['x'][i]:.2f}", xy=(A["x"][i], ratio[i]),
-                    xytext=(-6 if right else 6, dy), textcoords="offset points",
-                    ha="right" if right else "left", fontsize=8.5, color=INK_2)
-    ax.set_ylabel(f"$a_i$ ratio\n{B['law']} / {A['law']}")
+    for r in runs[1:]:
+        ratio = np.interp(ref["x"], r["x"], r["ai"]) / ref["ai"]
+        ax.plot(ref["x"], ratio, color=r["color"], linewidth=1.6)
+    ax.set_ylabel(f"$a_i$ / $a_i$ of\n{ref['label']}")
 
-    # 3 - void fraction (context)
     ax = axes[2]
-    for run, c in zip((A, B), SERIES):
-        ax.plot(run["x"], run["ag"], color=c, linewidth=1.6, label=run["label"])
+    for r in runs:
+        ax.plot(r["x"], r["ag"], color=r["color"], linewidth=1.6)
     ax.set_ylabel(r"$\alpha_g$  [-]")
-    ax.legend(frameon=False, fontsize=9, labelcolor=INK, loc="upper left")
 
-    # 4 - pressure
     ax = axes[3]
-    for run, c in zip((A, B), SERIES):
-        ax.plot(run["x"], run["p"], color=c, linewidth=1.6, label=run["label"])
+    for r in runs:
+        ax.plot(r["x"], r["p"], color=r["color"], linewidth=1.6)
     ax.set_ylabel(r"$p$  [bar]")
     ax.set_xlabel("x  [m]")
-    ax.legend(frameon=False, fontsize=9, labelcolor=INK, loc="lower left")
-    # zoom on the two-phase part, where the runs differ
     ins = ax.inset_axes([0.53, 0.40, 0.45, 0.55])
     style_axes(ins)
-    x0 = 0.5 * (A["x"][0] + A["x"][-1])
-    for run, c in zip((A, B), SERIES):
-        m = run["x"] >= x0
-        ins.plot(run["x"][m], run["p"][m], color=c, linewidth=1.4)
-    pz = np.concatenate([run["p"][run["x"] >= x0] for run in (A, B)])
-    ins.set_xlim(x0, A["x"][-1])
+    x0 = 0.5 * (ref["x"][0] + ref["x"][-1])
+    pz = []
+    for r in runs:
+        m = r["x"] >= x0
+        ins.plot(r["x"][m], r["p"][m], color=r["color"], linewidth=1.4)
+        pz.append(r["p"][m])
+    pz = np.concatenate(pz)
+    ins.set_xlim(x0, ref["x"][-1])
     ins.set_ylim(pz.min() - 0.1 * np.ptp(pz), pz.max() + 0.1 * np.ptp(pz))
     ins.tick_params(labelsize=8)
     ins.set_title("x > %.1f m" % x0, fontsize=8.5, color=INK_2, loc="left")
 
     fig.tight_layout()
-    out = HERE / cli.out
-    fig.savefig(out, dpi=150, facecolor=SURFACE)
-    print(f"A: {A['dir'].name}  ({A['label']})")
-    print(f"B: {B['dir'].name}  ({B['label']})")
-    print(f"ratio a_i(B)/a_i(A): max {ratio[i_max]:.2f} at x = {A['x'][i_max]:.3f}, "
-          f"min {ratio[i_min]:.2f} at x = {A['x'][i_min]:.3f}")
-    p_b_on_a = np.interp(A["x"], B["x"], B["p"])
-    dp = p_b_on_a - A["p"]; k = int(np.argmax(np.abs(dp)))
-    print(f"pressure p(B) - p(A): max |dp| {abs(dp[k]):.2f} bar ({100 * abs(dp[k]) / A['p'][k]:.1f} %) "
-          f"at x = {A['x'][k]:.3f}")
-    print("   x      alpha_A  alpha_B    a_i A     a_i B    ratio    p A [bar]  p B [bar]")
-    for xq in (0.45, 0.50, 0.55, 0.60, 0.65, 0.70, 0.80, 0.90, 1.00):
-        j = int(np.argmin(np.abs(A["x"] - xq)))
-        print(f"  {A['x'][j]:.3f}  {A['ag'][j]:7.4f}  {np.interp(A['x'][j], B['x'], B['ag']):7.4f}  "
-              f"{A['ai'][j]:8.0f}  {ai_b_on_a[j]:8.0f}  {ratio[j]:6.2f}   {A['p'][j]:8.2f}   {p_b_on_a[j]:8.2f}")
-    print(f"figure -> {out}")
+    out_x = HERE / cli.out
+    fig.savefig(out_x, dpi=150, facecolor=SURFACE)
+
+    # ── Figure 2: a_i(alpha) of the laws ───────────────────────────────────
+    fig2, ax = plt.subplots(figsize=(8.6, 5.0))
+    fig2.patch.set_facecolor(SURFACE)
+    style_axes(ax)
+    a_grid = np.linspace(0.0, 1.0, 2001)
+    a_reach = max(r["ag"].max() for r in runs)
+    ax.axvspan(a_reach, 1.0, color=GRID, alpha=0.6, linewidth=0)
+    for r in runs:
+        ai_g = np.asarray(r["ev"](jnp.asarray(a_grid))[0])
+        ax.plot(a_grid, ai_g, color=r["color"], linewidth=1.8, label=r["label"])
+        if r["pts"] is not None:
+            ax.plot(r["pts"][0], r["pts"][1], linestyle="none", marker="o", markersize=5.5,
+                    markerfacecolor=r["color"], markeredgecolor=SURFACE, markeredgewidth=1.2)
+    ax.text(a_reach + 0.01, ax.get_ylim()[1] * 0.97,
+            "not reached in\nthe nozzle\n" + r"($\alpha_g$ > " + f"{a_reach:.2f})",
+            fontsize=8.5, color=INK_2, va="top")
+    ax.set_xlim(0.0, 1.0)
+    ax.set_xlabel(r"$\alpha_g$  [-]")
+    ax.set_ylabel(r"$a_i$  [1/m]")
+    ax.set_title("Interfacial area laws", loc="left", fontsize=11, color=INK)
+    ax.legend(frameon=False, fontsize=9, labelcolor=INK, loc="lower center")
+    fig2.tight_layout()
+    out_a = HERE / cli.out_alpha
+    fig2.savefig(out_a, dpi=150, facecolor=SURFACE)
+
+    # ── Console summary ────────────────────────────────────────────────────
+    for k, r in enumerate(runs):
+        tag = "reference" if k == 0 else f"vs ref: max |dp| {np.max(np.abs(np.interp(ref['x'], r['x'], r['p']) - ref['p'])):.2f} bar"
+        print(f"[{k}] {r['label']:28s} {r['law']:9s} N={r['nx']:<4d} mdot={r['mdot']:.3f} kg/s  {tag}\n"
+              f"    {r['dir'].name}")
+    print("\n   x     " + "".join(f"| {'alpha':>6s} {'a_i':>7s} {'p':>6s}  " for _ in runs))
+    for xq in (0.50, 0.55, 0.60, 0.65, 0.70, 0.80, 0.90, 1.00):
+        j = int(np.argmin(np.abs(ref["x"] - xq)))
+        xx = ref["x"][j]
+        row = "".join(f"| {np.interp(xx, r['x'], r['ag']):6.3f} {np.interp(xx, r['x'], r['ai']):7.0f} "
+                      f"{np.interp(xx, r['x'], r['p']):6.2f}  " for r in runs)
+        print(f"  {xx:.3f}  {row}")
+    print(f"\nfigures -> {out_x}\n           {out_a}")
     if cli.show:
         plt.show()
 

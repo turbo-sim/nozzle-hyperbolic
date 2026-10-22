@@ -1,16 +1,21 @@
 """
-Ladder of stages from the HEM design to the N = 400 thin-ghost solution.
+Ladder of stages to the N = 400 thin-ghost solution of CO2 design case 4.
 =========================================================================
 
-The stages are defined in the settings file (`ladder:` block of settings_ladder.yaml),
-each one as ordinary settings overrides on top of the case.  Stage 1 starts from the
-case's ic (the nozzlex HEM seed); every later stage restarts from the previous one,
+The stages are defined in a ladder file (its `ladder:` block), each one as ordinary
+settings overrides on top of the case (settings_case4.yaml).  Two ladders:
+
+    settings_ladder_cold.yaml      from the HEM design:  N80 -> N200 -> N400 -> void 1e-5
+    settings_ladder_restart.yaml   from the truth (parabola, N400, void 1e-3):
+                                   N200 -> N400 -> void 1e-5, for a new closure
+
+Stage 1 starts from the ladder's ic; every later stage restarts from the previous one,
 interpolated onto its grid.  Each stage is an ordinary main_two_fluid.py run with its
 own results folder; the generated stage settings and summary.txt go into
 results/<repo_run>_ladder_<time>/.
 
-    python main_ladder.py                                  # settings_ladder.yaml, all stages
-    python main_ladder.py other.yaml                       # another ladder file
+    python main_ladder.py                                  # settings_ladder_cold.yaml, all stages
+    python main_ladder.py settings_ladder_restart.yaml     # the restart ladder
     python main_ladder.py --stages 3-4 --restart results/<N200 run folder>
     python main_ladder.py --stages 4 --restart results/<N400 run folder> \
                           --set numerics.CFL=8 --set run.t_end=0.08 --tag try_cfl8
@@ -307,7 +312,7 @@ def main(cli):
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0],
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("settings", nargs="?", default="settings_ladder.yaml",
+    ap.add_argument("settings", nargs="?", default="settings_ladder_restart.yaml",
                     help="ladder settings file, relative to this folder")
     ap.add_argument("--stages", help="e.g. 1-4, 3-4, 4 (default: all)")
     ap.add_argument("--restart", help="run folder to start from when --stages does not begin at 1")

@@ -66,7 +66,7 @@ eos:
 
 # ── Grid ──────────────────────────────────────────────────────────────────────
 grid:
-  Nx: 400                           # cold start: the p_out ramp is sized for N ~ 100
+  Nx: 200                           # cold start: the p_out ramp is sized for N ~ 100
   x1: 0.0
   x2: 1.0                           # m - the exported geometry spans [0, 1] m
 
@@ -81,9 +81,10 @@ sources:
   bubble_number:  1.0e12            # same as the SMD / nitrogen flashing cases
   droplet_number: 1.0e10
   p_phase_change_max: 0.95          # x p_crit = 70.1 bar: no phase change above
-  interfacial_area: parabola
+  interfacial_area: segments
   interfacial_area_params:
     d_min: 1.0e-5
+    ai_pts: [100.0, 6500.0, 22000.0, 12000.0, 5000.0, 100.0]
   regime_htc: true
   regime_blend: smoothstep
 
@@ -92,7 +93,7 @@ sources:
 numerics:
   pin_ghost_momentum: true
   lowmach_diss_bc: 0.0
-  CFL: 4.0
+  CFL: 0.5
   eps_void: 0.25
   eps_ghost: 0.25
   alpha_eps: 1.0e-8
@@ -106,7 +107,7 @@ bc:
   p0:            12000000.0
   T_g0:          295.0
   T_l0:          295.0
-  void_fraction: 1.0e-5
+  void_fraction: 1.0e-3
   p_out:         2000000.0
   # p_out_ramp_steps: 5000
 
@@ -123,12 +124,12 @@ save_options:
   repo_run: test_cold_start_manual
 
 time_control:
-  ser_beta:     0.7
+  ser_beta:     1.0
 
 
 ic:
   # type: nozzlex_csv
   # run: design_case4/hem_seed_s10_a3e-3.csv
   type: restart
-  run: results/test_cold_start_manual_N400_muscl_van_albada_20261015_161224   # relative to this folder (main.py runs from here)
+  run: results/ladder_S3_N400_muscl_van_albada_20261016_112644   # relative to this folder (main.py runs from here)
   alpha_floor: 1.0e-8

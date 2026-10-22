@@ -298,6 +298,67 @@ def interfacial_area_poly_prior(alpha, d_ctrl=(10e-6, 114e-6, 0.0, 318e-6, 718e-
     return ai, d
 
 
+def fit_bernstein_ai(alpha_pts, ai_pts, degree=10, lam=1e-3, n=4001):
+    """
+    Bernstein coefficients of a smooth polynomial ai(alpha) fitted to a piecewise-linear
+    ai (the 'segments' law: linear between (alpha_pts[k], ai_pts[k])).
+
+    The end values are kept exactly: ai(0) = ai_pts[0], ai(1) = ai_pts[-1] (first and last
+    Bernstein coefficients). The inner coefficients minimise the squared error over n
+    points in [0, 1] plus lam * n * |second differences of the coefficients|^2, with every
+    coefficient >= min(ai_pts) - so ai >= min(ai_pts) everywhere, and the coefficient
+    sequence stays smooth and shaped like the curve (lam = 0: closest fit, but the
+    coefficients jump around).
+
+    Returns the coefficients as a tuple (length degree + 1).
+    """
+    from scipy.optimize import lsq_linear
+
+    xs, ys = np.asarray(alpha_pts, float), np.asarray(ai_pts, float)
+    a = np.linspace(0.0, 1.0, n)
+    target = np.interp(a, xs, ys)
+    N = degree
+    B = np.stack([math.comb(N, k) * a**k * (1 - a) ** (N - k) for k in range(N + 1)], axis=1)
+    ends = np.array([ys[0], ys[-1]])
+    D2 = np.diff(np.eye(N + 1), 2, axis=0)
+    s = np.sqrt(lam * n)
+    A = np.vstack([B[:, 1:-1], s * D2[:, 1:-1]])
+    r = np.concatenate([target - B[:, [0, -1]] @ ends, -s * D2[:, [0, -1]] @ ends])
+    inner = lsq_linear(A, r, bounds=(ys.min(), np.inf)).x
+    return tuple(float(c) for c in np.concatenate([[ys[0]], inner, [ys[-1]]]))
+
+
+def interfacial_area_seg_poly(alpha,
+                              ai_ctrl=(100.0, 12342.0, 23401.0, 26272.0, 20992.0, 14931.0,
+                                       12818.0, 12545.0, 10153.0, 5255.0, 100.0),
+                              eps=0.1, d_min=1e-5):
+    """
+    Smooth polynomial version of interfacial_area_segments with the modified points
+    (alpha_pts 0, 0.05, 0.25, 0.7, 0.9, 1; ai_pts 100, 6500, 22000, 12000, 5000, 100).
+
+    ai is a Bernstein polynomial of degree N = len(ai_ctrl) - 1:
+      ai = sum_k ai_ctrl[k] * C(N, k) alpha^k (1 - alpha)^(N - k)
+    so ai(0) = ai_ctrl[0] and ai(1) = ai_ctrl[-1] exactly (100 1/m, as the segments), and
+    min(ai_ctrl) <= ai <= max(ai_ctrl). The diameter follows d = 6 alpha_disp / ai with the
+    floor d >= d_min, as in interfacial_area_para / interfacial_area_segments.
+
+    Default ai_ctrl: fit_bernstein_ai(segments points, degree=10, lam=1e-3), rounded.
+    Error vs the segments: rms 580 1/m (2.6 % of the peak), max 2330 1/m at the corner
+    alpha = 0.25; the peak is rounded off to 20330 1/m at alpha = 0.31 (segments: 22000
+    at 0.25), single maximum, no wiggles.
+
+    Returns
+    -------
+    ai : interfacial area density [1/m]
+    d : characteristic diameter [m]
+    """
+    N = len(ai_ctrl) - 1
+    ai = sum(c * math.comb(N, k) * alpha**k * (1.0 - alpha) ** (N - k) for k, c in enumerate(ai_ctrl))
+    alpha_disp = dispersed_fraction(alpha, eps)
+    d = jnp.maximum(6.0 * alpha_disp / ai, d_min)
+    return ai, d
+
+
 def interfacial_area_two_field(
     alpha,
     d_b=5.13e-3,
@@ -350,7 +411,7 @@ if __name__ == "__main__":
     ai_po, d_po = (np.asarray(x) for x in interfacial_area_poly(a))
     ai_pp, d_pp = (np.asarray(x) for x in interfacial_area_poly_prior(a))
     ai_par, d_par = (np.asarray(x) for x in interfacial_area_para(a, d_min=1e-5))
-    ai_seg, d_seg = (np.asarray(x) for x in interfacial_area_segments(a, d_min=1e-5))
+    ai_seg, d_seg = (np.asarray(x) for x in interfacial_area_segments(a, d_min=1e-5, ai_pts=(100.0, 6500.0, 22000.0, 12000.0, 5000.0, 100.0))) #ai_pts=(100.0, 2500.0, 12000.0, 24000.0, 20000.0, 100.0)))
 
     # --- Diameter checks: d = 6 alpha_disp / ai in the two dispersed regimes ---
     alpha_hard = np.minimum(alpha, 1.0 - alpha)
@@ -403,27 +464,39 @@ if __name__ == "__main__":
     # make_figure("DA", [("Prior", "-", ai_p, d_p), ("DA", "--", ai_po, d_po)], "DA.png") #("DA asymmetric", ":", ai_as, d_as)], "DA.png")
     # make_figure("DA", [("Truth", "--", ai_tr, d_tr), ("Polynomial", "-", ai_po, d_po)], "truth.png")
     # make_figure("Prior polynomial", [("Prior", "-", ai_p, d_p), ("Polynomial", "--", ai_pp, d_pp)], "prior_poly.png")
-    make_figure("Parabola", [("Parabola", "-", ai_par, d_par)], "parabola.png")
+    # make_figure("Parabola", [("Parabola", "-", ai_par, d_par)], "parabola.png")
     make_figure("DA", [("Truth", "--", ai_par, d_par), ("Segments", "-", ai_seg, d_seg)], "DA_test.png")
 
-    # --- Two-field interfacial area (bubbly + droplet field) vs. points read by eye from the reference figure ---
-    ai_tf, ai_tf_b, ai_tf_d = (np.asarray(x) for x in interfacial_area_two_field(a))
-    ref_b = np.array([[0.10, 120], [0.20, 215], [0.28, 248], [0.40, 235], [0.50, 210], [0.60, 170], [0.75, 100], [0.90, 35]])
-    ref_d = np.array([[0.25, 200], [0.375, 600], [0.50, 1050], [0.625, 1450], [0.72, 1620], [0.80, 1500], [0.85, 1200], [0.90, 800]])
+    # --- Smooth polynomial fit of the segments with the modified points ---
+    ai_sp, d_sp = (np.asarray(x) for x in interfacial_area_seg_poly(a))
+    err = ai_sp - ai_seg
+    print(f"seg_poly vs segments: rms {np.sqrt(np.mean(err**2)):.0f} 1/m, max {np.abs(err).max():.0f} 1/m "
+          f"at alpha = {alpha[np.abs(err).argmax()]:.3f}; ends {ai_sp[0]:.1f} / {ai_sp[-1]:.1f}; "
+          f"peak {ai_sp.max():.0f} at alpha = {alpha[ai_sp.argmax()]:.3f} (segments {ai_seg.max():.0f} "
+          f"at {alpha[ai_seg.argmax()]:.3f})")
+    make_figure("Segments vs polynomial fit",
+                [("Segments (modified points)", "-", ai_seg, d_seg),
+                 ("Polynomial fit (Bernstein, degree 10)", "--", ai_sp, d_sp)],
+                "segments_poly_fit.png")
 
-    fig, ax = plt.subplots(figsize=(6, 4))
-    ax.plot(alpha, ai_tf_b, "-", label="bubbly field")
-    ax.plot(alpha, ai_tf_d, "--", label="droplet field")
-    ax.plot(alpha, ai_tf, "k-", lw=2, label="sum")
-    ax.plot(*ref_b.T, "o", color="C0", mfc="none", label="reference (by eye)")
-    ax.plot(*ref_d.T, "s", color="C1", mfc="none")
-    for ac in (0.15, 0.85):
-        ax.axvline(ac, color="gray", ls=":", lw=1)
-    ax.set_xlabel(r"$\alpha$ [-]")
-    ax.set_ylabel(r"$a_i$ [1/m]")
-    ax.set_xlim(0, 1)
-    ax.set_ylim(bottom=0)
-    ax.legend()
-    fig.tight_layout()
-    fig.savefig(os.path.join(here, "two_field.png"), dpi=200)
+    # # --- Two-field interfacial area (bubbly + droplet field) vs. points read by eye from the reference figure ---
+    # ai_tf, ai_tf_b, ai_tf_d = (np.asarray(x) for x in interfacial_area_two_field(a))
+    # ref_b = np.array([[0.10, 120], [0.20, 215], [0.28, 248], [0.40, 235], [0.50, 210], [0.60, 170], [0.75, 100], [0.90, 35]])
+    # ref_d = np.array([[0.25, 200], [0.375, 600], [0.50, 1050], [0.625, 1450], [0.72, 1620], [0.80, 1500], [0.85, 1200], [0.90, 800]])
+
+    # fig, ax = plt.subplots(figsize=(6, 4))
+    # ax.plot(alpha, ai_tf_b, "-", label="bubbly field")
+    # ax.plot(alpha, ai_tf_d, "--", label="droplet field")
+    # ax.plot(alpha, ai_tf, "k-", lw=2, label="sum")
+    # ax.plot(*ref_b.T, "o", color="C0", mfc="none", label="reference (by eye)")
+    # ax.plot(*ref_d.T, "s", color="C1", mfc="none")
+    # for ac in (0.15, 0.85):
+    #     ax.axvline(ac, color="gray", ls=":", lw=1)
+    # ax.set_xlabel(r"$\alpha$ [-]")
+    # ax.set_ylabel(r"$a_i$ [1/m]")
+    # ax.set_xlim(0, 1)
+    # ax.set_ylim(bottom=0)
+    # ax.legend()
+    # fig.tight_layout()
+    # fig.savefig(os.path.join(here, "two_field.png"), dpi=200)
     plt.show()

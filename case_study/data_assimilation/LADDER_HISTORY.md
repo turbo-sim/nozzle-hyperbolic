@@ -1,5 +1,12 @@
 # Cold-start ladder for design case 4: what worked (2026-10-15)
 
+> **Layout since 2026-10-19.** The case (physics, closure, reservoir) is
+> `settings_case4.yaml`; two ladder files build on it and are run with `main_ladder.py`:
+> `settings_ladder_cold.yaml` (the ladder below, from the HEM design; it resolves to the
+> same stage settings as the former `settings_ladder.yaml`) and `settings_ladder_restart.yaml`
+> (from the truth, see the last section). `main_cold_start.py` / `settings_cold_start.yaml`
+> and `settings_ladder.yaml`, named in the dated notes below, no longer exist.
+
 Goal: from no knowledge (the nozzlex HEM design) to the production state, N = 400,
 `muscl_van_albada`, inlet ghost void 1e-5 (1e-6 later), fast enough to repeat for every
 interfacial area law. Implemented in `main_cold_start.py` (case file
@@ -226,3 +233,32 @@ code, settings only.
   candidate for 1e-6)
 - stage 1 without SER for marginal area laws (both converged segments shapes needed the
   no-SER retry)
+
+## Restart ladder (2026-10-19, settings_ladder_restart.yaml)
+
+Starts from the truth, `results/ladder_S3_N400_muscl_van_albada_20261016_112644`
+(parabola, N400, inlet void 1e-3, SSR 9.75e-9), with the closure of `settings_case4.yaml`
+(or `--set` overrides): N200 1e-3 (CFL 0.5) → N400 1e-3 (CFL 2) → N400 1e-5 (CFL 4, thin
+ghost, t_end 0.05). SER on with `ser_beta` 0.5 in every stage; ghost numerics and retries
+as in the matching cold stages. Tests (three ladders in parallel; A on P-cores 0-7,
+B on 8-15, C on E-cores 16-27):
+
+| run | area law | N200 | N400 | 1e-5 | result |
+|---|---|---|---|---|---|
+| rsA | parabola (the truth's law) | 992 steps, 78 s | 457, 68 s | 1173, 282 s | converged; = cold parabola 1e-5 state (ṁ 38.7163, p to 8e-9) |
+| rsC | segments SgG | 549, 77 s | 181, 42 s | 1198, 471 s | converged; = cold SgG 1e-5 state (ṁ 38.7501, p to 7e-9) |
+| rsB | segments [100, 6500, 22000, 12000, 5000, 100] | 913, 80 s | CFL 2: NaN at step 3487; retry CFL 0.5 no SER: 9207, 976 s | 1219, 266 s | converged (cold ladder fails this shape at N80) |
+
+So the restart path reaches the same steady states as the cold ladder, without the
+start-up transient. rsB, the shape that dies in the cold N80 start-up, converges from the truth.
+
+rsB and the N400 grid. The CFL 2 N400 stage fails on an odd-even limit cycle just behind the
+throat (x ≈ 0.56-0.57; σ_Mg 71 %, slip 69 % odd-even), the region of the non-unique N400
+fixed point above. The same stage at **N500** (CFL 2, SER 0.5, from the rsB N200 state)
+converges in 221 steps (37 s), and N500 1e-5 in 1565 steps. N400 and N500 agree on ṁ
+(38.192 / 38.175 kg/s, −0.04 %) and upstream / near the outlet (~1 % in p), but not just
+behind the throat: at N400 p falls 21.4 → 18.0 bar over three cells at x = 0.569-0.576 (with
+a bump at 0.566), at N500 it falls smoothly; p differs by 10 % at x = 0.6 and 6 % at 0.65.
+Thinning 1e-5 → 1e-6 (CFL 4, SER 0.5): N400 NaN at t = 0.015 s (front at the onset, as for
+the parabola); N500 survives to t_end but stays at SSR 5.2e-6 (not accepted; likely the
+pin floor at 1e-6). Runs: results/rsB_current_*, rsB500_*, rsB400_v1e-6_*, rsB500_v1e-6_*.
