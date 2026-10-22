@@ -307,8 +307,10 @@ def dispersed_fraction(alpha, eps=0.1):
     lo, mid = raw(1.0), raw(0.0)
     return 0.5 * (raw(2.0 * alpha - 1.0) - lo) / (mid - lo)
 
-
-def interfacial_area_poly(alpha, d_ctrl=(160e-6, 0.0, 320e-6, 0.0, 1455e-6), eps=0.1, d_min=1e-5,
+ 
+def interfacial_area_poly(alpha,
+        ai_ctrl=(100.0, 12342.0, 23401.0, 26272.0, 20992.0, 14931.0, 12818.0, 12545.0, 10153.0, 5255.0, 100.0),
+        eps=0.1, d_min=1e-5,
         alpha_b=0.3,  
         alpha_d=0.7,
         Nb=1e10,
@@ -316,35 +318,29 @@ def interfacial_area_poly(alpha, d_ctrl=(160e-6, 0.0, 320e-6, 0.0, 1455e-6), eps
         d_min_b=1e-5,
         d_min_d=1e-5,):
     """
-    Polynomial interfacial area density, parametrised by its diameter.
+    Smooth polynomial version of interfacial_area_segments with the modified points
+    (alpha_pts 0, 0.05, 0.25, 0.7, 0.9, 1; ai_pts 100, 6500, 22000, 12000, 5000, 100).
 
-    d = P(alpha) * (2 alpha_disp)^(1/3), with P a Bernstein polynomial of degree N = len(d_ctrl) - 1:
-      P = sum_k d_ctrl[k] * C(N, k) alpha^k (1 - alpha)^(N - k)
-    The cube-root factor is the fixed-number-density law of the prior (interfacial_area):
-    bubbles/droplets shrink as the dispersed phase vanishes, so d -> 0 at alpha = 0 and 1,
-    and ai = 6 alpha_disp / d ~ alpha_disp^(2/3) -> 0 there too. The factor equals 1 at alpha = 0.5.
-    P is the diameter the structures would have at alpha_disp = 0.5, i.e. (3 / (pi N))^(1/3) with a
-    number density N(alpha); d <= max(d_ctrl) everywhere.
+    ai is a Bernstein polynomial of degree N = len(ai_ctrl) - 1:
+      ai = sum_k ai_ctrl[k] * C(N, k) alpha^k (1 - alpha)^(N - k)
+    so ai(0) = ai_ctrl[0] and ai(1) = ai_ctrl[-1] exactly (100 1/m, as the segments), and
+    min(ai_ctrl) <= ai <= max(ai_ctrl). The diameter follows d = 6 alpha_disp / ai with the
+    floor d >= d_min, as in interfacial_area_para / interfacial_area_segments.
 
-    Default d_ctrl [m] is a least-squares fit (relative error in d over 0.1 < alpha < 0.9) to
-    interfacial_area_truth: max error 8% in d there, 6% of the peak in ai.
-
-    Nucleation / breakup floor (as in interfacial_area): d never drops below d_min. Below it the
-    structures keep their number density n = 3 / (pi P^3) but stop shrinking, so
-    ai = n pi d_min^2 = 3 d_min^2 / P^3: d(0), d(1) = d_min and ai(0), ai(1) > 0. Continuous where
-    d reaches d_min; there ai = 6 alpha_disp / d stops holding (as in the prior's floors).
+    Default ai_ctrl: fit_bernstein_ai(segments points, degree=10, lam=1e-3), rounded.
+    Error vs the segments: rms 580 1/m (2.6 % of the peak), max 2330 1/m at the corner
+    alpha = 0.25; the peak is rounded off to 20330 1/m at alpha = 0.31 (segments: 22000
+    at 0.25), single maximum, no wiggles.
 
     Returns
     -------
     ai : interfacial area density [1/m]
     d : characteristic diameter [m]
     """
-    N = len(d_ctrl) - 1
-    P = sum(c * math.comb(N, k) * alpha**k * (1.0 - alpha) ** (N - k) for k, c in enumerate(d_ctrl))
+    N = len(ai_ctrl) - 1
+    ai = sum(c * math.comb(N, k) * alpha**k * (1.0 - alpha) ** (N - k) for k, c in enumerate(ai_ctrl))
     alpha_disp = dispersed_fraction(alpha, eps)
-    # = max(P (2 alpha_disp)^(1/3), d_min), floored inside the cbrt so its gradient at alpha_disp = 0 stays finite
-    d = P * jnp.cbrt(jnp.maximum(2.0 * alpha_disp, (d_min / P) ** 3))
-    ai = 3.0 * d**2 / P**3  # = n pi d^2 = 6 alpha_disp / d above the floor
+    d = jnp.maximum(6.0 * alpha_disp / ai, d_min)
     return ai, d
 
 def ranz_marshall_htc_two_fluid(
