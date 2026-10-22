@@ -262,3 +262,9 @@ a bump at 0.566), at N500 it falls smoothly; p differs by 10 % at x = 0.6 and 6 
 Thinning 1e-5 → 1e-6 (CFL 4, SER 0.5): N400 NaN at t = 0.015 s (front at the onset, as for
 the parabola); N500 survives to t_end but stays at SSR 5.2e-6 (not accepted; likely the
 pin floor at 1e-6). Runs: results/rsB_current_*, rsB500_*, rsB400_v1e-6_*, rsB500_v1e-6_*.
+
+**Follow-up 2026-10-22.** The jump and odd-even limit cycle just behind the throat
+(x ≈ 0.56-0.57) is traced to the slip-dependent liquid-side Ranz-Marshall HTC of the bubbly
+regime (σ_Mg ∝ √|du|, cusp where the slip changes sign). A smooth effective slip
+(`smooth_slip`, on by default) removes it, and changes ṁ by −0.3 % to −3.3 %: the heat
+transfer near the throat controls the mass flow rate. See `THROAT_BUMP_HISTORY.md`.
