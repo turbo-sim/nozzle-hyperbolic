@@ -116,7 +116,7 @@ def calculate_drag_force_one_component(
 def calculate_heat_transfer_one_component(
     alpha1, state1, state2, u1, u2, d,
     Nu1_int=120.0, Nu2_int=2.0 * jnp.pi**2 / 3.0,
-    alpha_b=0.3, alpha_d=0.7, blend="linear",
+    alpha_b=0.3, alpha_d=0.7, blend="linear", slip_u0=0.0,
 ):
     """
     Regime-dependent interfacial heat transfer coefficients for the
@@ -150,6 +150,8 @@ def calculate_heat_transfer_one_component(
     alpha_d        : lower bound of droplet regime (vapor fraction)
     blend          : transition weight (regime_weight): 'linear' (default) or
                      'smoothstep' (zero slope at alpha_b and alpha_d -> C1 HTCs)
+    slip_u0        : [m/s] smooth effective slip of Ranz-Marshall (0 = |u1 - u2|),
+                     see ranz_marshall_htc_two_fluid
 
     Returns
     -------
@@ -160,12 +162,12 @@ def calculate_heat_transfer_one_component(
     def bubbly(_):
         # Vapor dispersed in liquid: internal Nu on the vapor side, liquid continuous
         htc1 = state1["k"] * Nu1_int / d
-        htc2 = ranz_marshall_htc_two_fluid(state2, u_rel_abs, d)
+        htc2 = ranz_marshall_htc_two_fluid(state2, u_rel_abs, d, slip_u0)
         return htc1, htc2
 
     def droplet(_):
         # Liquid dispersed in vapor: vapor continuous, internal Nu on the liquid side
-        htc1 = ranz_marshall_htc_two_fluid(state1, u_rel_abs, d)
+        htc1 = ranz_marshall_htc_two_fluid(state1, u_rel_abs, d, slip_u0)
         htc2 = state2["k"] * Nu2_int / d
         return htc1, htc2
 
@@ -346,7 +348,8 @@ def interfacial_area_poly(alpha,
 def ranz_marshall_htc_two_fluid(
         state_continuous,
         relative_velocity,
-        d_dispersed
+        d_dispersed,
+        slip_u0=0.0,
 ):
     """
     Continuous-phase HTC for dispersed particles (Ranz-Marshall 1952).
@@ -370,6 +373,10 @@ def ranz_marshall_htc_two_fluid(
         relative_velocity is provided directly.
     Nb : float
         Number density for interfacial area model (default 1e10).
+    slip_u0 : float
+        [m/s] > 0: Re from the smooth effective slip sqrt(du^2 + slip_u0^2) instead
+        of |du|, so Nu has no cusp (infinite slope) where the slip changes sign.
+        0 (default): |du|, the original closure.
     """
     # --- Continuous-phase properties ---
     rho_c = state_continuous["rho"]
@@ -378,7 +385,11 @@ def ranz_marshall_htc_two_fluid(
     cp_c  = state_continuous["cp"]
 
     # --- Re and Pr use continuous-phase properties ---
-    Re = rho_c * jnp.abs(relative_velocity) * d_dispersed / mu_c
+    if slip_u0 > 0.0:
+        u_rel = jnp.sqrt(relative_velocity**2 + slip_u0**2)
+    else:
+        u_rel = jnp.abs(relative_velocity)
+    Re = rho_c * u_rel * d_dispersed / mu_c
     Re_safe = jnp.maximum(Re, 1e-12)   # avoid 0**0.5 → ∞ gradient under jacfwd
     Pr = cp_c * mu_c / k_c
 

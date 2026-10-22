@@ -157,6 +157,10 @@ def two_fluid_closure(
     area_law="polynomial", # interfacial area law: original | polynomial | parabola
                            # (source_two_fluid.INTERFACIAL_AREA_LAWS)
     area_params=None,      # dict of keyword overrides for that law, e.g. {"d_min": 6.5e-5}
+    smooth_slip=True,      # True → Ranz-Marshall Re from the smooth effective slip
+                           # sqrt(du² + smooth_slip_u0²); False → |du| (cusp at du = 0)
+    smooth_slip_u0=2.0,    # [m/s] slip scale of the smooth effective slip (2: smallest
+                           # tested that removes the case-4 throat bump, THROAT_BUMP_HISTORY.md)
 ) -> TwoFluidClosure:
     """
     Assemble a TwoFluidClosure from state + saturation properties.
@@ -190,9 +194,16 @@ def two_fluid_closure(
                  drag and (with regime_htc) the HTC; smoothstep makes both C1
     area_law, area_params : interfacial area law by name and its keyword overrides
                  (get_interfacial_area); Nb / Nd only matter for 'original'
+    smooth_slip, smooth_slip_u0 : True → the Ranz-Marshall HTCs use the smooth
+                 effective slip sqrt(du² + u0²) instead of |du|.  With |du|, Nu has a
+                 cusp (infinite slope) at du = 0 and in the bubbly regime σ_Mg follows
+                 sqrt|du|: where the slip changes sign it swings ~2× cell to cell
+                 (measured 2026-10-22 on CO2 case 4 at x ≈ 0.57, odd-even 29% of σ_Mg
+                 with p, α and superheat smooth to ~1%).  False → original closure.
     """
     p, u_g, u_l, ag, h_g, h_l = U_h
     al = 1.0 - ag
+    slip_u0 = float(smooth_slip_u0) if smooth_slip else 0.0
 
     rg = eos_g.rho;  T_g = eos_g.T
     rl = eos_l.rho;  T_l = eos_l.T
@@ -292,7 +303,7 @@ def two_fluid_closure(
                 {"rho": stl_ex["rho"][0], "mu": stl_ex["mu"][0],
                  "k": stl_ex["k"][0], "cp": stl_ex["cp"][0]},
                 u_g, u_l, d, Nu1_int=Nu_g, Nu2_int=Nu_l,
-                alpha_b=alpha_b, alpha_d=alpha_d, blend=regime_blend,
+                alpha_b=alpha_b, alpha_d=alpha_d, blend=regime_blend, slip_u0=slip_u0,
             )
         else:
             # NICFD closure: bubbly-regime HTC at every α.
@@ -313,7 +324,7 @@ def two_fluid_closure(
                     "k":   stl_ex["k"][0],               # FluidState alias → conductivity
                     "cp":  stl_ex["cp"][0],              # FluidState alias → isobaric_heat_capacity
                 },
-                du_abs, d,
+                du_abs, d, slip_u0,
             )
 
         # # ── Interfacial heat transfer rates ──────────────────────────────────────
@@ -406,6 +417,7 @@ def two_fluid_closure(
                  "k": stl_ex["k"][0], "cp": stl_ex["cp"][0]},
                 u_g, u_l, d,
                 Nu1_int=Nu_g, alpha_b=alpha_b, alpha_d=alpha_d, blend=regime_blend,
+                slip_u0=slip_u0,
             )
         else:
             # NICFD closure: bubbly-regime HTC at every α.
@@ -426,7 +438,7 @@ def two_fluid_closure(
                     "k":   stl_ex["k"][0],               # FluidState alias → conductivity
                     "cp":  stl_ex["cp"][0],              # FluidState alias → isobaric_heat_capacity
                 },
-                du_abs, d,
+                du_abs, d, slip_u0,
             )
 
         htc = 1 / (1/htc_g + 1/htc_l)
