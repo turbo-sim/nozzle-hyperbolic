@@ -48,13 +48,33 @@ def calculate_mass_transfer_lv(T_l, T_v, T_sat, htc_l, htc_v, A_i, h_sat_l, h_sa
     return m_dot
 
 
+DRAG_LAWS = ("schiller_naumann", "ishii_zuber")
+
+
+def ishii_zuber_mixture_viscosity(mu_c, mu_d, alpha_disp, alpha_max=0.9):
+    """
+    Mixture viscosity of Ishii & Zuber (1979) with alpha_dm = 1:
+        mu_m = mu_c (1 - alpha_disp)^(-2.5 mu*),   mu* = (mu_d + 0.4 mu_c) / (mu_d + mu_c)
+    -> mu_c / (1 - alpha) for bubbles (mu_d << mu_c), mu_c (1 - alpha)^-2.5 for drops.
+    alpha_disp is capped at alpha_max: a regime law is also evaluated (with zero blend
+    weight) far outside its regime, where 1 - alpha -> 0 would give inf * 0 = NaN.
+    """
+    mu_star = (mu_d + 0.4 * mu_c) / (mu_d + mu_c)
+    return mu_c * (1.0 - jnp.minimum(alpha_disp, alpha_max)) ** (-2.5 * mu_star)
+
+
 def calculate_drag_force_one_component(
     alpha1, alpha2, rho1, rho2, mu1, mu2, u1, u2, d,
     alpha_b=0.3, alpha_d=0.7, blend="linear",
+    drag_bubbly="schiller_naumann", drag_droplet="schiller_naumann",
 ):
     """
     Regime-dependent drag force per unit volume for the one-component case.
-    The function is based on the Schiller and Naumann model
+    Drag coefficient of each regime (drag_bubbly / drag_droplet):
+      'schiller_naumann' (default): C_d = 24/Re (1 + 0.15 Re^0.687), continuous-phase viscosity
+      'ishii_zuber': viscous regime of Ishii & Zuber (1979), C_d = 24/Re_m (1 + 0.1 Re_m^0.75),
+                     Re_m with the mixture viscosity (ishii_zuber_mixture_viscosity: crowding).
+                     Distorted / Newton regimes not included.
 
     Convention: phase 1 = vapor (gas), phase 2 = liquid.
       F > 0 means force on vapor in the direction of u2 - u1.
@@ -74,11 +94,18 @@ def calculate_drag_force_one_component(
                      continuous, but its slope jumps at both ends.
                      'smoothstep': (1 - s) * bubbly + s * droplet, both laws at the
                      actual alpha, s = smoothstep -> C1 across the transition.
+    drag_bubbly, drag_droplet : drag coefficient law of each regime (DRAG_LAWS)
     """
+    if drag_bubbly not in DRAG_LAWS or drag_droplet not in DRAG_LAWS:
+        raise ValueError(f"drag laws {DRAG_LAWS}; got {drag_bubbly!r}, {drag_droplet!r}")
     u_rel = u1 - u2
     u_rel_abs = jnp.abs(u_rel)
 
-    def _Cd_SN(rho_c, mu_c):
+    def _Cd(law, rho_c, mu_c, mu_d, alpha_disp):
+        if law == "ishii_zuber":
+            Re = rho_c * u_rel_abs * d / ishii_zuber_mixture_viscosity(mu_c, mu_d, alpha_disp)
+            Re_safe = jnp.maximum(Re, 1e-12)
+            return (24.0 / Re_safe) * (1.0 + 0.1 * Re_safe**0.75)
         Re = rho_c * u_rel_abs * d / jnp.maximum(mu_c, 1e-30)
         Re_safe = jnp.maximum(Re, 1e-12)   # avoid 0**0.687 → ∞ gradient under jacfwd
         return (24.0 / Re_safe) * (1.0 + 0.15 * Re_safe**0.687)
@@ -87,17 +114,17 @@ def calculate_drag_force_one_component(
 
     def bubbly(_):
         # Vapor dispersed in liquid: alpha_disp = alpha1 (vapor), rho_cont = rho2 (liquid)
-        C_d = _Cd_SN(rho2, mu2)
+        C_d = _Cd(drag_bubbly, rho2, mu2, mu1, alpha1)
         return prefactor * C_d * alpha1 * rho2
 
     def droplet(_):
         # Liquid dispersed in vapor: alpha_disp = alpha2 (liquid), rho_cont = rho1 (vapor)
-        C_d = _Cd_SN(rho1, mu1)
+        C_d = _Cd(drag_droplet, rho1, mu1, mu2, alpha2)
         return prefactor * C_d * alpha2 * rho1
 
     def transition(_):
-        F_b = prefactor * _Cd_SN(rho2, mu2) * alpha_b * rho2           # bubbly at alpha1 = alpha_b
-        F_d = prefactor * _Cd_SN(rho1, mu1) * (1.0 - alpha_d) * rho1  # droplet at alpha1 = alpha_d
+        F_b = prefactor * _Cd(drag_bubbly, rho2, mu2, mu1, alpha_b) * alpha_b * rho2            # bubbly at alpha1 = alpha_b
+        F_d = prefactor * _Cd(drag_droplet, rho1, mu1, mu2, 1.0 - alpha_d) * (1.0 - alpha_d) * rho1  # droplet at alpha1 = alpha_d
         w = (alpha1 - alpha_b) / (alpha_d - alpha_b)
         return F_b + (F_d - F_b) * w
 

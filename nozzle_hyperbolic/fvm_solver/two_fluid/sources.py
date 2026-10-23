@@ -27,6 +27,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from source_two_fluid import (
     LIQUID_HTC_BUBBLY,
     LIQUID_HTC_DROPLET,
+    DRAG_LAWS,
     calculate_drag_force_one_component,
     calculate_heat_transfer_one_component,
     calculate_mass_transfer_lv,
@@ -174,6 +175,8 @@ def two_fluid_closure(
                            # None → 120 with mass transfer, 12 without (the earlier constants)
     htc_liquid_bubbly="ranz_marshall",  # liquid-side HTC, bubbly regime: ranz_marshall | jakob | max | liao
     htc_liquid_droplet="internal",      # liquid-side HTC, droplet regime: internal | jakob | max
+    drag_bubbly="schiller_naumann",     # drag coefficient, bubbly regime: schiller_naumann | ishii_zuber
+    drag_droplet="schiller_naumann",    # drag coefficient, droplet regime: schiller_naumann | ishii_zuber
 ) -> TwoFluidClosure:
     """
     Assemble a TwoFluidClosure from state + saturation properties.
@@ -228,6 +231,11 @@ def two_fluid_closure(
                  (source_two_fluid.liao_nusselt); its Pe uses the slip as Ranz-Marshall does
                  (smooth_slip).  Defaults = the closure used so far.  Jakob needs mass_transfer=True; without regime_htc
                  only the bubbly option applies.
+    drag_bubbly, drag_droplet : drag coefficient of each regime.  'ishii_zuber' = viscous
+                 regime of Ishii & Zuber (1979), C_d = 24/Re_m (1 + 0.1 Re_m^0.75) with the
+                 mixture viscosity μ_c (1 - α_d)^(-2.5 μ*) (crowding; μ_c/(1-α) for bubbles,
+                 μ_c (1-α)^-2.5 for drops); distorted / Newton regimes not included.
+                 Defaults = Schiller-Naumann in both regimes (the closure used so far).
     """
     p, u_g, u_l, ag, h_g, h_l = U_h
     al = 1.0 - ag
@@ -237,6 +245,8 @@ def two_fluid_closure(
                          f"{LIQUID_HTC_DROPLET}; got {htc_liquid_bubbly!r}, {htc_liquid_droplet!r}")
     if not mass_transfer and (htc_liquid_bubbly, htc_liquid_droplet) != ("ranz_marshall", "internal"):
         raise ValueError("the Jakob liquid HTC needs mass_transfer=True")
+    if drag_bubbly not in DRAG_LAWS or drag_droplet not in DRAG_LAWS:
+        raise ValueError(f"drag_bubbly / drag_droplet in {DRAG_LAWS}; got {drag_bubbly!r}, {drag_droplet!r}")
 
     rg = eos_g.rho;  T_g = eos_g.T
     rl = eos_l.rho;  T_l = eos_l.T
@@ -319,6 +329,7 @@ def two_fluid_closure(
         Fv_g = -calculate_drag_force_one_component(
             ag, al, rg, rl, mu_g, mu_l, u_g, u_l, d,
             alpha_b=alpha_b, alpha_d=alpha_d, blend=regime_blend,
+            drag_bubbly=drag_bubbly, drag_droplet=drag_droplet,
         )
 
         # ── Heat transfer coefficients (Ranz-Marshall, continuous phase) ─────────
@@ -438,6 +449,7 @@ def two_fluid_closure(
         Fv_g = -calculate_drag_force_one_component(
             ag, al, rg, rl, mu_g, mu_l, u_g, u_l, d,
             alpha_b=alpha_b, alpha_d=alpha_d, blend=regime_blend,
+            drag_bubbly=drag_bubbly, drag_droplet=drag_droplet,
         )
 
         # ── Heat transfer coefficients (Ranz-Marshall, continuous phase) ─────────
