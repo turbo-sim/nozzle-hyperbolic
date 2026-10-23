@@ -212,6 +212,8 @@ def make_two_fluid_step(
               | 'mc' | 'constant'
     sources_fn : optional callable with signature
                    (u_h, eos_g, eos_l, cq, dlnA, sat_g, sat_l) → D_VE (6,)
+                 or, when step() is given ai_scale, with the cell's ai_scale as an
+                 8th argument (u_h, ..., sat_l, ai_scale)
                  where sat_g = fluid_g.get_state_saturation(p) — sat. vapor props dict,
                        sat_l = fluid_l.get_state_saturation(p) — sat. liquid props dict.
                  Use sat_g["enthalpy"], sat_g["temperature"], etc. (canonical names).
@@ -1269,8 +1271,8 @@ def make_two_fluid_step(
 
     # ── Source terms at interior cells ────────────────────────────────────────
 
-    def _src_all_interior(U_h):
-        def _src_one(u_h, dlnA):
+    def _src_all_interior(U_h, ai_scale=None):
+        def _src_one(u_h, dlnA, s=None):
             eos_g_c = phase_props(fluid_g, u_h[0], u_h[4])
             eos_l_c = phase_props(fluid_l, u_h[0], u_h[5])
             cq_c    = common_quantities(u_h, eos_g_c, eos_l_c, k)
@@ -1292,7 +1294,9 @@ def make_two_fluid_step(
                     _z = jnp.zeros(())
                     sat_g_c = {"temperature": _z, "enthalpy": _z}
                     sat_l_c = {"temperature": _z, "enthalpy": _z}
-                return sources_fn(u_h, eos_g_c, eos_l_c, cq_c, dlnA, sat_g_c, sat_l_c)
+                if s is None:
+                    return sources_fn(u_h, eos_g_c, eos_l_c, cq_c, dlnA, sat_g_c, sat_l_c)
+                return sources_fn(u_h, eos_g_c, eos_l_c, cq_c, dlnA, sat_g_c, sat_l_c, s)
             # FALLBACK ONLY (sources_fn is None): primitive-frame area source with a
             # zero physical closure.  NOT used when a sources_fn is supplied (the
             # driver always supplies one → the ALGEBRAIC D_VE_algebric/D_VE_area path
@@ -1305,6 +1309,11 @@ def make_two_fluid_step(
             )
             return D_VE_conservative(u_h, eos_g_c, eos_l_c, cq_c, cl, k)
 
+        if ai_scale is not None:   # per-cell area-law correction, an 8th argument of sources_fn
+            if cell_local_jac:
+                return _local_jac_map(lambda x: _src_one(x[:6], x[6], x[7]))(
+                    jnp.concatenate([U_h[1:-1], dlnA_dx[1:-1, None], ai_scale[1:-1, None]], axis=1))
+            return jax.vmap(_src_one)(U_h[1:-1], dlnA_dx[1:-1], ai_scale[1:-1])
         if cell_local_jac:
             return _local_jac_map(lambda x: _src_one(x[:6], x[6]))(
                 jnp.concatenate([U_h[1:-1], dlnA_dx[1:-1, None]], axis=1))
@@ -1312,7 +1321,7 @@ def make_two_fluid_step(
 
     # ── Residual:  R ∈ R^{6·(N-2)},  W_int ∈ R^{8·(N-2)} ───────────────────
 
-    def _residual(W_int_flat, W_n_flat, dt, p_out_t=None):
+    def _residual(W_int_flat, W_n_flat, dt, p_out_t=None, ai_scale=None):
         W_int = W_int_flat.reshape(N - 2, 8)
         W_n   = W_n_flat.reshape(N, 8)
 
@@ -1332,7 +1341,7 @@ def make_two_fluid_step(
 
         # Non-conservative correction and sources (from the UNfiltered flux)
         nc  = _nc_all_interior(U_h, F_hat)
-        src = _src_all_interior(U_h)
+        src = _src_all_interior(U_h, ai_scale)
 
         # ── 4th-order (JST-type) background filter ────────────────────────────
         # Damps the 2Δx void/alpha checkerboard that the FVS leaves undamped at
@@ -1632,10 +1641,10 @@ def make_two_fluid_step(
 
     _jac_dense = jax.jacfwd(_residual, argnums=0)
 
-    def _jac_colored(W_int_flat, W_n_flat, dt, p_out_t=None):
+    def _jac_colored(W_int_flat, W_n_flat, dt, p_out_t=None, ai_scale=None):
         # Linearize once (expensive nonlinear residual + EOS chain runs a single
         # time); each colored seed is then a cheap linear JVP.
-        _, jvp_fn = jax.linearize(lambda w: _residual(w, W_n_flat, dt, p_out_t), W_int_flat)
+        _, jvp_fn = jax.linearize(lambda w: _residual(w, W_n_flat, dt, p_out_t, ai_scale), W_int_flat)
         cols_idx  = jnp.arange(_m_cols)
         color_ids = jnp.arange(_n_colors)
         S  = (cols_idx[None, :] % _col_stride == color_ids[:, None]).astype(W_int_flat.dtype)
@@ -1706,8 +1715,8 @@ def make_two_fluid_step(
     _Nc   = N - 2
     _Dtot = 2 * _sw + 1
 
-    def _jac_colored_blocks(W_int_flat, W_n_flat, dt, p_out_t=None):
-        _, jvp_fn = jax.linearize(lambda w: _residual(w, W_n_flat, dt, p_out_t), W_int_flat)
+    def _jac_colored_blocks(W_int_flat, W_n_flat, dt, p_out_t=None, ai_scale=None):
+        _, jvp_fn = jax.linearize(lambda w: _residual(w, W_n_flat, dt, p_out_t, ai_scale), W_int_flat)
         cols_idx  = jnp.arange(_m_cols)
         color_ids = jnp.arange(_n_colors)
         S  = (cols_idx[None, :] % _col_stride == color_ids[:, None]).astype(W_int_flat.dtype)
@@ -1934,10 +1943,10 @@ def make_two_fluid_step(
                          f"(8*(N-2)={_m_cols} < col_stride={_col_stride})")
     _S8 = 8 * _s_blk                     # scalar super-block size (32 for sw=2)
 
-    def _jac_blocks_e3(W_int_flat, W_n_flat, dt, p_out_t=None):
+    def _jac_blocks_e3(W_int_flat, W_n_flat, dt, p_out_t=None, ai_scale=None):
         """(Nc, Dtot, 8, 8) blocks: flux rows 0..5 from the colored JVPs, EOS
         rows 6..7 (cell-local, vmapped exact jacfwd) in the diagonal block."""
-        Jf = _jac_colored_blocks(W_int_flat, W_n_flat, dt, p_out_t)  # (Nc,Dtot,6,8)
+        Jf = _jac_colored_blocks(W_int_flat, W_n_flat, dt, p_out_t, ai_scale)  # (Nc,Dtot,6,8)
         Je = _eos_jac_cells(W_int_flat.reshape(_Nc, 8))         # (Nc,2,8)
         J8 = jnp.zeros((_Nc, _Dtot, 8, 8), dtype=Jf.dtype)
         J8 = J8.at[:, :, :6, :].set(Jf)
@@ -2375,7 +2384,7 @@ def make_two_fluid_step(
         Wp = jax.vmap(_project_one)(W_int_flat.reshape(N - 2, 8))
         return Wp.reshape(-1)
 
-    def step(W_n, dt, p_out=None):
+    def step(W_n, dt, p_out=None, ai_scale=None):
         """
         Advance one implicit time step.
 
@@ -2386,6 +2395,12 @@ def make_two_fluid_step(
         p_out : optional scalar — RUNTIME outlet back-pressure [Pa] for the
                 'pressure'/'characteristic' outlets (ramped start-up).  None
                 (default) uses the factory's p_out: the original code path.
+        ai_scale : optional (N,) — RUNTIME correction of the interfacial area law
+                per cell (field inversion, beta; ghost cells included, as dlnA_dx,
+                only [1:-1] is used).  Passed to sources_fn as an 8th argument, so
+                sources_fn must accept it (and give it to two_fluid_closure).  A
+                traced argument: a new beta does NOT recompile the step.  None
+                (default): sources_fn is called with 7 arguments, the original path.
 
         Returns
         -------
@@ -2401,7 +2416,7 @@ def make_two_fluid_step(
             _var = ["p", "ag", "m_g", "u_g", "m_l", "u_l", "mg_eg", "ml_el"]
             print(f"\n  [Newton]  dt={float(dt):.3e}  N_int={N-2}")
             for _it in range(newton_iter):
-                R_k = _residual(W_k, W_n_flat, dt, p_out)
+                R_k = _residual(W_k, W_n_flat, dt, p_out, ai_scale)
                 _nan_R = bool(jnp.any(jnp.isnan(R_k)))
                 _inf_R = bool(jnp.any(jnp.isinf(R_k)))
                 print(f"    it {_it:2d}  max|R|={float(jnp.nanmax(jnp.abs(R_k))):.3e}"
@@ -2423,7 +2438,7 @@ def make_two_fluid_step(
                         print(f"                      W = {dict(zip(_var, _W_mat[_c]))}")
                     break
 
-                J_k = _jac_fn(W_k, W_n_flat, dt, p_out)
+                J_k = _jac_fn(W_k, W_n_flat, dt, p_out, ai_scale)
                 _nan_J = bool(jnp.any(jnp.isnan(J_k)))
                 _inf_J = bool(jnp.any(jnp.isinf(J_k)))
                 print(f"           max|J|={float(jnp.nanmax(jnp.abs(J_k))):.3e}"
@@ -2464,12 +2479,12 @@ def make_two_fluid_step(
         else:
             def _newton_update(W_k):
                 """One Newton iteration → (W_new, max|dW_scaled|)."""
-                R_k   = _residual(W_k, W_n_flat, dt, p_out)        # (6*(N-2),)
+                R_k   = _residual(W_k, W_n_flat, dt, p_out, ai_scale)        # (6*(N-2),)
                 w_ref = _w_ref_fn(W_k)
                 if _use_banded:
                     # E1b: block-banded Jacobian + banded normal equations —
                     # same scaling/solve as below, O(N) instead of O(N³).
-                    J_blk = _jac_colored_blocks(W_k, W_n_flat, dt, p_out)
+                    J_blk = _jac_colored_blocks(W_k, W_n_flat, dt, p_out, ai_scale)
                     dW_sc = _min_norm_banded(J_blk, R_k, w_ref)
                 elif _use_banded_e3:
                     # E3-BANDED (new option 2026-07-16): same JᵀJ + Tikhonov
@@ -2479,17 +2494,17 @@ def make_two_fluid_step(
                         [R_k.reshape(_Nc, 6),
                          jax.vmap(_eos_res_cell)(W_k.reshape(_Nc, 8))], axis=1)
                     dW_sc = _e3_banded_solve(
-                        _jac_blocks_e3(W_k, W_n_flat, dt, p_out), R8, w_ref)
+                        _jac_blocks_e3(W_k, W_n_flat, dt, p_out, ai_scale), R8, w_ref)
                 elif eos_rows:
                     # E3-augmented prototype: 8 rows/cell, same scaling + lstsq
                     R_k   = jnp.concatenate([R_k, _eos_residual(W_k)])
                     J_k   = jnp.concatenate(
-                        [_jac_fn(W_k, W_n_flat, dt, p_out), _eos_jac_dense(W_k)], axis=0)
+                        [_jac_fn(W_k, W_n_flat, dt, p_out, ai_scale), _eos_jac_dense(W_k)], axis=0)
                     J_sc  = J_k * w_ref[None, :]
                     r_sc  = 1.0 / (jnp.max(jnp.abs(J_sc), axis=1) + 1e-300)
                     dW_sc = _lin_solve(J_sc * r_sc[:, None], -R_k * r_sc)
                 else:
-                    J_k   = _jac_fn(W_k, W_n_flat, dt, p_out)      # (6*(N-2), 8*(N-2))
+                    J_k   = _jac_fn(W_k, W_n_flat, dt, p_out, ai_scale)      # (6*(N-2), 8*(N-2))
                     J_sc  = J_k * w_ref[None, :]            # column scaling (relative dW)
                     # Row equilibration: scale each residual row to O(1).  For the
                     # underdetermined min-norm this is EXACTLY invariant (same solution
@@ -2534,7 +2549,7 @@ def make_two_fluid_step(
                 # full speedup is realized.  Cost of the guard: one norm.
                 def _newton_body_lag(it, carry):
                     W_k, J_blk, r_prev = carry
-                    R_k   = _residual(W_k, W_n_flat, dt, p_out)
+                    R_k   = _residual(W_k, W_n_flat, dt, p_out, ai_scale)
                     w_ref = _w_ref_fn(W_k)
                     R8    = jnp.concatenate(
                         [R_k.reshape(_Nc, 6),
@@ -2542,7 +2557,7 @@ def make_two_fluid_step(
                     r_now = jnp.linalg.norm(R8)
                     J_blk = jax.lax.cond(
                         (it % jac_lag == 0) | (r_now > r_prev),
-                        lambda W: _jac_blocks_e3(W, W_n_flat, dt, p_out),
+                        lambda W: _jac_blocks_e3(W, W_n_flat, dt, p_out, ai_scale),
                         lambda W: J_blk, W_k)
                     dW_sc = _e3_banded_solve(J_blk, R8, w_ref)
                     W_new = W_k + dW_sc * w_ref
@@ -2581,7 +2596,7 @@ def make_two_fluid_step(
 
         # Steady-state residual (dV = 0 since same W passed for new and old)
         R_ss = _residual(
-            W_new[1:-1].reshape(-1), W_new.reshape(-1), jnp.float64(1.0), p_out
+            W_new[1:-1].reshape(-1), W_new.reshape(-1), jnp.float64(1.0), p_out, ai_scale
         ).reshape(N - 2, 6)
 
         U_h_new = _bc_U_h(jax.vmap(U_h_from_W)(W_new), p_out)

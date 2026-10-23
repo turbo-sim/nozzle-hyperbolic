@@ -25,11 +25,16 @@ from .matrices import PhaseProps, CommonQty, J_matrix, Phi_inv_matrix
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from source_two_fluid import (
+    LIQUID_HTC_BUBBLY,
+    LIQUID_HTC_DROPLET,
     calculate_drag_force_one_component,
     calculate_heat_transfer_one_component,
     calculate_mass_transfer_lv,
     get_interfacial_area,
+    jakob_nusselt,
+    liao_nusselt,
     ranz_marshall_htc_two_fluid,
+    select_liquid_htc,
 )
 
 
@@ -157,10 +162,18 @@ def two_fluid_closure(
     area_law="polynomial", # interfacial area law: original | polynomial | parabola
                            # (source_two_fluid.INTERFACIAL_AREA_LAWS)
     area_params=None,      # dict of keyword overrides for that law, e.g. {"d_min": 6.5e-5}
-    smooth_slip=True,      # True → Ranz-Marshall Re from the smooth effective slip
-                           # sqrt(du² + smooth_slip_u0²); False → |du| (cusp at du = 0)
+    ai_scale=1.0,          # correction of the law in this cell (field inversion, beta):
+                           # ai -> ai_scale * ai, and d follows from the scaled ai
+    smooth_slip=False,     # True → Ranz-Marshall Re from the smooth effective slip
+                           # sqrt(du² + smooth_slip_u0²); False → |du| (cusp at du = 0).
+                           # Off since 2026-10-23: htc_liquid_bubbly='max' removes the cusp
+                           # without moving ṁ (THROAT_BUMP_HISTORY.md)
     smooth_slip_u0=2.0,    # [m/s] slip scale of the smooth effective slip (2: smallest
                            # tested that removes the case-4 throat bump, THROAT_BUMP_HISTORY.md)
+    nu_g_int=None,         # internal Nusselt number of the vapour (bubbles, htc_g = k_g Nu / d);
+                           # None → 120 with mass transfer, 12 without (the earlier constants)
+    htc_liquid_bubbly="ranz_marshall",  # liquid-side HTC, bubbly regime: ranz_marshall | jakob | max | liao
+    htc_liquid_droplet="internal",      # liquid-side HTC, droplet regime: internal | jakob | max
 ) -> TwoFluidClosure:
     """
     Assemble a TwoFluidClosure from state + saturation properties.
@@ -194,16 +207,36 @@ def two_fluid_closure(
                  drag and (with regime_htc) the HTC; smoothstep makes both C1
     area_law, area_params : interfacial area law by name and its keyword overrides
                  (get_interfacial_area); Nb / Nd only matter for 'original'
+    ai_scale   : correction factor of the area law in this cell (field inversion): ai is
+                 multiplied by it BEFORE d is derived, so drag and HTCs see the corrected d
+                 too. 1 = the law itself (bit-identical)
     smooth_slip, smooth_slip_u0 : True → the Ranz-Marshall HTCs use the smooth
                  effective slip sqrt(du² + u0²) instead of |du|.  With |du|, Nu has a
                  cusp (infinite slope) at du = 0 and in the bubbly regime σ_Mg follows
                  sqrt|du|: where the slip changes sign it swings ~2× cell to cell
                  (measured 2026-10-22 on CO2 case 4 at x ≈ 0.57, odd-even 29% of σ_Mg
                  with p, α and superheat smooth to ~1%).  False → original closure.
+    nu_g_int   : internal Nusselt number of the vapour inside bubbles (vapour-side HTC of
+                 the bubbly regime).  None keeps the constants used so far (120 in the
+                 mass-transfer branch, 12 in the no-mass-transfer branch); a value sets both.
+    htc_liquid_bubbly, htc_liquid_droplet : liquid-side HTC of each regime.  'jakob' is the
+                 thermal-diffusion bubble growth Nu = max(2, (12/π) Ja) (Plesset & Zwick 1954,
+                 source_two_fluid.jakob_nusselt), Ja = ρ_l cp_l (T_l - T_sat) / (ρ_g h_fg) with
+                 the local ρ_g; independent of the slip.  'max' takes the larger of it and the
+                 regime's own closure (Ranz-Marshall bubbly, internal Nu droplet).  'liao'
+                 (bubbly only) = sqrt(12/π² Ja² + Pe/(3π)), thermal diffusion + convection
+                 (source_two_fluid.liao_nusselt); its Pe uses the slip as Ranz-Marshall does
+                 (smooth_slip).  Defaults = the closure used so far.  Jakob needs mass_transfer=True; without regime_htc
+                 only the bubbly option applies.
     """
     p, u_g, u_l, ag, h_g, h_l = U_h
     al = 1.0 - ag
     slip_u0 = float(smooth_slip_u0) if smooth_slip else 0.0
+    if htc_liquid_bubbly not in LIQUID_HTC_BUBBLY or htc_liquid_droplet not in LIQUID_HTC_DROPLET:
+        raise ValueError(f"htc_liquid_bubbly in {LIQUID_HTC_BUBBLY}, htc_liquid_droplet in "
+                         f"{LIQUID_HTC_DROPLET}; got {htc_liquid_bubbly!r}, {htc_liquid_droplet!r}")
+    if not mass_transfer and (htc_liquid_bubbly, htc_liquid_droplet) != ("ranz_marshall", "internal"):
+        raise ValueError("the Jakob liquid HTC needs mass_transfer=True")
 
     rg = eos_g.rho;  T_g = eos_g.T
     rl = eos_l.rho;  T_l = eos_l.T
@@ -276,7 +309,7 @@ def two_fluid_closure(
         # ── Interfacial area and dispersed-structure diameter ────────────────────
         # d_min_b=5e-5 matches nozzlex (nozzle_two_fluid_one_component_autonomous).
         ai, d = get_interfacial_area(area_law, area_params)(ag, alpha_b=alpha_b, alpha_d=alpha_d,
-                                Nb=Nb, Nd=Nd, d_min_b=5e-6)
+                                Nb=Nb, Nd=Nd, d_min_b=5e-6, ai_scale=ai_scale)
         # ai, d = 100, 5e-5
         # ── Drag force on gas per unit volume (sign: F > 0 accelerates gas) ─────
         mu_g = stg_ex["viscosity"][0]
@@ -290,7 +323,8 @@ def two_fluid_closure(
 
         # ── Heat transfer coefficients (Ranz-Marshall, continuous phase) ─────────
         du_abs = jnp.abs(u_g - u_l)
-        Nu_g, Nu_l = 120.0, 12.0
+        Nu_g, Nu_l = (120.0 if nu_g_int is None else float(nu_g_int)), 12.0
+        ja_l = rl * stl_ex["cp"][0] * (T_l - T_sat) / (rg * (h_sat_g - h_sat_l))   # liquid Jakob number
 
         if regime_htc:
             # Regime-dependent HTC: bubbly (α ≤ alpha_b) identical to the NICFD
@@ -304,6 +338,7 @@ def two_fluid_closure(
                  "k": stl_ex["k"][0], "cp": stl_ex["cp"][0]},
                 u_g, u_l, d, Nu1_int=Nu_g, Nu2_int=Nu_l,
                 alpha_b=alpha_b, alpha_d=alpha_d, blend=regime_blend, slip_u0=slip_u0,
+                ja=ja_l, liquid_bubbly=htc_liquid_bubbly, liquid_droplet=htc_liquid_droplet,
             )
         else:
             # NICFD closure: bubbly-regime HTC at every α.
@@ -326,6 +361,10 @@ def two_fluid_closure(
                 },
                 du_abs, d, slip_u0,
             )
+            u_pe = jnp.sqrt(du_abs**2 + slip_u0**2) if slip_u0 > 0.0 else du_abs
+            pe_l = u_pe * d * stl_ex["rho"][0] * stl_ex["cp"][0] / stl_ex["k"][0]
+            htc_l = select_liquid_htc(htc_liquid_bubbly, htc_l, stl_ex["k"][0] * jakob_nusselt(ja_l) / d,
+                                      stl_ex["k"][0] * liao_nusselt(ja_l, pe_l) / d)
 
         # # ── Interfacial heat transfer rates ──────────────────────────────────────
         # Qvi = htc_g * ai * (T_sat - T_g)    # heat from interface to gas [W/m^3]
@@ -389,7 +428,7 @@ def two_fluid_closure(
         # ── Interfacial area and dispersed-structure diameter ────────────────────
         # d_min_b=5e-5 matches nozzlex (nozzle_two_fluid_one_component_autonomous).
         ai, d = get_interfacial_area(area_law, area_params)(ag, alpha_b=alpha_b, alpha_d=alpha_d,
-                                Nb=Nb, Nd=Nd, d_min_b=5e-6)
+                                Nb=Nb, Nd=Nd, d_min_b=5e-6, ai_scale=ai_scale)
         # ai, d = 100, 5e-5
         # ── Drag force on gas per unit volume (sign: F > 0 accelerates gas) ─────
         mu_g = stg_ex["viscosity"][0]
@@ -403,7 +442,7 @@ def two_fluid_closure(
 
         # ── Heat transfer coefficients (Ranz-Marshall, continuous phase) ─────────
         du_abs = jnp.abs(u_g - u_l)
-        Nu_g = 12
+        Nu_g = 12 if nu_g_int is None else float(nu_g_int)
 
         if regime_htc:
             # Regime-dependent HTC: bubbly (α ≤ alpha_b) identical to the NICFD

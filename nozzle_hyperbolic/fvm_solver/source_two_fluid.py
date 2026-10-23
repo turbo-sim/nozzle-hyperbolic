@@ -113,10 +113,48 @@ def calculate_drag_force_one_component(
     )
 
 
+LIQUID_HTC_BUBBLY = ("ranz_marshall", "jakob", "max", "liao")
+LIQUID_HTC_DROPLET = ("internal", "jakob", "max")
+
+
+def jakob_nusselt(ja):
+    """
+    Liquid-side Nusselt number of a bubble growing in superheated liquid, controlled by
+    thermal diffusion (Plesset & Zwick 1954, R = sqrt(12/pi) Ja sqrt(D_l t)):
+        Nu = h d / k_l = (12/pi) Ja,   Ja = rho_l cp_l (T_l - T_sat) / (rho_g h_fg)
+    floored at the conduction limit of a sphere, Nu = 2.  Independent of the slip.
+    """
+    return jnp.maximum(2.0, 12.0 / jnp.pi * ja)
+
+
+def liao_nusselt(ja, pe):
+    """
+    Liquid-side Nusselt number of a flashing bubble, thermal diffusion + convection
+    (Liao et al., their Eqs. 8-10):
+        Nu = h d / k_l = sqrt(12/pi^2 Ja^2 + Pe / (3 pi)),   Pe = |du| d / D_l = Re Pr
+    Ja with (T_l - T_sat) to the first power (the paper's square is a typo: Ja must be
+    dimensionless).  The slip enters under the root next to Ja^2, so there is no cusp at
+    du = 0 while the liquid is superheated.  Floored to keep the sqrt gradient finite.
+    """
+    return jnp.sqrt(jnp.maximum(12.0 / jnp.pi**2 * ja**2 + pe / (3.0 * jnp.pi), 1e-12))
+
+
+def select_liquid_htc(option, htc_default, htc_jakob, htc_liao=None):
+    """option: the regime's own closure ('ranz_marshall' / 'internal') | 'jakob' | 'max' | 'liao'."""
+    if option == "jakob":
+        return htc_jakob
+    if option == "max":
+        return jnp.maximum(htc_default, htc_jakob)
+    if option == "liao":
+        return htc_liao
+    return htc_default
+
+
 def calculate_heat_transfer_one_component(
     alpha1, state1, state2, u1, u2, d,
     Nu1_int=120.0, Nu2_int=2.0 * jnp.pi**2 / 3.0,
     alpha_b=0.3, alpha_d=0.7, blend="linear", slip_u0=0.0,
+    ja=0.0, liquid_bubbly="ranz_marshall", liquid_droplet="internal",
 ):
     """
     Regime-dependent interfacial heat transfer coefficients for the
@@ -152,23 +190,38 @@ def calculate_heat_transfer_one_component(
                      'smoothstep' (zero slope at alpha_b and alpha_d -> C1 HTCs)
     slip_u0        : [m/s] smooth effective slip of Ranz-Marshall (0 = |u1 - u2|),
                      see ranz_marshall_htc_two_fluid
+    ja             : liquid Jakob number, only used by the 'jakob' / 'max' options
+    liquid_bubbly  : liquid-side HTC of the bubbly regime: 'ranz_marshall' (default) |
+                     'jakob' (jakob_nusselt) | 'max' (larger of the two) |
+                     'liao' (liao_nusselt, Jakob + Peclet; Pe slip as in Ranz-Marshall)
+    liquid_droplet : liquid-side HTC of the droplet regime: 'internal' (Nu2_int, default) |
+                     'jakob' | 'max'.  The vapor side keeps Ranz-Marshall in the droplet
+                     regime and Nu1_int in the bubbly regime
 
     Returns
     -------
     htc1, htc2 : interfacial HTCs of vapor and liquid [W/(m^2 K)]
     """
+    if liquid_bubbly not in LIQUID_HTC_BUBBLY or liquid_droplet not in LIQUID_HTC_DROPLET:
+        raise ValueError(f"liquid HTC options: bubbly {LIQUID_HTC_BUBBLY}, droplet {LIQUID_HTC_DROPLET}; "
+                         f"got {liquid_bubbly!r}, {liquid_droplet!r}")
     u_rel_abs = jnp.abs(u1 - u2)
+    htc2_jakob = state2["k"] * jakob_nusselt(ja) / d
+    u_pe = jnp.sqrt(u_rel_abs**2 + slip_u0**2) if slip_u0 > 0.0 else u_rel_abs
+    pe = u_pe * d * state2["rho"] * state2["cp"] / state2["k"]
+    htc2_liao = state2["k"] * liao_nusselt(ja, pe) / d
 
     def bubbly(_):
         # Vapor dispersed in liquid: internal Nu on the vapor side, liquid continuous
         htc1 = state1["k"] * Nu1_int / d
-        htc2 = ranz_marshall_htc_two_fluid(state2, u_rel_abs, d, slip_u0)
+        htc2 = select_liquid_htc(liquid_bubbly, ranz_marshall_htc_two_fluid(state2, u_rel_abs, d, slip_u0),
+                                 htc2_jakob, htc2_liao)
         return htc1, htc2
 
     def droplet(_):
         # Liquid dispersed in vapor: vapor continuous, internal Nu on the liquid side
         htc1 = ranz_marshall_htc_two_fluid(state1, u_rel_abs, d, slip_u0)
-        htc2 = state2["k"] * Nu2_int / d
+        htc2 = select_liquid_htc(liquid_droplet, state2["k"] * Nu2_int / d, htc2_jakob)
         return htc1, htc2
 
     def transition(_):
@@ -199,6 +252,7 @@ def interfacial_area_original(
     d_min_b=1e-5,
     d_min_d=1e-5,
     d_min=1e-5,
+    ai_scale=1.0,
 ):
     """
     TA-BD interfacial area density with nucleation and breakup floors.
@@ -220,6 +274,9 @@ def interfacial_area_original(
         Bubble and droplet number densities [1/m^3].
     d_min_b, d_min_d : float
         Minimum physical diameters for bubbles and droplets [m].
+    ai_scale : float
+        Correction factor (field inversion): ai -> ai_scale * ai and d -> d / ai_scale, which
+        keeps ai * d = 6 alpha_disp of the bubbly and droplet branches. 1 = the law itself.
 
     Returns
     -------
@@ -293,7 +350,7 @@ def interfacial_area_original(
         None,
     )
 
-    return ai, d
+    return ai_scale * ai, d / ai_scale
 
 def dispersed_fraction(alpha, eps=0.1):
     """
@@ -318,7 +375,8 @@ def interfacial_area_poly(alpha,
         Nb=1e10,
         Nd=1e10,
         d_min_b=1e-5,
-        d_min_d=1e-5,):
+        d_min_d=1e-5,
+        ai_scale=1.0,):
     """
     Smooth polynomial version of interfacial_area_segments with the modified points
     (alpha_pts 0, 0.05, 0.25, 0.7, 0.9, 1; ai_pts 100, 6500, 22000, 12000, 5000, 100).
@@ -334,13 +392,15 @@ def interfacial_area_poly(alpha,
     alpha = 0.25; the peak is rounded off to 20330 1/m at alpha = 0.31 (segments: 22000
     at 0.25), single maximum, no wiggles.
 
+    ai_scale multiplies ai (field-inversion correction); d follows from the scaled ai.
+
     Returns
     -------
     ai : interfacial area density [1/m]
     d : characteristic diameter [m]
     """
     N = len(ai_ctrl) - 1
-    ai = sum(c * math.comb(N, k) * alpha**k * (1.0 - alpha) ** (N - k) for k, c in enumerate(ai_ctrl))
+    ai = ai_scale * sum(c * math.comb(N, k) * alpha**k * (1.0 - alpha) ** (N - k) for k, c in enumerate(ai_ctrl))
     alpha_disp = dispersed_fraction(alpha, eps)
     d = jnp.maximum(6.0 * alpha_disp / ai, d_min)
     return ai, d
@@ -403,9 +463,10 @@ def ranz_marshall_htc_two_fluid(
 def interfacial_area_para(alpha, a_min=100.0, a_max=20000.0, eps=0.1, d_min=1e-5,
                     alpha_b=0.3, 
                     alpha_d=0.7,
-                    Nb=10e12, 
-                    Nd=10e10, 
-                    d_min_b=5e-6):
+                    Nb=10e12,
+                    Nd=10e10,
+                    d_min_b=5e-6,
+                    ai_scale=1.0):
     """
     Interfacial area density for data assimilation: inverted parabola in alpha.
 
@@ -422,12 +483,14 @@ def interfacial_area_para(alpha, a_min=100.0, a_max=20000.0, eps=0.1, d_min=1e-5
     The floor is active for alpha_disp < a_min * d_min / 6, where ai = 6 alpha_disp / d no
     longer holds (minimum-size bubbles/droplets, as in the prior's floor regions).
 
+    ai_scale multiplies ai (field-inversion correction); d follows from the scaled ai.
+
     Returns
     -------
     ai : interfacial area density [1/m]
     d : characteristic diameter [m]
     """
-    ai = a_min + (a_max - a_min) * 4.0 * alpha * (1.0 - alpha)
+    ai = ai_scale * (a_min + (a_max - a_min) * 4.0 * alpha * (1.0 - alpha))
     alpha_disp = dispersed_fraction(alpha, eps)
     d = jnp.maximum(6.0 * alpha_disp / ai, d_min)
     return ai, d
@@ -441,7 +504,8 @@ def interfacial_area_segments(alpha,
                               alpha_d=0.7,
                               Nb=10e12,
                               Nd=10e10,
-                              d_min_b=5e-6):
+                              d_min_b=5e-6,
+                              ai_scale=1.0):
     """
     Interfacial area density for data assimilation: piecewise linear in alpha.
 
@@ -458,6 +522,8 @@ def interfacial_area_segments(alpha,
     parabola-like area up to alpha ~ 0.25) that runs the case-4 ladder of
     main_ladder.py / settings_ladder.yaml unattended to N = 400, inlet void 1e-5
     (tested 2026-10-16, see LADDER_HISTORY.md).
+
+    ai_scale multiplies ai (field-inversion correction); d follows from the scaled ai.
 
     Returns
     -------
@@ -480,13 +546,15 @@ def interfacial_area_segments(alpha,
         ai = jnp.maximum(ai, min(ys))
     else:
         ai = jnp.interp(alpha, jnp.asarray(xs), jnp.asarray(ys))
+    ai = ai_scale * ai
     alpha_disp = dispersed_fraction(alpha, eps)
     d = jnp.maximum(6.0 * alpha_disp / ai, d_min)
     return ai, d
 
 
 # Interfacial area laws selectable by name (settings: sources.interfacial_area).
-# Every law takes (alpha, alpha_b=, alpha_d=, Nb=, Nd=, d_min_b=, ...) and returns (ai, d).
+# Every law takes (alpha, alpha_b=, alpha_d=, Nb=, Nd=, d_min_b=, ai_scale=, ...) and returns (ai, d);
+# ai_scale (default 1) multiplies ai before d is derived from it (field-inversion correction beta).
 INTERFACIAL_AREA_LAWS = {
     "original": interfacial_area_original,     # TA-BD number-density law (uses Nb / Nd)
     "polynomial": interfacial_area_poly,       # Bernstein-polynomial diameter (ignores Nb / Nd)
