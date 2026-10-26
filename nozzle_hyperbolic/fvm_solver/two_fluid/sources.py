@@ -803,5 +803,13 @@ def D_VE_area(U_h, cq, closure, eos_g, eos_l):
     D6 =  p * D_alpha
     # D5 = z
     # D6 = z
+    
+    # non-viscous (virtual-mass) area term, missing in reference
+    Phi  = ag * al * rg * rl * (rg + rl) / cq.rh2
+    e_nv = Phi * (u_g - u_l) * (ag * u_g + al * u_l) * G
+    D3 = D3 + e_nv
+    D4 = D4 - e_nv
+    D5 = D5 + u_g * e_nv
+    D6 = D6 - u_l * e_nv
 
     return jnp.array([z, z, D3, D4, D5, D6])
