@@ -1,0 +1,71 @@
+# Run steady_nozzle.py directly, with no CLI arguments.
+# Select a preset here, or override SOLVER_PRESET at the top of the script.
+# All solver keys below are consumed by fvm_euler_1d / make_jax_stadtke_step.
+# Outputs overwrite results_steady/<preset>/, making preset comparisons easy.
+active_preset: fast
+fluid_name: Air  # jaxprop.FluidPerfectGas, no lookup tables
+
+geometry:
+  function: get_lettieri_nozzle
+  file_path: Lettieri_nozzle.xlsx  # relative to this YAML, independent of cwd
+  roughness: 0.0
+
+mesh:
+  Nx: 200  # Increase for mesh convergence; keep fixed when comparing speed.
+  x1: -0.03201
+  x2: 0.06636
+
+case:
+  p_stagnation: 200000.0
+  T_stagnation: 295.15
+  shock_fraction: 0.5  # fraction of divergent section, fixes exact back pressure
+  n_exact: 1201
+
+# Common physics and accuracy. Inviscid adiabatic flow; no artificial filter.
+# Stop using the dt-independent spatial residual (SSR), not small time updates.
+# The driver may stop on a plateau below 3*residuals; this example explicitly
+# flags a run as unconverged unless it meets residuals itself.
+solver:
+  residuals: 1.0e-9
+  max_iterations: 10000
+  initialization: simple  # independent of exact solution; no exact-state seeding
+  reconstruction: muscl_van_leer
+  delta_factor: 1.0e-6    # smoothing in the FVS split near zero eigenvalues
+  eps_filter: 0.0
+  newton_iter: 8
+  jacobian: colored
+  jacobian_validate: false  # costly dense AD comparison; enable for diagnostics
+  adaptive_dt: true        # retain increment checks and step halving
+
+presets:
+  fast:
+    CFL: 20.0
+    linear_solver: banded  # O(N) block solve instead of O(N^3) dense LU
+    newton_tol: 1.0e-8     # stop Newton early; newton_iter is still the cap
+    flux_local_jac: true   # reuse each face's small exact AD Jacobian
+    cell_local_jac: true   # reuse per-cell EOS Jacobians
+    fast_increments: true # JIT the adaptive acceptance checks
+    ser_beta: 1.0          # raise CFL as SSR falls; steady-state only
+    ser_cfl_max: 500.0     # tested on this perfect-gas case; reduce for harder cases
+
+  # Same optimized kernels, fixed CFL: isolates the effect of pseudo-time ramping.
+  no_ser:
+    CFL: 20.0
+    linear_solver: banded
+    newton_tol: 1.0e-8
+    flux_local_jac: true
+    cell_local_jac: true
+    fast_increments: true
+    ser_beta: 0.0
+    ser_cfl_max: 100.0
+
+  # Slower reference implementation with the same mesh, flux, and reconstruction.
+  baseline:
+    CFL: 0.5
+    linear_solver: dense
+    newton_tol: 0.0        # always do all eight Newton iterations
+    flux_local_jac: false
+    cell_local_jac: false
+    fast_increments: false
+    ser_beta: 0.0
+    ser_cfl_max: 50.0
