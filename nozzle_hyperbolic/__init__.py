@@ -16,3 +16,6 @@ from .plot_settings import *
 from .fit_nozzle_shape import *
 
 from . import fvm_solver
+
+# Package info
+__version__ = "0.0.1"

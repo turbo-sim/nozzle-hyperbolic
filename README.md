@@ -17,7 +17,7 @@ poetry install --with dev
 Use `poetry run` to run commands in this environment:
 
 ```bash
-poetry run python -c "import nozzle_hyperbolic"
+poetry run python -c "import nozzle_hyperbolic; print(nozzle_hyperbolic.__version__)"
 poetry run pytest tests
 ```
 
@@ -28,6 +28,21 @@ Commit `pyproject.toml` and `poetry.lock` together.
 The commented local dependencies in `pyproject.toml` support development against
 the neighboring `jaxprop`, `pysolver_view`, and `nurbspy` repositories. Enable a
 local entry in place of its published-version entry, then regenerate the lockfile.
+
+## Version bumping and publishing
+
+The project uses `bump-my-version` and `.bumpversion.toml`, following TurboDash's
+setup. A bump updates `pyproject.toml` and `nozzle_hyperbolic/__init__.py`, commits
+the change, and creates a `vX.Y.Z` tag. Start from a clean working tree and preview
+the operation first:
+
+```bash
+poetry run bump-my-version bump --dry-run --verbose patch
+```
+
+The release commands are documented at the end of `pyproject.toml`. Publishing is
+manual until a publishing workflow is configured for this repository.
+
 
 ## Pushing to git repository
 

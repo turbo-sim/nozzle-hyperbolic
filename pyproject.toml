@@ -49,7 +49,7 @@ sphinxcontrib-bibtex = "^2.6.2"
 sphinxawesome-theme = "^5.1.5"
 sphinx-design = "^0.6.0"
 sphinx-togglebutton = "^0.3.2"
-bump2version = "^1.0.1"
+bump-my-version = "^1.5.1"
 sphinx-autobuild = "^2024.10.3"
 myst-parser = "^4.0.1"
 sympy = "^1.14.0"
@@ -59,5 +59,17 @@ requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
 
 
-# Rememeber to add --tags when publishing a new version
-# git push origin main --tags
+# Version bumping and releasing (run from the repository root):
+# 1. Install development tools: poetry install --with dev
+# 2. Commit your changes first; bumping requires a clean working tree.
+# 3. Preview a bump: poetry run bump-my-version bump --dry-run --verbose patch
+# 4. Choose ONE increment (updates version files, commits, and creates a vX.Y.Z tag):
+#    poetry run bump-my-version bump patch
+#    poetry run bump-my-version bump minor
+#    poetry run bump-my-version bump major
+# 5. Push the reviewed release branch and tags:
+#    git push origin <branch> --follow-tags
+# 6. Build and publish the package (PyPI credentials must already be configured):
+#    poetry build
+#    poetry publish
+# This repository does not yet have an automated publishing workflow.
