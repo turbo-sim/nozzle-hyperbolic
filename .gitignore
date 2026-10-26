@@ -4,6 +4,7 @@
 fluid_tables/
 
 # Compiled Python
+.venv/
 __pycache__/
 *.pyc
 *.pyo

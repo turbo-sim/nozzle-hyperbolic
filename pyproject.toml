@@ -2,31 +2,32 @@
 name = "nozzle_hyperbolic"
 version = "0.0.1"
 description = "A Python tool for modeling flows in nozzles."
-authors = ["Andrea Cioffi",  "Roberto Agromayor"]
+authors = ["Andrea Cioffi", "Alberto Bergamin", "Roberto Agromayor"]
 license = "MIT"
 readme = "README.md"
-repository = "https://github.com/turbo-sim/hyperbolic-nozzle"
-documentation = "https://to.be.completed.com"
+repository = "https://github.com/turbo-sim/nozzle-hyperbolic"
+documentation = "https://github.com/turbo-sim/nozzle-hyperbolic"
+packages = [{ include = "nozzle_hyperbolic" }]
 
 [tool.poetry.dependencies]
 python = ">=3.11,<3.14"
 jax = "^0.6.0"
-#jaxprop = "^0.4.1"
-jaxprop = { path = "../jaxprop/", develop = true }
+jaxprop = "^0.5.7"
+#jaxprop = { path = "../../jaxprop/", develop = true }
 equinox = "^0.12.0"
 optimistix = "^0.0.10"
-scipy = "^1.16.1"
-numpy = "^2.3.0"
-#nurbspy ="^1.2.2"
-matplotlib = "^3.10.6"
-CoolProp = "^7.0.0"
+# PySolverView's controlled SLSQP bridge requires this SciPy interface.
+scipy = "1.17.1"
+# NURBSpy's JAX extra currently requires Quadax <0.3, which needs NumPy <2.5.
+numpy = ">=2.4.6,<2.5"
+matplotlib = "^3.11.2"
 jaxlib = "^0.6.0"
 diffrax = "^0.7.0"
-pysolver_view = "^0.6.8"
-#pysolver_view = { path = "../pysolver_view/", develop = true }
+pysolver-view = "^0.7.4"
+#pysolver-view = { path = "../../pysolver_view/", develop = true }
 tqdm = "^4.67.1"
-nurbspy ="^1.2.3"
-#nurbspy = { path = "../nurbspy/", develop = true }
+nurbspy = { version = "^1.4.0", extras = ["jax"] }
+#nurbspy = { path = "../../nurbspy/", develop = true, extras = ["jax"] }
 snakeviz = "^2.2.2"
 parse = "^1.22.0"
 line-profiler = "^5.0.2"
