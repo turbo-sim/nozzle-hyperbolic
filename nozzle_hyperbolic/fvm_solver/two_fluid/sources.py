@@ -624,6 +624,11 @@ def D_s_primitive(U_h, eos_g: PhaseProps, eos_l: PhaseProps,
            - sigma_Mg * (k_rho * rl + ag * (rg**2 - rl**2)) / (rl * rh2) * du)
         #    + (F_g * al * k_rho + F_l * (rg + al * k_rho)) / (al * rh2))
 
+    # Correction terms. Not present in the book but rederived from the primitve equations!
+    u_bar = ag * u_g + al * u_l
+    Ds_2 = Ds_2 + (rg + rl) * al * rl * du * u_bar * dlnA_dx / rh2
+    Ds_3 = Ds_3 - (rg + rl) * ag * rg * du * u_bar * dlnA_dx / rh2
+
     # ── Row 4: void fraction ─────────────────────────────────────────────────
     Ds_4 = (al * a0sq / (rho_s * al_sq) * Mg
           - ag * a0sq / (rho_s * ag_sq) * Ml
@@ -713,6 +718,7 @@ def D_VE_algebric(U_h, cq, closure, eos_g, eos_l, k):
 
     return jnp.array([D1, D2, D3, D4, D5, D6])
 
+# TODO: delete this if old and not used!
 def D_VE_algebric_two_component(U_h, cq, closure, eos_g, eos_l, k):
     """
     For cases where there is no mass transfer 
