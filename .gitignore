@@ -48,7 +48,8 @@ debug_*
 check_*
 
 # results folders
-results*
+results*/
+outputs/
 
 # old_file
 old_*

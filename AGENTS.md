@@ -12,3 +12,7 @@
   backend's native success flag. Keep failed runs and accepted/trial history
   distinctions explicit.
 - Use `$...$` for inline Markdown math and `$$...$$` for display math.
+
+- The pytest suite covers production code under `src/` only. Do not add tests
+  for `development_new/` experiments or import development scripts from tests.
+  Keep experiment verification in their executable audits and reports.
