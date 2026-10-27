@@ -1,5 +1,13 @@
 # LM/HYBR tests and Euler flux/MUSCL corrections
 
+> Historical analysis. The one-off drivers and old generated outputs referenced
+> below were removed during experiment cleanup. Their commands and output paths
+> are historical, not currently supported reproduction instructions. See the
+> [consolidated overview](../development_new/newton_solve/README.md) and
+> [convergence explanation](../development_new/newton_solve/CONVERGENCE_MECHANISM.md)
+> for the retained comparison. Flux/limiter verification is now in
+> [numerical_fixes](../development_new/numerical_fixes/README.md).
+
 The flux and limiter defects are corrected, but the tested changes do **not**
 make direct cold-start solves converge on the two shocked cases. Constant
 reconstruction also fails with the original equations, so the remaining

@@ -4,9 +4,10 @@
   PySolverView backends with their initial-step/radius controls. Verify and
   record `library="pysolver"` and the actual backend method. Do not silently
   substitute vanilla SciPy/MINPACK solvers.
-- `development_new/newton_solve/minpack_solvers.py` and the old
-  `compare_root_methods.py` preserve historical SciPy experiments; they are
-  not the default for new investigations.
+- The retained `development_new/newton_solve/scripts/investigate_ptc.py` comparison
+  uses custom Newton, physical-storage PTC, and implicit integration. Historical
+  SciPy wrappers and abandoned continuation drivers have been removed; their
+  findings are summarized in that directory's README.md.
 - Audit convergence with the original spatial residual independently of a
   backend's native success flag. Keep failed runs and accepted/trial history
   distinctions explicit.

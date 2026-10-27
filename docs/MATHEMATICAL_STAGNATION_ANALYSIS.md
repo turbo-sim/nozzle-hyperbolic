@@ -1,5 +1,13 @@
 # Mathematical analysis of the shocked-nozzle stagnation
 
+> Historical analysis. The one-off drivers and old generated outputs referenced
+> below were removed during experiment cleanup. Their commands and output paths
+> are historical, not currently supported reproduction instructions. See the
+> [consolidated overview](../development_new/newton_solve/README.md) and
+> [convergence explanation](../development_new/newton_solve/CONVERGENCE_MECHANISM.md)
+> for the retained comparison. Flux/limiter verification is now in
+> [numerical_fixes](../development_new/numerical_fixes/README.md).
+
 This analysis describes the historical flux, retained as
 `_jax_F_fvs_stadtke_legacy`. The subsequent implementation and controlled
 LM/HYBR/reconstruction tests are documented in
@@ -151,7 +159,7 @@ For example, linearizing the limiter did not improve all `shock35` trials.
 The diagnostic is not a proposed replacement residual or a validated solver;
 away from the starting field it is a different function.
 
-![Limiter probe at the saved shock70 Newton state](../development_new/newton_solve/results_stagnation_mechanism/shock70_newton_limiter_probe.png)
+*The historical limiter-probe figure was removed with the old generated outputs.*
 
 ## 3. The entropy-fix activation creates a finite flux jump
 

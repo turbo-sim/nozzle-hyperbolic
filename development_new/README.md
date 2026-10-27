@@ -12,10 +12,10 @@ poetry run python -m development_new.euler_nozzle.verify_euler_nozzle_steady --n
 poetry run python -m development_new.euler_nozzle.verify_euler_nozzle_sod --no-show
 ```
 
-The original research drivers remain in `development/`. The separate
-[direct steady-solver experiments](newton_solve/README.md) live in
-`newton_solve/`; their implementations and the pending numerical changes are
-not part of the verification-example commit.
+The original research drivers remain in `development/`. The focused
+[Newton/PTC/implicit comparison](newton_solve/README.md) lives in
+`newton_solve/`, alongside an overview of the earlier attempts and a
+[physical and mathematical convergence explanation](newton_solve/CONVERGENCE_MECHANISM.md).
 
 The [numerical-fix comparison](numerical_fixes/RUNNING.md) runs the shared steady
 example with legacy/corrected fluxes and optional smooth reconstruction.
