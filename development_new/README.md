@@ -26,3 +26,8 @@ The [implicit-integration sensitivity studies](implicit_integration/README.md)
 compare inner Newton caps and CFL controllers across the same five nozzle cases.
 The [combined report](implicit_integration/outputs/REPORT.md) includes convergence,
 pressure, actual CFL, and warm-time figures for all three studies.
+
+The [boundary-condition study](boundary_conditions/README.md) compares internal
+ghost treatment with coupled algebraic boundary equations using matched implicit
+Newton and banded solvers. Its reports retain repeated timing samples and the
+same five-case residual and physical audits.
