@@ -381,7 +381,7 @@ def make_jax_stadtke_step(fluid, A, A_face, dAdx, D_h, roughness, dx, CFL, p_out
                            eps_filter=0.0, eps_filter_ucut=None, eps_filter_uwidth=None,
                            linear_solver='dense', newton_tol=0.0,
                            flux_local_jac=False, cell_local_jac=False,
-                           *, flux_variant='regularized',
+                           *, return_operators=False, flux_variant='regularized',
                            smooth_limiter_coefficient=1.0, limiter_scales=None):
     """
     Build a @jax.jit step function implementing the Städtke Newton implicit scheme.
@@ -416,6 +416,12 @@ def make_jax_stadtke_step(fluid, A, A_face, dAdx, D_h, roughness, dx, CFL, p_out
 
     The current step call is ``step(U_n, dt) -> (U_new, ssr)``. The factory
     normally returns ``(step, compute_dt, jac_diff, face_mass_flux)``.
+    ``return_operators=True`` appends a dictionary of JIT-compatible steady
+    operators for experiments. These use the same spatial residual and boundary
+    conditions as the implicit step, with only the interior primitive variables
+    as unknowns. ``steady_residual`` has physical flux units; its Jacobian and
+    Newton direction contain no pseudo-time storage term.
+
     ``flux_variant='regularized'`` uses consistent characteristic splitting
     with conservative sonic viscosity and no inverse of the singular flux
     Jacobian. ``'legacy'`` retains the historical implementation solely for
@@ -990,7 +996,68 @@ def make_jax_stadtke_step(fluid, A, A_face, dAdx, D_h, roughness, dx, CFL, p_out
         F_hat    = _face_flux(U_L, U_R, fluid, delta_factor)   # (N-1, 3)
         return A_face * F_hat[:, 0]
 
-    return step, compute_dt, jac_diff, face_mass_flux
+    if not return_operators:
+        return step, compute_dt, jac_diff, face_mass_flux
+
+    @jax.jit
+    def state_from_interior(U_int_flat):
+        """Complete an interior primitive state with the existing ghost BCs."""
+        U_int = U_int_flat.reshape(N - 2, 3)
+        U = jnp.concatenate([U_int[:1], U_int, U_int[-1:]], axis=0)
+        return _bc_outlet(_bc_inlet(U))
+
+    @jax.jit
+    def steady_residual(U_int_flat):
+        """Return the integrated spatial residual, with storage cancelled.
+
+        Both arguments depend on the unknowns, so AD also cancels the
+        conservative storage Jacobian. Holding the old-state argument fixed
+        would instead produce the implicit pseudo-time Jacobian.
+        """
+        U = state_from_interior(U_int_flat)
+        return _residual(U_int_flat, U.reshape(-1), jnp.float64(1.0))
+
+    @jax.jit
+    def steady_jacobian(U_int_flat):
+        """Return the exact spatial Jacobian using the selected AD assembly."""
+        U_flat = state_from_interior(U_int_flat).reshape(-1)
+        # The dt=0 Jacobian contains only the conservative storage blocks.
+        return (_jac_fn(U_int_flat, U_flat, jnp.float64(1.0))
+                - _jac_fn(U_int_flat, U_flat, jnp.float64(0.0)))
+
+    @jax.jit
+    def steady_newton_step(U_int_flat):
+        """Solve J_ss dU = -R_ss with the existing dense or banded solver."""
+        U_flat = state_from_interior(U_int_flat).reshape(-1)
+        R = steady_residual(U_int_flat)
+        if linear_solver == 'banded':
+            J_blocks = (_jac_blocks(U_int_flat, U_flat, jnp.float64(1.0))
+                        - _jac_blocks(U_int_flat, U_flat, jnp.float64(0.0)))
+            return _banded_solve(J_blocks, R)
+        return jnp.linalg.solve(steady_jacobian(U_int_flat), -R)
+
+    @jax.jit
+    def steady_residual_norm(U_int_flat):
+        """Return exactly the dimensionless SSR reported by the implicit step."""
+        U = state_from_interior(U_int_flat)
+        R = steady_residual(U_int_flat).reshape(N - 2, 3)
+        st = fluid.get_state(jxp.HmassP_INPUTS, U[:, 2], U[:, 0])
+        t_char = dx / (jnp.max(jnp.abs(U[:, 1]) + st["a"]) + 1e-300)
+        V = _V_from_U(U)
+        return jnp.sqrt(jnp.mean(
+            (t_char * R
+             / (V_cell[1:-1, None] * jnp.abs(V[1:-1]) + 1e-300)) ** 2))
+
+    operators = {
+        'state_from_interior': state_from_interior,
+        'steady_residual': steady_residual,
+        'steady_jacobian': steady_jacobian,
+        'steady_newton_step': steady_newton_step,
+        'steady_residual_norm': steady_residual_norm,
+        'conservative_state': jax.jit(_V_from_U),
+        'cell_volumes': V_cell,
+    }
+    return step, compute_dt, jac_diff, face_mass_flux, operators
 
 
 # ---------------------------------------------------------------------------
