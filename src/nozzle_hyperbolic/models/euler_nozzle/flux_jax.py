@@ -1,4 +1,4 @@
-"""Unchanged definitions relocated from fvm_solver.fvm."""
+"""JAX Euler fluxes, including the preserved legacy Städtke implementation."""
 import jax.numpy as jnp
 import jaxprop as jxp
 
@@ -62,7 +62,7 @@ def _jax_F_hllc(Q_L, Q_R, p_L, c_L, p_R, c_R, A_L, A_R, fluid):
 # Städtke FVS flux  (JAX, operates in (p, u, h) primitive space)
 # ---------------------------------------------------------------------------
 
-def _jax_F_fvs_stadtke(U_L, U_R, fluid, delta_factor=0.1):
+def _jax_F_fvs_stadtke_legacy(U_L, U_R, fluid, delta_factor=0.1):
     """
     Städtke flux-vector-splitting interface flux for all faces simultaneously.
 
@@ -168,3 +168,183 @@ def _jax_F_fvs_stadtke(U_L, U_R, fluid, delta_factor=0.1):
     # F̂ = R̃⁺ F_L + R̃⁻ F_R  (batched matvec)
     return (jnp.einsum('...ij,...j->...i', R_plus,  F_L)
           + jnp.einsum('...ij,...j->...i', R_minus, F_R))
+
+
+def _jax_stadtke_conservative_projectors(U, rho, a, gruneisen):
+    """Return conservative Euler projectors without inverting the flux Jacobian.
+
+    For primitive W=(p,u,h), C=dQ/dW has determinant rho**2/a**2.
+    The thermodynamic identities rho_p=(1+G)/a**2 and
+    rho_h=-rho*G/a**2 give the explicit inverse below. With A the
+    primitive Euler matrix and P_i=v_i*l_i, K=dF/dW=C*A, so
+    K*P_i*K^-1=C*P_i*C^-1 wherever K is invertible. The C representation
+    also remains regular at u=0 and u=+/-a, where K is singular.
+
+    Returns shape (..., 3 waves, 3 balances, 3 conservative variables).
+    Admissible EOS states require finite rho>0 and a>0.
+    """
+    u, h = U[..., 1], U[..., 2]
+    rho_p = (1.0 + gruneisen) / a**2
+    rho_h = -rho * gruneisen / a**2
+    total_h = h + 0.5 * u**2
+    zero = jnp.zeros_like(u)
+    one = jnp.ones_like(u)
+    storage = jnp.stack(
+        [
+            jnp.stack([rho_p, zero, rho_h], axis=-1),
+            jnp.stack([u * rho_p, rho, u * rho_h], axis=-1),
+            jnp.stack(
+                [total_h * rho_p - one, rho * u, total_h * rho_h + rho],
+                axis=-1,
+            ),
+        ],
+        axis=-2,
+    )
+    chi = 0.5 * u**2 - h
+    inverse_storage = jnp.stack(
+        [
+            jnp.stack(
+                [a**2 + gruneisen * chi, -gruneisen * u, gruneisen],
+                axis=-1,
+            ),
+            jnp.stack([-u / rho, one / rho, zero], axis=-1),
+            jnp.stack(
+                [
+                    (a**2 + (gruneisen + one) * chi) / rho,
+                    -(gruneisen + one) * u / rho,
+                    (gruneisen + one) / rho,
+                ],
+                axis=-1,
+            ),
+        ],
+        axis=-2,
+    )
+    right = jnp.stack(
+        [
+            jnp.stack([rho * a, one, a], axis=-1),
+            jnp.stack([-rho * a, one, -a], axis=-1),
+            jnp.stack([zero, zero, one], axis=-1),
+        ],
+        axis=-2,
+    )
+    left = jnp.stack(
+        [
+            jnp.stack([0.5 / (rho * a), 0.5 * one, zero], axis=-1),
+            jnp.stack([-0.5 / (rho * a), 0.5 * one, zero], axis=-1),
+            jnp.stack([-one / rho, zero, one], axis=-1),
+        ],
+        axis=-2,
+    )
+    conservative_right = jnp.einsum("...ij,...kj->...ki", storage, right)
+    conservative_left = jnp.einsum("...ki,...ij->...kj", left, inverse_storage)
+    return conservative_right[..., :, None] * conservative_left[..., None, :]
+
+
+def _jax_harten_absolute(eigenvalues, width):
+    """Return a positive C1 regularized absolute value for positive widths.
+
+    The quadratic inner branch matches abs(lambda) and its first derivative
+    at +/-width. Its second derivative jumps there: this is C1, not C2.
+    Every traced branch is finite, including lambda=0, when width>0.
+    """
+    absolute = jnp.abs(eigenvalues)
+    inner = (eigenvalues**2 + width**2) / (2.0 * width)
+    return jnp.where(absolute < width, inner, absolute)
+
+
+def _jax_characteristic_flux_with_entropy_viscosity(
+    flux_left, flux_right, conservative_jump, projectors, eigenvalues, width
+):
+    """Combine characteristic FVS with a conservative sonic viscosity term.
+
+    phi is the regularized absolute eigenvalue and s=lambda/phi. The first
+    characteristic term is a smooth sum-to-one weighting of physical fluxes.
+    The additional coefficient phi-s*lambda is nonnegative. For a frozen
+    linear system, the complete viscosity is exactly phi rather than the
+    smaller lambda**2/phi supplied by smoothing the flux weights alone.
+    """
+    absolute = _jax_harten_absolute(eigenvalues, width)
+    sign = eigenvalues / absolute
+    extra_viscosity = absolute - sign * eigenvalues
+    projected_flux_jump = jnp.einsum(
+        "...kij,...j->...ki", projectors, flux_right - flux_left
+    )
+    projected_state_jump = jnp.einsum(
+        "...kij,...j->...ki", projectors, conservative_jump
+    )
+    dissipation = jnp.sum(
+        sign[..., None] * projected_flux_jump
+        + extra_viscosity[..., None] * projected_state_jump,
+        axis=-2,
+    )
+    return 0.5 * (flux_left + flux_right) - 0.5 * dissipation
+
+
+def _jax_F_fvs_stadtke(U_L, U_R, fluid, delta_factor=0.1):
+    """Regularized characteristic FVS flux with conservative entropy viscosity.
+
+    Primitive face states have columns (p,u,h); output balances are mass,
+    momentum, and total energy. The original implementation is retained
+    verbatim as _jax_F_fvs_stadtke_legacy for baseline reproduction.
+
+    Conservative projectors C*P_i*C^-1 remove the original sonic/rest flux-
+    Jacobian singularity. Smooth physical-flux weights sum to one, preserving
+    Fhat(U,U)=F(U) for a general EOS, including states in the sonic band.
+    A conservative-state jump adds the viscosity missing from smoothing
+    those weights alone. This deliberately changes the discretization inside
+    the regularization band; outside it the flux is the original intended
+    characteristic FVS, with exact supersonic upwinding when every averaged
+    eigenvalue is beyond its positive or negative band.
+
+    The entropy width is delta0 + 0.5*positive_smooth(lambda_R-lambda_L),
+    where delta0=delta_factor*a_average and positive_smooth(d) is
+    0.5*(d+sqrt(d**2+delta0**2)). There is no strict sonic activation gate.
+    For delta_factor>0 and a smooth admissible EOS, flux regularity is C1 at
+    rest, sonic states, and the Harten band edges. The caller must supply a
+    strictly positive delta_factor; no tracer-dependent Python check is used.
+
+    Arithmetic averaging is not a general-EOS Roe linearization. Although
+    frozen linear characteristic viscosity equals the Harten absolute value,
+    this construction does not establish a full nonlinear entropy proof.
+    """
+    average = 0.5 * (U_L + U_R)
+    state_average = fluid.get_state(jxp.HmassP_INPUTS, average[:, 2], average[:, 0])
+    state_left = fluid.get_state(jxp.HmassP_INPUTS, U_L[:, 2], U_L[:, 0])
+    state_right = fluid.get_state(jxp.HmassP_INPUTS, U_R[:, 2], U_R[:, 0])
+    rho = state_average["rho"]
+    a = state_average["a"]
+    projectors = _jax_stadtke_conservative_projectors(
+        average, rho, a, state_average["G"]
+    )
+
+    def conservative_and_flux(primitive, density):
+        p, u, h = primitive[:, 0], primitive[:, 1], primitive[:, 2]
+        total_h = h + 0.5 * u**2
+        conservative = jnp.stack([density, density * u, density * total_h - p], axis=-1)
+        flux = jnp.stack(
+            [density * u, density * u**2 + p, density * u * total_h], axis=-1
+        )
+        return conservative, flux
+
+    conservative_left, flux_left = conservative_and_flux(U_L, state_left["rho"])
+    conservative_right, flux_right = conservative_and_flux(U_R, state_right["rho"])
+
+    def characteristics(primitive, sound_speed):
+        u = primitive[:, 1]
+        return jnp.stack([u + sound_speed, u - sound_speed, u], axis=-1)
+
+    eigenvalues = characteristics(average, a)
+    spread = characteristics(U_R, state_right["a"]) - characteristics(
+        U_L, state_left["a"]
+    )
+    delta0 = delta_factor * a[:, None]
+    positive_spread = 0.5 * (spread + jnp.sqrt(spread**2 + delta0**2))
+    width = delta0 + 0.5 * positive_spread
+    return _jax_characteristic_flux_with_entropy_viscosity(
+        flux_left,
+        flux_right,
+        conservative_right - conservative_left,
+        projectors,
+        eigenvalues,
+        width,
+    )

@@ -86,6 +86,8 @@ from nozzle_hyperbolic.numerics.reconstruction import (
     _LIMITERS,
     muscl_van_leer_ph,
     _muscl_reconstruct,
+    _van_leer_jax_safe,
+    _van_leer_jax_regularized,
 )
 from nozzle_hyperbolic.models.euler_nozzle.reconstruction import (
     _muscl_reconstruct_prim,
@@ -97,6 +99,7 @@ from nozzle_hyperbolic.models.euler_nozzle.flux_jax import (
     _jax_F_lf,
     _jax_F_hllc,
     _jax_F_fvs_stadtke,
+    _jax_F_fvs_stadtke_legacy,
 )
 from nozzle_hyperbolic.models.euler_nozzle.state import (
     _conservative_to_puh,
@@ -178,7 +181,7 @@ def make_jax_step(fluid, A, dAdx, D_h, roughness, dx, CFL, p_out, h0, s0,
     _LIMS = {
         'muscl_minmod':   lambda a, b: jnp.where(jnp.sign(a) == jnp.sign(b),
                               jnp.sign(a) * jnp.minimum(jnp.abs(a), jnp.abs(b)), 0.0),
-        'muscl_van_leer': lambda a, b: jnp.where(a * b > 0, 2 * a * b / (a + b + 1e-300), 0.0),
+        'muscl_van_leer': _van_leer_jax_safe,
         'muscl_superbee': lambda a, b: jnp.maximum(
             jnp.where(jnp.sign(a) == jnp.sign(b), jnp.sign(a) * jnp.minimum(2*jnp.abs(a), jnp.abs(b)), 0.0),
             jnp.where(jnp.sign(a) == jnp.sign(b), jnp.sign(a) * jnp.minimum(jnp.abs(a), 2*jnp.abs(b)), 0.0)),
@@ -377,7 +380,9 @@ def make_jax_stadtke_step(fluid, A, A_face, dAdx, D_h, roughness, dx, CFL, p_out
                            jacobian_mode='dense',
                            eps_filter=0.0, eps_filter_ucut=None, eps_filter_uwidth=None,
                            linear_solver='dense', newton_tol=0.0,
-                           flux_local_jac=False, cell_local_jac=False):
+                           flux_local_jac=False, cell_local_jac=False,
+                           *, flux_variant='regularized',
+                           smooth_limiter_coefficient=1.0, limiter_scales=None):
     """
     Build a @jax.jit step function implementing the Städtke Newton implicit scheme.
 
@@ -408,9 +413,29 @@ def make_jax_stadtke_step(fluid, A, A_face, dAdx, D_h, roughness, dx, CFL, p_out
       U_new : (N, 3) — primitive state at time n+1
       dt    : scalar — time step used
       ssr   : scalar — max relative change (convergence metric)
+
+    The current step call is ``step(U_n, dt) -> (U_new, ssr)``. The factory
+    normally returns ``(step, compute_dt, jac_diff, face_mass_flux)``.
+    ``flux_variant='regularized'`` uses consistent characteristic splitting
+    with conservative sonic viscosity and no inverse of the singular flux
+    Jacobian. ``'legacy'`` retains the historical implementation solely for
+    reproducible comparisons. ``recon='muscl_van_leer_smooth'`` selects a C2
+    limiter with fixed dimensionless width coefficient/(N-1)^2. It damps
+    nearly flat slopes while retaining componentwise reconstruction bounds.
+    Its fixed primitive scales can be supplied as (pressure, velocity, enthalpy).
+    The bit-for-bit statement above concerns the historical speed-up switches
+    within a selected flux variant. The corrected default flux deliberately
+    changes the sonic-band discretization; select 'legacy' to reproduce the
+    historical flux equations.
     """
     if linear_solver not in ('dense', 'banded'):
         raise ValueError(f"linear_solver must be 'dense' or 'banded', got {linear_solver!r}")
+    if flux_variant not in ('regularized', 'legacy'):
+        raise ValueError("flux_variant must be 'regularized' or 'legacy'")
+    if flux_variant == 'regularized' and (not np.isfinite(delta_factor) or delta_factor <= 0.0):
+        raise ValueError("The regularized characteristic flux needs delta_factor > 0")
+    _face_flux = (_jax_F_fvs_stadtke if flux_variant == 'regularized'
+                  else _jax_F_fvs_stadtke_legacy)
     N      = len(A)
     A_j    = jnp.asarray(A,   dtype=jnp.float64)
     D_h_j  = jnp.asarray(D_h, dtype=jnp.float64)
@@ -427,6 +452,20 @@ def make_jax_stadtke_step(fluid, A, A_face, dAdx, D_h, roughness, dx, CFL, p_out
     h0_j  = jnp.float64(h0)
     s0_j  = jnp.float64(s0)
     pout_j = jnp.float64(p_out)
+
+    if recon == 'muscl_van_leer_smooth':
+        if not np.isfinite(smooth_limiter_coefficient) or smooth_limiter_coefficient <= 0:
+            raise ValueError("smooth_limiter_coefficient must be finite and positive")
+        if limiter_scales is None:
+            # Fixed reservoir-related scales preserve the local Jacobian stencil.
+            _scale_state = fluid.get_state(jxp.HmassP_INPUTS, h0, p_out)
+            limiter_scales = (abs(float(p_out)), float(_scale_state['a']), abs(float(h0)))
+        _limiter_scales = np.asarray(limiter_scales, dtype=float)
+        if (_limiter_scales.shape != (3,) or not np.isfinite(_limiter_scales).all()
+                or np.any(_limiter_scales <= 0)):
+            raise ValueError("limiter_scales must contain three finite positive values")
+        _limiter_scales = jnp.asarray(_limiter_scales, dtype=jnp.float64)
+        _limiter_epsilon = float(smooth_limiter_coefficient) / (N - 1)**2
 
     # ── Inner functions (all JAX-traceable) ──────────────────────────────
 
@@ -445,7 +484,10 @@ def make_jax_stadtke_step(fluid, A, A_face, dAdx, D_h, roughness, dx, CFL, p_out
         land outside the EOS table bounds (spec §6.4).
         """
         dU    = U[1:] - U[:-1]                           # (N-1, 3)
-        if recon == 'muscl_van_albada':
+        if recon == 'muscl_van_leer_smooth':
+            lim = lambda a, b: _limiter_scales * _van_leer_jax_regularized(
+                a / _limiter_scales, b / _limiter_scales, _limiter_epsilon)
+        elif recon == 'muscl_van_albada':
             # Van Albada is smooth (no r=1 kink) for same-sign inputs, better Jacobian
             # than minmod/van_leer there. But ab(a+b)/(a²+b²) is non-zero for opposite
             # signs when a+b≠0 → anti-diffusion → NaN. Must zero out for a·b ≤ 0.
@@ -462,7 +504,7 @@ def make_jax_stadtke_step(fluid, A, A_face, dAdx, D_h, roughness, dx, CFL, p_out
                 jnp.sign(a) * jnp.minimum(jnp.minimum(2*jnp.abs(a), 2*jnp.abs(b)),
                                            0.5*jnp.abs(a + b)), 0.0)
         else:  # muscl_van_leer (default)
-            lim = lambda a, b: jnp.where(a * b > 0, 2.0 * a * b / (a + b + 1e-300), 0.0)
+            lim = _van_leer_jax_safe
         sigma = jnp.zeros_like(U).at[1:-1].set(lim(dU[:-1], dU[1:]))
         U_L_m = U[:-1] + 0.5 * sigma[:-1]   # MUSCL candidate
         U_R_m = U[1:]  - 0.5 * sigma[1:]    # MUSCL candidate
@@ -606,7 +648,7 @@ def make_jax_stadtke_step(fluid, A, A_face, dAdx, D_h, roughness, dx, CFL, p_out
     # as a small mat-vec replaces 15 tangent passes by 6 (faces) / 3 (cells).
     # Chain rule regrouped: values unchanged, derivatives to ~1e-15.
     def _flux_one(ul, ur):
-        return _jax_F_fvs_stadtke(ul[None], ur[None], fluid, delta_factor)[0]
+        return _face_flux(ul[None], ur[None], fluid, delta_factor)[0]
 
     def _flux_and_jac_one(ul, ur):
         xf = jnp.concatenate([ul, ur])
@@ -615,7 +657,7 @@ def make_jax_stadtke_step(fluid, A, A_face, dAdx, D_h, roughness, dx, CFL, p_out
 
     @jax.custom_jvp
     def _flux_faces_local(U_L, U_R):
-        return _jax_F_fvs_stadtke(U_L, U_R, fluid, delta_factor)
+        return _face_flux(U_L, U_R, fluid, delta_factor)
 
     @_flux_faces_local.defjvp
     def _flux_faces_local_jvp(primals, tangents):
@@ -670,7 +712,7 @@ def make_jax_stadtke_step(fluid, A, A_face, dAdx, D_h, roughness, dx, CFL, p_out
         if flux_local_jac:
             F_hat = _flux_faces_local(U_L, U_R)                         # (N-1, 3)
         else:
-            F_hat = _jax_F_fvs_stadtke(U_L, U_R, fluid, delta_factor)  # (N-1, 3)
+            F_hat = _face_flux(U_L, U_R, fluid, delta_factor)  # (N-1, 3)
 
         # Source: area variation + wall friction — momentum only (theory §7.3)
         if cell_local_jac:
@@ -945,7 +987,7 @@ def make_jax_stadtke_step(fluid, A, A_face, dAdx, D_h, roughness, dx, CFL, p_out
         U = _bc_inlet(U)
         U = _bc_outlet(U)
         U_L, U_R = _muscl_ph(U) if recon != 'constant' else (U[:-1], U[1:])
-        F_hat    = _jax_F_fvs_stadtke(U_L, U_R, fluid, delta_factor)   # (N-1, 3)
+        F_hat    = _face_flux(U_L, U_R, fluid, delta_factor)   # (N-1, 3)
         return A_face * F_hat[:, 0]
 
     return step, compute_dt, jac_diff, face_mass_flux
@@ -1071,6 +1113,9 @@ def fvm_euler_1d(x, t, parameters):
             transmissive_bc=transmissive_bc, recon=recon,
             delta_factor=parameters.get('delta_factor', 0.1),
             newton_iter=parameters.get('newton_iter', 20),
+            flux_variant=parameters.get('flux_variant', 'regularized'),
+            smooth_limiter_coefficient=parameters.get('smooth_limiter_coefficient', 1.0),
+            limiter_scales=parameters.get('limiter_scales', None),
             jacobian_mode=jacobian_mode,
             eps_filter=_eps_filter,
             eps_filter_ucut=None if _ef_ucut in (None, "", "none") else float(_ef_ucut),
@@ -1135,6 +1180,7 @@ def fvm_euler_1d(x, t, parameters):
         t_phys   = 0.0
         res      = float('inf')
         res_hist = [float('inf')] * 5
+        convergence_history = [] if parameters.get('record_history', False) else None
         dt       = float(_dt_init_j)   # current target dt; grows/shrinks adaptively
         t0       = _time.perf_counter()
         # phase timers (s): where does the per-iteration time go?
@@ -1229,6 +1275,12 @@ def fvm_euler_1d(x, t, parameters):
                 t_phys += dt
                 n      += 1
                 res_hist = res_hist[1:] + [res]
+                if convergence_history is not None:
+                    convergence_history.append(dict(
+                        iteration=n, pseudo_time_s=t_phys, dt_s=dt,
+                        ssr=float(res_j), stopping_ssr=res,
+                        halvings=halvings if adaptive_dt else 0,
+                    ))
 
                 _cfl_txt = f"  CFL_eff={CFL * _cfl_mult:.1f}" if _ser_beta > 0.0 else ""
                 if adaptive_dt and halvings > 0:
@@ -1298,6 +1350,8 @@ def fvm_euler_1d(x, t, parameters):
         parameters['run_stats'] = dict(steps=n_done, wall_s=elapsed, ssr=res_done,
                                        reason=reason, t_phys=t_done,
                                        compile_s=compile_time)
+        if convergence_history is not None:
+            parameters['run_stats']['convergence_history'] = convergence_history
 
         Q_out = np.zeros((N, Nj, 2))
         Q_out[:, :, 0] = Q_init

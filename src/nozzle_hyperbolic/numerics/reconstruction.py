@@ -17,6 +17,61 @@ def _van_leer(a, b):
     return np.where(ab > 0.0, 2.0 * ab / (a + b + 1e-300), 0.0)
 
 
+def _van_leer_jax_safe(a, b):
+    """Return the original JAX Van Leer slope with a safe inactive branch.
+
+    The active formula is unchanged. For opposite differences, including
+    ``a == -b``, replace the denominator before dividing so reverse AD never
+    encounters an overflowing inactive quotient. This does not smooth the
+    mathematical limiter at its axes or origin.
+    """
+    a = jnp.asarray(a)
+    b = jnp.asarray(b)
+    active = a * b > 0.0
+    denominator = jnp.where(active, a + b + 1e-300, jnp.ones_like(a + b))
+    return jnp.where(active, 2.0 * a * b / denominator, 0.0)
+
+
+def _van_leer_jax_regularized(a, b, epsilon):
+    """Return a C2 regularization of Van Leer for dimensionless differences.
+
+    ``epsilon`` must be finite and strictly positive. Normalize physical
+    component differences with fixed reference scales before calling, then
+    multiply the returned slope by the same scales. A mesh-dependent choice
+    such as ``epsilon = coefficient * (dx / length)**2`` makes the smoothing
+    vanish with refinement without introducing state-dependent nonlocality.
+
+    With ``t = max(a*b, 0)`` and ``s = a+b``, this computes
+
+        2*t**3*s / ((t**2 + epsilon**4)*(s**2 + epsilon**2)).
+
+    For same-sign differences it is Van Leer multiplied by two factors in
+    [0, 1]; opposite-sign and zero differences give exactly zero. Thus it
+    retains componentwise slope/reconstruction bounds and preserves constants.
+    Those properties alone do not establish TVD or update positivity for a
+    coupled Euler solver. Linear slopes are damped near the regularization
+    scale and are recovered as epsilon tends to zero, rather than preserved
+    exactly at finite epsilon.
+
+    The positive-part cubic makes the extension across each axis C2. Factored
+    evaluation avoids division by a small ``a+b`` and any exponential branch.
+    No custom derivative is needed for JAX forward or reverse AD.
+    """
+    a = jnp.asarray(a)
+    b = jnp.asarray(b)
+    epsilon = jnp.asarray(epsilon)
+    product = jnp.maximum(a * b, 0.0)
+    total = a + b
+    product_squared = product * product
+    epsilon_squared = epsilon * epsilon
+    product_weight = product_squared / (
+        product_squared + epsilon_squared * epsilon_squared
+    )
+    return (
+        2.0 * product * total / (total * total + epsilon_squared)
+    ) * product_weight
+
+
 def _superbee(a, b):
     s1 = np.where(np.sign(a) == np.sign(b),
                   np.sign(a) * np.minimum(2.0 * np.abs(a), np.abs(b)), 0.0)
@@ -65,7 +120,7 @@ def muscl_van_leer_ph(U):
     face adjacent to a ghost cell uses a 1st-order (cell-centred) value.
     """
     dU    = U[1:] - U[:-1]                                              # (N-1, 3)
-    vl    = lambda a, b: jnp.where(a * b > 0, 2.0 * a * b / (a + b + 1e-300), 0.0)
+    vl    = _van_leer_jax_safe
     sigma = jnp.zeros_like(U).at[1:-1].set(vl(dU[:-1], dU[1:]))        # (N, 3)
     U_L   = U[:-1] + 0.5 * sigma[:-1]
     U_R   = U[1:]  - 0.5 * sigma[1:]
