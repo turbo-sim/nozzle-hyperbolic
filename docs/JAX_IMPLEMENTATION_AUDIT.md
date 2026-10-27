@@ -6,7 +6,7 @@ This audit records inherited implementation issues and limitations. No numerical
 
 ## Scope and evidence
 
-The review covered the GeneralEuler finite-volume driver and step factories, NumPy and JAX flux implementations, thermodynamic recovery, and the TwoFluid state, matrices, flux, sources, closures, and step factory. AnnularChannel has no finite-volume implementation on this baseline to audit.
+The review covered the EulerNozzle finite-volume driver and step factories, NumPy and JAX flux implementations, thermodynamic recovery, and the TwoFluid state, matrices, flux, sources, closures, and step factory. EulerAnnular has no finite-volume implementation on this baseline to audit.
 
 Small probes ran with the available Python interpreter and JAX **0.6.2**, with x64 enabled. They extracted the relevant function ASTs directly from `git show alberto-branch:<path>` and executed the original function bodies in isolated namespaces. Where needed, a smooth analytical ideal-gas property stub supplied the property interface. These probes isolate numerical/JAX behavior from dependency loading, table provenance, and case configuration. They are not full nozzle simulations or validation of the installed `jaxprop` thermodynamic backend.
 
@@ -62,7 +62,7 @@ The probe used `_va_rel_eff=0.001`; it establishes nonlocal dependence rather th
 
 There is also a comment/code mismatch: lines 1023–1024 say the `smoothness` mean contribution is scaled by `1e-12`; line 1026 actually uses `0.1 * _va_mean` on that path. This observation concerns the implemented scale and dependency, not a proposed replacement value.
 
-### JAX-04: GeneralEuler FVS is singular at rest and inconsistent under its eigenvalue floor
+### JAX-04: EulerNozzle FVS is singular at rest and inconsistent under its eigenvalue floor
 
 Original source: `nozzle_hyperbolic/fvm_solver/fvm.py`, `_jax_F_fvs_stadtke`, especially the flux Jacobian at lines 1279–1285 and `_Rt_vec` at lines 1306–1316.
 
@@ -110,7 +110,7 @@ The evaporation gate is deliberately binary, including its superheat, volume-fra
 
 Original sources include `fvm.py`, `fvm_euler_1d`, lines 2197 onward; `flux.py`, `state_from_rho_u`, lines 20–40; and the NumPy perfect-gas/property helpers.
 
-The GeneralEuler application driver performs NumPy allocation/conversion, Python scalar conversion, printing, mutable parameter-dictionary updates, and host-controlled acceptance logic. Its `use_jax` condition at line 2547 explicitly excludes the legacy perfect-gas and Roe paths. The NumPy flux/recovery implementation also uses SciPy root finding and Python scalar conversions. These are inherited capability boundaries; moving them into model or infrastructure folders does not make them JIT/AD compatible.
+The EulerNozzle application driver performs NumPy allocation/conversion, Python scalar conversion, printing, mutable parameter-dictionary updates, and host-controlled acceptance logic. Its `use_jax` condition at line 2547 explicitly excludes the legacy perfect-gas and Roe paths. The NumPy flux/recovery implementation also uses SciPy root finding and Python scalar conversions. These are inherited capability boundaries; moving them into model or infrastructure folders does not make them JIT/AD compatible.
 
 Host configuration and reporting are reasonable outside a differentiable kernel. The future distinction must be explicit: a host runner can call a compiled step without itself being differentiable. The TwoFluid `debug_newton=True` path is intentionally non-JIT and is documented as a debugging facility, not a production defect.
 
@@ -132,7 +132,7 @@ The local custom-JVP implementations linearize each face or cell and apply its l
 ## Suggested follow-up, after the structural refactor
 
 - Define supported differentiation targets separately: state, boundary data, geometry, closure parameters, and fluid/table parameters; distinguish forward from reverse mode and one-step from converged-solve sensitivities.
-- Add equal-state and stationary-state flux checks before claiming all GeneralEuler kernels are valid on those states.
+- Add equal-state and stationary-state flux checks before claiming all EulerNozzle kernels are valid on those states.
 - Compare EOS recovery sensitivities with analytical identities or finite differences, including boundary recovery.
 - Check dense versus colored Jacobians for every limiter, filter, and boundary combination that changes dependency width; include directional finite differences when derivatives have been stopped.
 - Give physical transient marching and steady pseudo-time iteration explicit separate contracts.

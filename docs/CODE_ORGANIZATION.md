@@ -3,7 +3,7 @@
 Date: 2026-10-26.
 
 This step reorganizes **nozzle_hyperbolic only**. It does not integrate NozzleX,
-port code from Andrea, implement AnnularChannel, change numerical algorithms,
+port code from Andrea, implement EulerAnnular, change numerical algorithms,
 or repair the issues recorded in [the repository audit](ALBERTO_REPOSITORY_AUDIT.md)
 and [the JAX audit](JAX_IMPLEMENTATION_AUDIT.md).
 
@@ -38,7 +38,7 @@ nozzle_hyperbolic/
   fit_nozzle_shape.py             existing fitting utility, unchanged
   plot_settings.py                existing plotting utility, unchanged
   models/
-    general_euler/               GeneralEuler model family
+    euler_nozzle/                EulerNozzle model family
       __init__.py
       equations.py              physical fluxes, eigenvalues, retained Roe matrices
       state.py                  conservative / (p,u,h) conversion
@@ -50,6 +50,14 @@ nozzle_hyperbolic/
       flux.py                   retained NumPy FDS/Riemann fluxes
       flux_jax.py               existing JAX Euler FVS and FDS/Riemann fluxes
       fvm.py                    assembly, intact factories and run driver
+      analytical/
+        __init__.py
+        exact_solution.py       retained alternative nozzle reference
+        nozzle_exact_solution.py
+                                retained perfect-gas nozzle reference
+        nozzle_exact_real_gas.py
+                                retained real-fluid nozzle reference
+        shock_tube.py           exact Sod shock-tube solution
     two_fluid/                   TwoFluid model family
       __init__.py                existing public TwoFluid exports
       state.py                  six-variable physical/storage transformations
@@ -60,7 +68,8 @@ nozzle_hyperbolic/
       boundaries.py             existing ramped-inlet function
       flux.py                   model FVS and nonconservative correction
       solver.py                 intact eight-variable Newton/FVM factory
-    annular_channel/             reserved AnnularChannel namespace
+      analytical.py             isentropic, shock, subsonic and Bernoulli references
+    euler_annular/               reserved EulerAnnular namespace
       __init__.py                explicitly states implementation is pending
       boundaries.py             ownership placeholder; no boundary implementation
       closures/__init__.py       ownership placeholder; no closure implementation
@@ -73,19 +82,21 @@ nozzle_hyperbolic/
     reconstruction.py          array limiters and reconstruction arithmetic
     linear.py                  equilibrated solve and least-squares kernels
   solvers/time_marching/cfl.py  existing shared CFL helper
-  reference/euler/
-    exact_solution.py           retained alternative reference implementation
-    nozzle_exact_solution.py    retained perfect-gas reference implementation
-    nozzle_exact_real_gas.py    retained real-fluid reference implementation
   fvm_solver/                  compatibility modules for original import paths
     Lettieri_nozzle.xlsx        original data location retained
 ```
 
-`GeneralEuler`, `TwoFluid`, and `AnnularChannel` are the intended model names.
+`EulerNozzle`, `TwoFluid`, and `EulerAnnular` are the intended model names.
 This move does **not** introduce classes with those names. Existing factories and
 functions remain the callable API. A perfect gas is a thermodynamic choice within
-GeneralEuler; the existing specialized perfect-gas routines are retained for
+EulerNozzle; the existing specialized perfect-gas routines are retained for
 compatibility and comparison.
+
+Analytical and semi-analytical solutions belong to the physical model they
+describe. Euler nozzle and shock-tube references live in
+`models/euler_nozzle/analytical/`; the two-fluid dominant-phase references live
+in `models/two_fluid/analytical.py`. Development and case-study scripts import
+these implementations. There is no top-level reference-solution package.
 
 The standalone Euler boundary routines and the TwoFluid ramped inlet now have
 model-local homes. Other boundaries, local limiters, residuals, and Newton
@@ -103,13 +114,23 @@ are not the proposed public API.
 
 | Original location under `nozzle_hyperbolic/` | Canonical location |
 |---|---|
-| `fvm_solver/fvm.py` | `models/general_euler/fvm.py`, with top-level groups extracted as listed above |
-| `fvm_solver/flux.py` | `models/general_euler/flux.py` |
+| `fvm_solver/fvm.py` | `models/euler_nozzle/fvm.py`, with top-level groups extracted as listed above |
+| `fvm_solver/flux.py` | `models/euler_nozzle/flux.py` |
 | `fvm_solver/two_fluid/{state,matrices,flux,sources,solver}.py` | `models/two_fluid/`, with ramped inlet and equilibrated linear helpers extracted |
 | `fvm_solver/source_two_fluid.py` | `models/two_fluid/closures/source_two_fluid.py` |
 | `fvm_solver/geometry.py` | `geometry/duct.py` |
 | `fvm_solver/perfect_gas_props*.py` | `thermodynamics/` |
-| `fvm_solver/{exact_solution,nozzle_exact_solution,nozzle_exact_real_gas}.py` | `reference/euler/` |
+| `fvm_solver/{exact_solution,nozzle_exact_solution,nozzle_exact_real_gas}.py` | `models/euler_nozzle/analytical/` |
+
+The analytical initial-condition builders formerly defined in
+`development/initial_conditions.py` now live in `models/two_fluid/analytical.py`.
+The driver module re-exports them, and the duplicated NICFD isentropic module
+forwards to the same implementations. The plotting-specific subsonic reference
+also lives with TwoFluid, preserving its existing behavior. The exact Sod
+routine formerly defined in `development/shock_tube_fvs.py` and the vectorized
+comparison from `development/main.py` now live in
+`models/euler_nozzle/analytical/shock_tube.py`. The latter retains its supplied
+EOS sound speeds and existing ideal-gas approximation.
 
 Old module paths forward to the canonical module objects, including private
 names explicitly imported by current tests and cases. The legacy TwoFluid
@@ -121,7 +142,9 @@ duplicate numerical implementations.
 For new code, use imports such as:
 
 ```python
-from nozzle_hyperbolic.models.general_euler.fvm import make_jax_stadtke_step
+from nozzle_hyperbolic.models.euler_nozzle.fvm import make_jax_stadtke_step
+from nozzle_hyperbolic.models.euler_nozzle.analytical.shock_tube import sod_exact
+from nozzle_hyperbolic.models.two_fluid.analytical import isentropic_ic, bernoulli_ic
 from nozzle_hyperbolic.models.two_fluid.solver import make_two_fluid_step
 from nozzle_hyperbolic.geometry.duct import get_symmetric_nozzle
 ```
@@ -135,7 +158,7 @@ import; relocation does not resolve undeclared dependencies.
 
 ## Ownership for the next steps
 
-Keep **closures and boundary conditions with the model that defines their
+Keep **closures, boundary conditions, and analytical solutions with the model that defines their
 meaning**. A wall law can be shared later only after its assumptions, units,
 friction-factor convention, and inputs are reconciled. Avoid a top-level bucket
 for all physical closures or boundaries.
@@ -161,9 +184,9 @@ Preserve three distinct state representations:
 
 | Model | Physical primitives | Balance storage | Current solver unknowns |
 |---|---|---|---|
-| GeneralEuler | $(p,u,h)$, with retained conservative paths | 3 mass/momentum/energy densities | 3 primitive or conservative variables, depending on path |
+| EulerNozzle | $(p,u,h)$, with retained conservative paths | 3 mass/momentum/energy densities | 3 primitive or conservative variables, depending on path |
 | TwoFluid | $(p,u_g,u_l,\alpha_g,h_g,h_l)$ | 6 partial mass/momentum/energy densities | 8 Newton variables in the current factory |
-| AnnularChannel, planned | $(p,v_m,v_\theta,h)$ | 4 balances including swirl | To be designed and checked against the annular documents |
+| EulerAnnular, planned | $(p,v_m,v_\theta,h)$ | 4 balances including swirl | To be designed and checked against the annular documents |
 
 A future model contract can provide storage, physical flux, physical sources,
 wave information, and admissibility. TwoFluid additionally requires its
@@ -182,7 +205,7 @@ is preservation of Alberto's source, not a new port from Andrea.
 |---|---|---|---|
 | NumPy FDS/Riemann methods in `flux.py` | Conservative states, `(3, Nfaces)` | Already multiplied by interface area | Separate perfect/general-EOS paths; Roe imports model matrices lazily |
 | JAX Rusanov/HLL/HLLC/LF in `flux_jax.py` | Conservative states, `(3, Nfaces)` plus supplied thermodynamics | Area weighting inside current helpers | No JAX Roe implementation in this path |
-| GeneralEuler Städtke FVS | $(p,u,h)$, `(Nfaces, 3)` | Unweighted flux; caller applies `A_face` | EOS derivatives and model-specific spectral splitting |
+| EulerNozzle Städtke FVS | $(p,u,h)$, `(Nfaces, 3)` | Unweighted flux; caller applies `A_face` | EOS derivatives and model-specific spectral splitting |
 | TwoFluid Städtke FVS | Six primitives at each face, scalar-face calls batched by caller | Geometry handled by assembly | Virtual-mass/eigenstructure choices and nonconservative correction |
 
 Current `time_method='fvs_newton'` selects Euler FVS, mixing the spatial-method
@@ -202,7 +225,7 @@ capability- and model-dependent.
 ### Suggested future option schema, not implemented
 
 ```yaml
-model: general_euler
+model: euler_nozzle
 spatial:
   family: fvs
   flux: stadtke
@@ -223,7 +246,7 @@ linear:
 An FDS/Riemann selection would choose a named flux independently of reconstruction,
 time integration, nonlinear method, and linear solver. Define a supported-options
 matrix and reject unsupported combinations when constructing a solver. Do not
-silently route a requested JAX method to NumPy, or offer TwoFluid/AnnularChannel
+silently route a requested JAX method to NumPy, or offer TwoFluid/EulerAnnular
 methods merely because an Euler method has the same flux label.
 
 Boundary data belong to the physical problem. Reconstruction order and ghost
@@ -263,10 +286,15 @@ physics.
 
 Do not assume that a spatial TwoFluid implementation exists just because another
 package has a directory with that name. Reconcile the actual equations first.
-AnnularChannel also remains design work: the retained documents in `docs/` are
+EulerAnnular also remains design work: the retained documents in `docs/` are
 inputs to that implementation, not an executable unsteady solver.
 
-## Verification for this move
+## Verification recorded for the initial restructuring
+
+The following results describe the initial relocation from Alberto's tree,
+before the model renaming and extraction of analytical routines from scripts.
+They are retained as baseline evidence, not as a claim that those scripts are
+still byte-for-byte unchanged after the subsequent extraction.
 
 - Source comparison against a snapshot taken before relocation verifies all
   **153 original top-level functions/classes**, including nested routines,
@@ -278,9 +306,9 @@ inputs to that implementation, not an executable unsteady solver.
   checks are recorded in the workspace [compatibility inventory](../files_that_should_still_run.md).
 - All **32 finite numerical outputs** in focused before/after probes match
   exactly (maximum absolute difference 0.0), including five FDS flux/residual
-  choices and six-cell JIT GeneralEuler/TwoFluid Newton steps with analytical
+  choices and six-cell JIT EulerNozzle/TwoFluid Newton steps with analytical
   ideal-gas mocks. These checks also cover reconstruction, wall friction, CFL,
-  GeneralEuler face mass flux, and its dense/colored Jacobian comparison.
+  EulerNozzle face mass flux, and its dense/colored Jacobian comparison.
 - Before and after relocation, `python -m pytest tests -q -p no:cacheprovider`
   reports **25 passed, 3 expected failures, 1 failure**. The failure is the same
   missing `T` entry in the existing `_IdealGas` test fixture. It is documented,
