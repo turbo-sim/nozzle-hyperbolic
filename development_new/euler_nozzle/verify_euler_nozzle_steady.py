@@ -59,9 +59,10 @@ from nozzle_hyperbolic.geometry.duct import get_symmetric_nozzle
 from nozzle_hyperbolic.models.euler_nozzle.analytical.nozzle_exact_real_gas import (
     nozzle_exact_real_gas,
 )
-from nozzle_hyperbolic.models.euler_nozzle.flux_jax import _jax_F_fvs_stadtke
-from nozzle_hyperbolic.models.euler_nozzle.fvm import fvm_euler_1d
-from nozzle_hyperbolic.numerics.reconstruction import muscl_van_leer_ph
+from nozzle_hyperbolic.models.euler_nozzle.fvm import (
+    fvm_euler_1d,
+    make_jax_stadtke_step,
+)
 
 
 def subsonic_reference(area, fluid, throat_mach):
@@ -93,10 +94,50 @@ def subsonic_reference(area, fluid, throat_mach):
     return dict(p=pressure, rho=density, M=mach)
 
 
-def main(show=True):
+def solution_face_mass_flux(primitive, parameters):
+    """Audit with the factory's actual flux, reconstruction, and boundaries.
+
+    Rebuilding only the diagnostic callable avoids silently evaluating a
+    corrected flux or ordinary Van Leer on a legacy/smoothed solver result.
+    No extra timestep is advanced and no numerical formula is duplicated.
+    """
+    geometry = parameters["geometry"]
+    area = np.asarray(parameters["A_nodes"])
+    face_area = 0.5 * (area[:-1] + area[1:])
+    gradient = np.asarray(geometry.dAdx).copy()
+    gradient[1:-1] = np.diff(face_area) / parameters["dx"]
+    fluid = parameters["fluid"]
+    reservoir = fluid.get_state(jxp.PT_INPUTS, *parameters["pT_stagnation"])
+    options = dict(
+        recon=parameters["reconstruction"],
+        delta_factor=parameters["delta_factor"],
+        wall_friction=parameters["wall_friction"],
+    )
+    for name in ("flux_variant", "smooth_limiter_coefficient", "limiter_scales"):
+        if name in parameters:
+            options[name] = parameters[name]
+    _, _, _, evaluate = make_jax_stadtke_step(
+        fluid, area, face_area, gradient, geometry.D_h, geometry.roughness,
+        parameters["dx"], parameters["CFL"], parameters["p_out"],
+        float(reservoir["h"]), float(reservoir["s"]), **options,
+    )
+    return np.asarray(evaluate(primitive))
+
+
+def main(show=True, *, solver_overrides=None, output_dir=None, strict=True):
+    """Run the shared cases; optional controls support matched comparisons.
+
+    Defaults retain the standalone verification. Overrides change numerical
+    settings only; physical data, initialization, references, and thresholds
+    remain shared. strict=False saves and returns failed checks for analysis.
+    """
     # The existing solver prints Unicode diagnostics; make Windows redirects safe.
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
+    settings = dict(SOLVER)
+    if solver_overrides is not None:
+        settings.update(solver_overrides)
+    destination = OUTPUT_DIR if output_dir is None else Path(output_dir)
     # 1. Build one fluid and one numerical mesh, reused at every back pressure.
     started = perf_counter()
     fluid = jxp.FluidPerfectGas(name="Air")
@@ -109,7 +150,7 @@ def main(show=True):
     area_exact = np.asarray(get_symmetric_nozzle(x_exact, **NOZZLE).A)
     x_throat = 0.5 * NOZZLE["L"]
     colors = plt.colormaps["plasma"](np.linspace(0.2, 0.8, len(CASES)))
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    destination.mkdir(parents=True, exist_ok=True)
     fig, axes = plt.subplots(1, 3, figsize=(13, 4), layout="constrained")
     summaries, pressure_handles = [], []
 
@@ -142,7 +183,7 @@ def main(show=True):
         # selects an implementation path: False uses general-EOS FVS with the
         # actual perfect-gas fluid object constructed above.
         parameters = dict(
-            **SOLVER, fluid=fluid, fluid_name="Air", perfect_gas=False,
+            **settings, fluid=fluid, fluid_name="Air", perfect_gas=False,
             geometry=geometry, A_nodes=area, dx=dx, N_eq=3,
             pT_stagnation=np.array([P_STAGNATION, T_STAGNATION]),
             p_out=p_back, nozzle_type="nozzle", wall_friction=False,
@@ -174,15 +215,12 @@ def main(show=True):
                      for key in scales}
             for region, mask in (("all_physical_points", physical), ("away_from_shock", smooth))
         }
-        # Match the selected Van Leer reconstruction and FVS flux. All baseline
-        # face states lie inside the factory's EOS fallback bounds.
-        left, right = muscl_van_leer_ph(primitive)
-        flux = _jax_F_fvs_stadtke(left, right, fluid, SOLVER["delta_factor"])
-        mass_flux = face_area * np.asarray(flux[:, 0])
+        # Match the selected reconstruction and FVS flux, including fallbacks.
+        mass_flux = solution_face_mass_flux(primitive, parameters)
         mass_imbalance = float(abs(mass_flux[-1] - mass_flux[0]) / abs(mass_flux[0]))
         stats = parameters["run_stats"].copy()
         stats["pseudo_time_s"] = stats.pop("t_phys")
-        converged = bool(stats["ssr"] < SOLVER["residuals"])
+        converged = bool(stats["ssr"] < settings["residuals"])
         passed = bool(converged and mass_imbalance < MAX_MASS_IMBALANCE
                       and max(errors["all_physical_points"].values()) < MAX_NORMALIZED_L1)
         summary = dict(
@@ -206,7 +244,7 @@ def main(show=True):
         # lines are exact; hollow circles are the numerical solution.
         columns = [x, area] + [v for key in ("p", "rho", "M")
                                for v in (numerical[key], reference[key])]
-        np.savetxt(OUTPUT_DIR / f"case_{index + 1}.csv", np.column_stack(columns),
+        np.savetxt(destination / f"case_{index + 1}.csv", np.column_stack(columns),
                    delimiter=",", header="x_m,area_m2,p_num_Pa,p_exact_Pa,rho_num,rho_exact,M_num,M_exact",
                    comments="")
         for ax, key, ylabel in zip(axes, scales, (r"$p/p_0$", r"$\rho/\rho_0$", "Mach number")):
@@ -222,23 +260,25 @@ def main(show=True):
     axes[1].legend(handles=[Line2D([], [], color="0.25", label="Exact"),
                            Line2D([], [], color="0.25", marker="o", mfc="none",
                                   linestyle="none", label="FVM")], fontsize=9)
-    fig.suptitle(f"EulerNozzle steady baseline: Städtke FVS / Van Leer / backward Euler, N={N_POINTS}")
-    fig.savefig(OUTPUT_DIR / "comparison.png", dpi=180)
-    fig.savefig(OUTPUT_DIR / "comparison.pdf")
+    fig.suptitle(f"EulerNozzle steady: {settings.get('flux_variant', 'installed')} FVS / "
+                 f"{settings['reconstruction']} / backward Euler, N={N_POINTS}")
+    fig.savefig(destination / "comparison.png", dpi=180)
+    fig.savefig(destination / "comparison.pdf")
     report = dict(
         fluid="jaxprop.FluidPerfectGas(Air)", gamma=float(fluid.constants.gamma),
-        numerical_points=N_POINTS, geometry=NOZZLE, solver=SOLVER,
+        numerical_points=N_POINTS, geometry=NOZZLE, solver=settings,
         thresholds=dict(normalized_L1=MAX_NORMALIZED_L1, mass_imbalance=MAX_MASS_IMBALANCE),
         cases=summaries, elapsed_s=perf_counter() - started,
     )
-    (OUTPUT_DIR / "summary.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
-    print(f"\nSaved steady comparison to {OUTPUT_DIR}", flush=True)
+    (destination / "summary.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+    print(f"\nSaved steady comparison to {destination}", flush=True)
     if show:
         plt.show()
     else:
         plt.close(fig)
-    if not all(case["passed"] for case in summaries):
+    if strict and not all(case["passed"] for case in summaries):
         raise SystemExit("Steady baseline failed; see summary.json for convergence and errors.")
+    return report
 
 
 if __name__ == "__main__":
