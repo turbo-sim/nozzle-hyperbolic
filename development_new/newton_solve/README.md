@@ -11,6 +11,10 @@ connects the observed failures to the evolution-based directions that worked.
 The measurements below summarize the earlier investigations; they are not new
 performance measurements made during cleanup.
 
+The [PTC performance investigation](PTC_PERFORMANCE.md) separates linear-algebra
+cost from the controller-induced iteration gap, with measured inner-solve counts
+and controlled one-correction replays.
+
 ## Current five-case comparison: start here
 
 The default [comparison script](scripts/investigate_ptc.py) now runs all five
@@ -141,6 +145,7 @@ physical interpretation, including why neither method guarantees branch choice.
 newton_solve/
   README.md                   Start here: attempts, outcomes, and run commands
   CONVERGENCE_MECHANISM.md     Mathematical and physical interpretation
+  PTC_PERFORMANCE.md           Measured explanation of the PTC slowdown
   scripts/                    Comparison driver and implementation modules
   outputs/                    Generated reports, tables, histories, and figures
 ```
@@ -192,13 +197,14 @@ historical context; their old scripts/commands/results are superseded.
 
 ## Tests and cleanup
 
-The retained tests cover custom Newton identity and truthful histories,
-PTC acceptance/rejection and original-root audits, physical storage, and the
-shared spatial operator. Pressure/arclength tests and LM/HYBR/SLSQP-only adapter
-tests were removed with the abandoned implementations. Numerical-fix regression
-tests and unrelated physical-model tests remain.
+The pytest suite covers production `src/` code only. Tests of custom experiment
+adapters, PTC storage/controller logic, and development-only sensitivity controls
+were removed. Source flux, reconstruction, shared spatial operators, and physical
+models retain their regression tests. Development studies retain independent
+residual, root-agreement, seed, conservation and analytic audits in their scripts
+and reports.
 
-This directory keeps the two Markdown notes at the top level, executable and
+This directory keeps the explanatory Markdown notes at the top level, executable and
 support code under `scripts/`, and generated runs under `outputs/`. Old one-off
 drivers, duplicate notes and generated result folders were deleted. No production numerical behavior was changed by
 this cleanup.
