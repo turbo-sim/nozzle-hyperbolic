@@ -31,7 +31,7 @@ import jax.numpy as jnp
 import jaxprop as jxp
 from case_study.nicfd.nicfd_figures.config_loader import load_config
 import nozzle_hyperbolic.fvm_solver.geometry as _geom
-from case_study.nicfd.nicfd_figures.isentropic_ic import isentropic_ic, isentropic_shock_ic
+from nozzle_hyperbolic.models.two_fluid.analytical import isentropic_ic, isentropic_shock_ic
 
 _here = pathlib.Path(__file__).parent
 if RUN_DIR == "auto":

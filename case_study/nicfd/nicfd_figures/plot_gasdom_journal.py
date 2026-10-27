@@ -16,7 +16,7 @@ solver result for every case that has one.
   3. gasdom_velocity.png — gas velocity u_g vs x with the analytic reference
                            (MAKE_VELOCITY_FIG = False to skip).
 
-Analytic references (all from isentropic_ic.py, i.e. the SAME construction the
+Analytic references (from models.two_fluid.analytical, the SAME construction the
 ICs and check_*.py use, with gamma and R derived from the run's own gas EOS at
 the reservoir state):
   * 'isentropic' — choked perfect (adapted) expansion, area-Mach relation.
@@ -28,9 +28,8 @@ the reservoir state):
                    ic.x_shock from the settings (SHOCK_REF='design').
   * 'subsonic'   — fully subsonic, UNCHOKED isentropic flow: M_exit from
                    p_out/p0, virtual sonic area A* = A_exit/(A/A*)(M_exit), then
-                   the subsonic area-Mach branch everywhere.  Built here (it is
-                   not in isentropic_ic.py) and skipped automatically if the
-                   back-pressure would in fact choke the nozzle.
+                   the subsonic area-Mach branch everywhere.  Skipped automatically
+                   if the back-pressure would in fact choke the nozzle.
 
 Every case in RUNS whose folder has no solution.csv is skipped with a note, so a
 placeholder path for a run that does not exist yet is harmless.
@@ -48,7 +47,11 @@ import jaxprop as jxp
 
 from case_study.nicfd.nicfd_figures.config_loader import load_config
 from case_study.nicfd.nicfd_figures.nozzle_silhouette import add_nozzle
-from case_study.nicfd.nicfd_figures.isentropic_ic import isentropic_ic, isentropic_shock_ic, _area_mach
+from nozzle_hyperbolic.models.two_fluid.analytical import (
+    isentropic_ic,
+    isentropic_shock_ic,
+    subsonic_profile,
+)
 
 # ── KNOBS: the cases to overlay (path relative to dev_scripts, label, ref) ─────
 # ref: 'auto' reads ic.type from the run's own settings yaml
@@ -126,42 +129,6 @@ def _build_fluid(lut):
     return jxp.FluidBicubic(**lut)
 
 
-def _area_ratio(M, g):
-    """A/A* from the area-Mach relation (inverse of _area_mach)."""
-    return (1.0 / M) * ((2.0 / (g + 1.0))
-                        * (1.0 + 0.5 * (g - 1.0) * M * M)
-                        ) ** ((g + 1.0) / (2.0 * (g - 1.0)))
-
-
-def subsonic_profile(x, A, *, p0, T0, p_out, gamma, R):
-    """Analytic UNCHOKED subsonic isentropic profile set by the back-pressure.
-
-    M_exit from p0/p_out, virtual sonic area A* = A_exit / (A/A*)(M_exit), then
-    the subsonic area-Mach branch at every station.  Returns None (with a note)
-    if the pressure ratio would choke the nozzle, i.e. if the required A* is
-    larger than the actual throat area.
-    """
-    g = gamma
-    if not (p_out < p0):
-        print("    subsonic reference: p_out >= p0 — skipped")
-        return None
-    M_e = np.sqrt(2.0 / (g - 1.0) * ((p0 / p_out) ** ((g - 1.0) / g) - 1.0))
-    if M_e >= 1.0:
-        print(f"    subsonic reference: exit would be supersonic "
-              f"(M_exit={M_e:.3f}) — skipped")
-        return None
-    A_star = float(A[-1]) / _area_ratio(M_e, g)
-    if A_star > float(A.min()) * (1.0 + 1e-12):
-        print(f"    subsonic reference: back-pressure chokes the nozzle "
-              f"(A*={A_star:.4e} > A_throat={A.min():.4e}) — skipped")
-        return None
-    M = np.array([_area_mach(a / A_star, g, "sub") for a in A])
-    T = T0 / (1.0 + 0.5 * (g - 1.0) * M * M)
-    p = p0 * (T / T0) ** (g / (g - 1.0))
-    u = M * np.sqrt(g * R * T)
-    print(f"    subsonic reference: M_exit={M_e:.4f}  M_throat={M.min():.4f}"
-          f"..{M.max():.4f}  A*/A_throat={A_star/float(A.min()):.4f}")
-    return dict(x=x, A=A, M=M, p=p, T=T, u=u, gamma=g, R=R)
 
 
 def load_case(rel_path, ref_mode):

@@ -18,6 +18,8 @@ import yaml
 import numpy as np
 import matplotlib.pyplot as plt
 import nozzle_hyperbolic as hyp
+from nozzle_hyperbolic.models.euler_nozzle.analytical.nozzle_exact_solution import nozzle_exact2
+from nozzle_hyperbolic.models.euler_nozzle.analytical.shock_tube import sod_exact_with_sound_speeds
 import jaxprop as jxp
 import shutil
 
@@ -288,7 +290,7 @@ def _add_nozzle_overlay(ax_main, x, r, x2, show_ylabel=False):
 
 if perfect_gas:
     total_bc   = np.array([T_stagnation, p_stagnation])
-    M_exact, p_exact, u_exact, rho_exact, i_shock = hyp.fvm_solver.nozzle_exact2(x, parameters, total_bc)
+    M_exact, p_exact, u_exact, rho_exact, i_shock = nozzle_exact2(x, parameters, total_bc)
     A_cr_index = np.argmin(A_nodes)
     legend_kw  = dict(fontsize='x-small', handlelength=1.2, handletextpad=0.4, borderpad=0.4, frameon=True)
 
@@ -371,7 +373,7 @@ if "symmetric_nozzle" in nozzle_type and not perfect_gas:
     params_ex  = {"gamma": gamma_eff, "p_out": p_out, "A_nodes": A_nodes}
     total_bc_n = np.array([T_stagnation, p_stagnation])
     M_exact, p_exact, u_exact, rho_exact, i_shock = \
-        hyp.fvm_solver.nozzle_exact2(x, params_ex, total_bc_n)
+        nozzle_exact2(x, params_ex, total_bc_n)
     A_cr_index = np.argmin(A_nodes)
     legend_kw  = dict(fontsize='x-small', handlelength=1.2, handletextpad=0.4,
                       borderpad=0.4, frameon=True)
@@ -427,7 +429,6 @@ if "symmetric_nozzle" in nozzle_type and not perfect_gas:
 
 ## Shock tube: compare with exact Sod solution
 if "shock_tube" in nozzle_type:
-    from scipy.optimize import brentq as _brentq_sod
     cfg_st   = case_data["shock_tube"]
     x_d      = float(cfg_st.get("x_diaphragm", 0.5 * (x1 + x2)))
     p_L_st   = float(cfg_st["p_L"]);  T_L_st = float(cfg_st["T_L"]);  u_L_st = float(cfg_st.get("u_L", 1.0))
@@ -440,46 +441,11 @@ if "shock_tube" in nozzle_type:
     gam_ex   = float(st_L_ex.cpmass / st_L_ex.cvmass)
     cL_ex    = float(st_L_ex.speed_sound);  cR_ex = float(st_R_ex.speed_sound)
 
-    AL = 2 / ((gam_ex + 1) * rho_L_ex);  BL = (gam_ex - 1) / (gam_ex + 1) * p_L_st
-    AR = 2 / ((gam_ex + 1) * rho_R_ex);  BR = (gam_ex - 1) / (gam_ex + 1) * p_R_st
-
-    def _fK(p, pK, cK, AK, BK):
-        return ((p - pK) * np.sqrt(AK / (p + BK)) if p > pK
-                else 2 * cK / (gam_ex - 1) * ((p / pK) ** ((gam_ex - 1) / (2 * gam_ex)) - 1))
-
-    p_star = _brentq_sod(lambda p: _fK(p, p_L_st, cL_ex, AL, BL)
-                                  + _fK(p, p_R_st, cR_ex, AR, BR)
-                                  + (u_R_st - u_L_st), 1e-6 * p_L_st, 10 * p_L_st)
-    u_star = (0.5 * (u_L_st + u_R_st)
-              + 0.5 * (_fK(p_star, p_R_st, cR_ex, AR, BR) - _fK(p_star, p_L_st, cL_ex, AL, BL)))
-    rhoL_star = (rho_L_ex * (p_star / p_L_st + (gam_ex-1)/(gam_ex+1))
-                 / ((gam_ex-1)/(gam_ex+1) * p_star / p_L_st + 1)) if p_star > p_L_st \
-                else rho_L_ex * (p_star / p_L_st) ** (1 / gam_ex)
-    rhoR_star = (rho_R_ex * (p_star / p_R_st + (gam_ex-1)/(gam_ex+1))
-                 / ((gam_ex-1)/(gam_ex+1) * p_star / p_R_st + 1)) if p_star > p_R_st \
-                else rho_R_ex * (p_star / p_R_st) ** (1 / gam_ex)
-    cL_star = np.sqrt(gam_ex * p_star / rhoL_star)
-    S_HL = u_L_st - cL_ex;  S_TL = u_star - cL_star
-    S_R  = u_R_st + cR_ex * np.sqrt((gam_ex+1)/(2*gam_ex)*p_star/p_R_st + (gam_ex-1)/(2*gam_ex))
-
     t_phys = float(t[-1])   # elapsed physical time
-    xi_s = (x - x_d) / t_phys if t_phys > 0 else np.zeros_like(x)
-    gm1 = gam_ex - 1.0;  gp1 = gam_ex + 1.0
-    # rarefaction fan: u, p, rho as functions of xi_s
-    u_fan   = 2/gp1 * (cL_ex + gm1/2*u_L_st + xi_s)
-    c_fan   = cL_ex + gm1/2*(u_L_st - u_fan)
-    p_fan   = p_L_st * (c_fan/cL_ex)**(2*gam_ex/gm1)
-    rho_fan = gam_ex * p_fan / c_fan**2
-    rho_ex = np.where(xi_s < S_HL, rho_L_ex,
-             np.where(xi_s < S_TL, rho_fan,
-             np.where(xi_s < u_star, rhoL_star,
-             np.where(xi_s < S_R,   rhoR_star, rho_R_ex))))
-    u_ex   = np.where(xi_s < S_HL, u_L_st,
-             np.where(xi_s < S_TL, u_fan,
-             np.where(xi_s < S_R,  u_star, u_R_st)))
-    p_ex   = np.where(xi_s < S_HL, p_L_st,
-             np.where(xi_s < S_TL, p_fan,
-             np.where(xi_s < S_R,  p_star, p_R_st)))
+    rho_ex, u_ex, p_ex = sod_exact_with_sound_speeds(
+        x, t_phys, x_d, rho_L_ex, u_L_st, p_L_st, rho_R_ex, u_R_st, p_R_st,
+        gam_ex, cL_ex, cR_ex,
+    )
 
     fig_sod, axes_sod = plt.subplots(1, 3, figsize=(13, 4))
     fig_sod.suptitle(f"Sod shock tube — {parameters['space_method']},  "

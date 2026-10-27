@@ -15,9 +15,10 @@ refs when inspected; no remote update was requested or fetched. These histories
 have no common Git ancestor in this non-shallow checkout. Similar source is
 therefore described as source overlap, not Git ancestry.
 
-The existing Roberto notes/cases and annular design documents are retained on
-this branch. The initial local changes to `pyproject.toml`, `poetry.lock`, and the
-two shock-validation files are preserved separately from the refactoring.
+The obsolete Roberto case-study copies were removed as requested; the annular
+design documents remain under `docs/`. The initial local changes to
+`pyproject.toml`, `poetry.lock`, and the two shock-validation files are kept
+separate from the numerical-behavior review.
 
 Existing functions, nested functions, classes, comments, and docstrings are
 preserved. Self-contained top-level definitions move verbatim; only module-level
@@ -25,15 +26,20 @@ imports and filesystem paths are rewired. The original factory signatures and
 configuration keys remain unchanged. Some old comments describe earlier names
 or behavior; the audit documents clarify them without rewriting historical text.
 
-The existing flat package layout is retained to preserve checkout-based scripts
-and current packaging. A `src/` conversion is optional later, alongside an
-installation/entry-point migration. Internal ownership is independent of that
-choice and can later be transplanted beneath `nozzlex`.
+The installable package now lives under `src/nozzle_hyperbolic/`. Poetry's
+package declaration and the version-bump configuration use this location.
+Run `poetry install` to refresh the editable installation; the import name
+remains `nozzle_hyperbolic`. Internal ownership is independent of the `src`
+layout and can later be transplanted beneath `nozzlex`.
+
+The structural commit preserves the pre-experiment numerical implementations.
+Later flux, reconstruction, and root-solver changes remain uncommitted; see
+[the numerical changes review](NUMERICAL_CHANGES_REVIEW.md) before approving them.
 
 ## Current implemented layout
 
 ```text
-nozzle_hyperbolic/
+src/nozzle_hyperbolic/
   __init__.py                     existing public imports and side effects
   fit_nozzle_shape.py             existing fitting utility, unchanged
   plot_settings.py                existing plotting utility, unchanged
@@ -303,7 +309,7 @@ still byte-for-byte unchanged after the subsequent extraction.
 - The **305 pre-existing non-package files** captured in that snapshot remain
   byte-for-byte unchanged, including the initial local edits and Roberto files.
 - Package source compilation succeeds. Legacy-import and representative numerical
-  checks are recorded in the workspace [compatibility inventory](../files_that_should_still_run.md).
+  checks are recorded in the workspace [compatibility inventory](../../files_that_should_still_run.md).
 - All **32 finite numerical outputs** in focused before/after probes match
   exactly (maximum absolute difference 0.0), including five FDS flux/residual
   choices and six-cell JIT EulerNozzle/TwoFluid Newton steps with analytical

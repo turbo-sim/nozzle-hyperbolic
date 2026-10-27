@@ -52,6 +52,29 @@ physical model or change their formulas.
 The `src` migration changes installation and resource locations. It does not
 change the package import name: callers still use `import nozzle_hyperbolic`.
 
+## Verification of the separation
+
+- The committed structural tree is tested independently of the experimental
+  working tree: 25 tests pass, three are expected failures, and the inherited
+  `test_lowmach_flux_dissipation` fixture fails because its mock EOS omits `T`.
+- The current experimental working tree has 100 passing tests, the same three
+  expected failures, and the same inherited fixture failure after migration.
+- A 13-point perfect-gas probe compares the original `d2a69ef` package against
+  the structural tree. One implicit update, its SSR, the CFL timestep, sound
+  speeds, and face mass flux are bitwise identical. This is a bounded regression
+  check, not a validation of every configuration.
+- The structural tree builds into a wheel. Imports from the unpacked wheel
+  resolve to the renamed model modules, historical `fvm_solver` aliases work,
+  and the wheel contains the original numerical factories and packaged nozzle
+  data. The working editable install resolves to `src/nozzle_hyperbolic`.
+- The staged versions of the three numerical files are checked against the
+  original source, allowing only the model/reference import renames. Exactly
+  those three package files remain modified in the working tree.
+
+The analytical relocation also preserves 115 function/class definitions in
+the retained development drivers and plotting scripts. Dependencies were not
+changed for the layout migration; Poetry's existing lockfile remains valid.
+
 ## Reviewing the pending work
 
 From the repository root, after the structural commit:

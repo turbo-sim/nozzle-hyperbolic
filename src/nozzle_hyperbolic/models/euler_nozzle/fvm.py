@@ -36,7 +36,7 @@ from nozzle_hyperbolic.thermodynamics.recovery import (
     state_from_rho_u_batch,
     _state_rho_u,
 )
-from nozzle_hyperbolic.models.general_euler.initialization import (
+from nozzle_hyperbolic.models.euler_nozzle.initialization import (
     isentropic_initialization,
     _shock_tube_velocities,
     shock_tube_Q_initialization,
@@ -46,7 +46,7 @@ from nozzle_hyperbolic.models.general_euler.initialization import (
     stadtke_puh_initialization_shocked,
     stadtke_puh_initialization_simple,
 )
-from nozzle_hyperbolic.models.general_euler.equations import (
+from nozzle_hyperbolic.models.euler_nozzle.equations import (
     euler_eigenvalues_perfect,
     euler_eigenvalues,
     euler_flux,
@@ -55,7 +55,7 @@ from nozzle_hyperbolic.models.general_euler.equations import (
     euler_roe_matrix,
     _H_fix,
 )
-from nozzle_hyperbolic.models.general_euler.boundaries import (
+from nozzle_hyperbolic.models.euler_nozzle.boundaries import (
     _bc_inlet_perfect,
     _bc_outlet_perfect,
     _bc_inlet_real,
@@ -63,11 +63,11 @@ from nozzle_hyperbolic.models.general_euler.boundaries import (
     _bc_inlet_real_jax,
     _bc_outlet_real_jax,
 )
-from nozzle_hyperbolic.models.general_euler.sources import (
+from nozzle_hyperbolic.models.euler_nozzle.sources import (
     _real_gas_state_and_friction,
     _source_term,
 )
-from nozzle_hyperbolic.models.general_euler.closures.wall import (
+from nozzle_hyperbolic.models.euler_nozzle.closures.wall import (
     _haaland_jnp,
     Haaland,
     viscosity_Beattie,
@@ -87,10 +87,10 @@ from nozzle_hyperbolic.numerics.reconstruction import (
     muscl_van_leer_ph,
     _muscl_reconstruct,
 )
-from nozzle_hyperbolic.models.general_euler.reconstruction import (
+from nozzle_hyperbolic.models.euler_nozzle.reconstruction import (
     _muscl_reconstruct_prim,
 )
-from nozzle_hyperbolic.models.general_euler.flux_jax import (
+from nozzle_hyperbolic.models.euler_nozzle.flux_jax import (
     _jax_euler_flux,
     _jax_F_rusanov,
     _jax_F_hll,
@@ -98,7 +98,7 @@ from nozzle_hyperbolic.models.general_euler.flux_jax import (
     _jax_F_hllc,
     _jax_F_fvs_stadtke,
 )
-from nozzle_hyperbolic.models.general_euler.state import (
+from nozzle_hyperbolic.models.euler_nozzle.state import (
     _conservative_to_puh,
     _puh_to_conservative,
 )

@@ -7,7 +7,7 @@ license = "MIT"
 readme = "README.md"
 repository = "https://github.com/turbo-sim/nozzle-hyperbolic"
 documentation = "https://github.com/turbo-sim/nozzle-hyperbolic"
-packages = [{ include = "nozzle_hyperbolic" }]
+packages = [{ include = "nozzle_hyperbolic", from = "src" }]
 
 [tool.poetry.dependencies]
 python = ">=3.11,<3.14"

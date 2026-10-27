@@ -155,7 +155,7 @@ away from the starting field it is a different function.
 
 ## 3. The entropy-fix activation creates a finite flux jump
 
-In [flux_jax.py](../nozzle_hyperbolic/models/euler_nozzle/flux_jax.py), the acoustic
+In [flux_jax.py](../src/nozzle_hyperbolic/models/euler_nozzle/flux_jax.py), the acoustic
 projector is multiplied by $c=|\bar\lambda|/\lambda_{\rm safe}$. The strict
 expansion condition is $\lambda_L<0<\lambda_R$. When active,
 

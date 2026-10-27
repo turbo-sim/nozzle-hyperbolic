@@ -267,7 +267,7 @@ step sweep and warm-start findings. Those historical step-control studies kept
 the spatial equations unchanged. The subsequent production corrections below
 change the flux inside its sonic regularization band.
 
-The subsequent [mathematical analysis](../../MATHEMATICAL_STAGNATION_ANALYSIS.md)
+The subsequent [mathematical analysis](../../docs/MATHEMATICAL_STAGNATION_ANALYSIS.md)
 isolates the limiter's loss of a useful Newton neighborhood, demonstrates a
 finite entropy-switch flux jump, and derives the avoidable sonic matrix
 inverse and equal-state consistency defects. Reproduce those diagnostic-only
@@ -279,7 +279,7 @@ poetry run python -m development_new.newton_solve.analyze_stagnation_mechanism
 ```
 
 The implemented corrections and historical LM/HYBR/reconstruction results are
-documented in [SOLVER_REGULARITY_IMPROVEMENTS.md](../../SOLVER_REGULARITY_IMPROVEMENTS.md).
+documented in [SOLVER_REGULARITY_IMPROVEMENTS.md](../../docs/SOLVER_REGULARITY_IMPROVEMENTS.md).
 The archived `compare_root_methods.py` experiments separated native SciPy
 MINPACK termination from the common root target and recorded all LM/HYBR
 residual requests. Some historical probes used log coordinates or an actual

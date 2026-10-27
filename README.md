@@ -25,6 +25,11 @@ Change `3.13` to another installed, supported Python version when needed. After
 editing dependency requirements, run `poetry lock` and `poetry install --with dev`.
 Commit `pyproject.toml` and `poetry.lock` together.
 
+The installable package lives in `src/nozzle_hyperbolic/`. Run `poetry install`
+after cloning or moving the source tree so that Python uses the editable
+installation. Imports remain `import nozzle_hyperbolic`; no `PYTHONPATH` change
+or package-directory entry in `sys.path` is needed.
+
 The commented local dependencies in `pyproject.toml` support development against
 the neighboring `jaxprop`, `pysolver_view`, and `nurbspy` repositories. Enable a
 local entry in place of its published-version entry, then regenerate the lockfile.
@@ -32,7 +37,7 @@ local entry in place of its published-version entry, then regenerate the lockfil
 ## Version bumping and publishing
 
 The project uses `bump-my-version` and `.bumpversion.toml`, following TurboDash's
-setup. A bump updates `pyproject.toml` and `nozzle_hyperbolic/__init__.py`, commits
+setup. A bump updates `pyproject.toml` and `src/nozzle_hyperbolic/__init__.py`, commits
 the change, and creates a `vX.Y.Z` tag. Start from a clean working tree and preview
 the operation first:
 
