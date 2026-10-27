@@ -72,9 +72,21 @@ conditions, and back pressure. It receives neither an imposed shock position
 nor the exact flow as initialization; it uses its ordinary simple startup.
 
 The numerical method is Städtke FVS with primitive Van Leer MUSCL and implicit
-backward-Euler/Newton pseudo-time marching. The starting CFL is 20 with
-SER/adaptive controls, at most 5000 updates, and residual target $10^{-8}$.
+backward-Euler/Newton pseudo-time marching with one Newton correction per
+timestep. The starting CFL is 10, maximum SER CFL is $10^6$, SER exponent is
+one, and the timestep growth bound is 1.5 per accepted update. Adaptive
+increment checks can halve a trial timestep. The budget is 5000 updates and
+the residual target is $10^{-8}$.
 Pseudo-time is a convergence device, not a time-accurate nozzle startup.
+
+The combined CFL 10 / growth 1.5 / maximum $10^6$ setting was run on all five
+cases. Accepted-update counts were 17 (supersonic), 114 (shock 35%), 199
+(shock 70%), 43 (sonic limit), and 41 (subsonic). All met the residual target;
+the same four analytic checks passed, with the known sonic-limit discrepancy
+remaining. This is a verified usable setting, not a claim of minimum work for
+every case. `dt_growth_factor` is a production-driver parameter with fallback
+1.2 for callers that do not specify it.
+
 
 **Why it is useful:** smooth branches check the geometric source and
 isentropic acceleration; choking checks the sonic region and operating

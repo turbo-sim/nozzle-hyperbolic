@@ -1235,13 +1235,15 @@ def fvm_euler_1d(x, t, parameters):
         _DP_MAX = 0.20        # max |Δp|/p   accepted per step
         _DH_MAX = 0.10        # max |Δh|/h   accepted per step
         _DU_MAX = 0.20        # max |Δu|/(|u|+a) accepted per step
-        _DT_GROW = 1.20       # dt growth factor after accepted step
+        _DT_GROW = float(parameters.get('dt_growth_factor', 1.20))  # dt growth factor after accepted step
+        if not math.isfinite(_DT_GROW) or _DT_GROW < 1.0:
+            raise ValueError("dt_growth_factor must be finite and at least one")
         _DT_MIN  = dx / 1e12  # absolute floor: if dt collapses below this, stop
         # adaptive_dt=False: take the full CFL-capped dt every step and accept
         # unconditionally — no increment check, no halving (faster, but no safety
         # net against divergence). True (default): adaptive halving as below.
         adaptive_dt = parameters.get('adaptive_dt', True)
-        print(f"  Adaptive dt limiter: {adaptive_dt}", flush=True)
+        print(f"  Adaptive dt limiter: {adaptive_dt}; timestep growth: {_DT_GROW:g}", flush=True)
 
         n        = 0
         t_phys   = 0.0

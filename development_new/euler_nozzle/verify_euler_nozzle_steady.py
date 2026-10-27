@@ -30,11 +30,11 @@ N_EXACT = 1601
 SOLVER = dict(
     time_method="fvs_newton", space_method="fvs",
     reconstruction="muscl_van_leer", initialization="simple",
-    CFL=20.0, max_iterations=5000, residuals=1.0e-8,
-    delta_factor=1.0e-6, newton_iter=8, newton_tol=1.0e-8,
+    CFL=10.0, max_iterations=5000, residuals=1.0e-8,
+    delta_factor=1.0e-6, newton_iter=1, newton_tol=1.0e-8,
     jacobian="colored", linear_solver="banded", adaptive_dt=True,
     flux_local_jac=True, cell_local_jac=True, fast_increments=True,
-    ser_beta=1.0, ser_cfl_max=500.0, eps_filter=0.0,
+    ser_beta=1.0, ser_cfl_max=1.0e6, dt_growth_factor=1.5, eps_filter=0.0,
 )
 MAX_NORMALIZED_L1 = 0.03  # Baseline check, not a mesh-convergence claim.
 MAX_MASS_IMBALANCE = 1.0e-4
