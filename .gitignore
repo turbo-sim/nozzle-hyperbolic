@@ -47,9 +47,9 @@ Thumbs.db
 debug_*
 check_*
 
-# results folders
+# Generated result/output directories at any depth (directory names by prefix)
 results*/
-outputs/
+output*/
 
 # old_file
 old_*
@@ -57,3 +57,6 @@ old_*
 implementation_notes/
 demo_nozzlex/
 
+
+# Preserve the existing tracked cluster launcher after thematic relocation.
+!/development/alberto/hpc/run_job.sh

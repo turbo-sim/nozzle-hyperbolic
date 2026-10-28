@@ -26,7 +26,7 @@ structural commit restores the complete original implementations in its Git
 tree, including the original factory signatures and defaults.
 
 The experimental direct Newton, LM, HYBR, SLSQP, continuation, and Newton/PTC
-drivers remain uncommitted under `development_new/`, along with their new
+drivers remain uncommitted under `development/roberto/`, along with their new
 tests. The existing changes to the shock-validation Python/YAML files also
 remain outside the structural commit; those include a change from LUT
 properties to a perfect-gas backend and predate this separation.

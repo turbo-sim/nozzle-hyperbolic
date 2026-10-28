@@ -3,10 +3,10 @@
 > Historical analysis. The one-off drivers and old generated outputs referenced
 > below were removed during experiment cleanup. Their commands and output paths
 > are historical, not currently supported reproduction instructions. See the
-> [consolidated overview](../development_new/newton_solve/README.md) and
-> [convergence explanation](../development_new/newton_solve/CONVERGENCE_MECHANISM.md)
+> [consolidated overview](../development/roberto/newton_solve/README.md) and
+> [convergence explanation](../development/roberto/newton_solve/CONVERGENCE_MECHANISM.md)
 > for the retained comparison. Flux/limiter verification is now in
-> [numerical_fixes](../development_new/numerical_fixes/README.md).
+> [numerical_fixes](../development/roberto/numerical_fixes/README.md).
 
 The flux and limiter defects are corrected, but the tested changes do **not**
 make direct cold-start solves converge on the two shocked cases. Constant
@@ -36,7 +36,7 @@ earlier MUSCL diagnosis identifies an obstruction at a sampled Newton state,
 but is not a complete explanation of all global convergence failures.
 
 `results_root_methods_before/` and `results_root_methods_constant_before/`
-under `development_new/newton_solve/` preserve these measurements, native
+under `development/roberto/newton_solve/` preserve these measurements, native
 messages, settings, states, histories, and source-file fingerprints.
 
 ## Corrected characteristic flux
@@ -237,7 +237,7 @@ error about 0.03119 against a 0.03 threshold, with numerical throat Mach 0.8464
 versus the reference 1.0. Consequently that baseline script still exits nonzero;
 this is not presented as an all-green analytical validation.
 
-Results live under `development_new/newton_solve/results_root_methods_*`:
+Results live under `development/roberto/newton_solve/results_root_methods_*`:
 `summary.json`, `timings.csv`, raw history CSVs, and PNG/PDF residual/profile
 plots. LM/HYBR histories are **all residual evaluations**, including duplicate
 and unsuccessful trial requests, because MINPACK has no accepted-iteration
@@ -258,20 +258,20 @@ Run from the repository root:
 
 ```powershell
 # Historical residual: LM/HYBR first, ordinary MUSCL, three trust factors.
-poetry run python -m development_new.newton_solve.compare_root_methods --stage before --no-show
+poetry run python -m development.roberto.newton_solve.compare_root_methods --stage before --no-show
 
 # Historical residual: isolate constant reconstruction.
-poetry run python -m development_new.newton_solve.compare_root_methods --stage constant_before --reconstructions constant --methods lm hybr newton slsqp --factors 0.1 --no-show
+poetry run python -m development.roberto.newton_solve.compare_root_methods --stage constant_before --reconstructions constant --methods lm hybr newton slsqp --factors 0.1 --no-show
 
 # Corrected flux: compare constant and both piecewise-linear reconstructions.
-poetry run python -m development_new.newton_solve.compare_root_methods --stage after --reconstructions constant muscl_van_leer muscl_van_leer_smooth --methods lm hybr newton slsqp --factors 0.1 --no-show
+poetry run python -m development.roberto.newton_solve.compare_root_methods --stage after --reconstructions constant muscl_van_leer muscl_van_leer_smooth --methods lm hybr newton slsqp --factors 0.1 --no-show
 
 # Positive coordinates, then the tested short actual warm start.
-poetry run python -m development_new.newton_solve.compare_root_methods --stage after_log --reconstructions muscl_van_leer_smooth --coordinates log --factors 0.1 --max-evaluations 300 --no-show
-poetry run python -m development_new.newton_solve.compare_root_methods --stage warm20_log --reconstructions muscl_van_leer_smooth --coordinates log --factors 0.1 --warm-steps 20 --max-evaluations 300 --no-show
+poetry run python -m development.roberto.newton_solve.compare_root_methods --stage after_log --reconstructions muscl_van_leer_smooth --coordinates log --factors 0.1 --max-evaluations 300 --no-show
+poetry run python -m development.roberto.newton_solve.compare_root_methods --stage warm20_log --reconstructions muscl_van_leer_smooth --coordinates log --factors 0.1 --warm-steps 20 --max-evaluations 300 --no-show
 
 # Redraw saved observations without rerunning solvers.
-poetry run python -m development_new.newton_solve.compare_root_methods --stage after --plot-only --no-show
+poetry run python -m development.roberto.newton_solve.compare_root_methods --stage after --plot-only --no-show
 ```
 
 `--flux-variant` overrides the stage selection; `before`/`constant_before`

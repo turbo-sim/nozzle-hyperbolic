@@ -3,10 +3,10 @@
 > Historical analysis. The one-off drivers and old generated outputs referenced
 > below were removed during experiment cleanup. Their commands and output paths
 > are historical, not currently supported reproduction instructions. See the
-> [consolidated overview](../development_new/newton_solve/README.md) and
-> [convergence explanation](../development_new/newton_solve/CONVERGENCE_MECHANISM.md)
+> [consolidated overview](../development/roberto/newton_solve/README.md) and
+> [convergence explanation](../development/roberto/newton_solve/CONVERGENCE_MECHANISM.md)
 > for the retained comparison. Flux/limiter verification is now in
-> [numerical_fixes](../development_new/numerical_fixes/README.md).
+> [numerical_fixes](../development/roberto/numerical_fixes/README.md).
 
 This analysis describes the historical flux, retained as
 `_jax_F_fvs_stadtke_legacy`. The subsequent implementation and controlled
@@ -22,7 +22,7 @@ regularity and consistency defects in the implemented FVS flux.
 This investigation evaluated saved states and diagnostic models before the
 subsequent production corrections. Numerical evidence
 below refers to the original 201-point cases and first saved repeat in
-`development_new/newton_solve/results_comparison/summary.json`.
+`development/roberto/newton_solve/results_comparison/summary.json`.
 
 ## 1. An accurate Newton solve can give an unusable finite step
 
@@ -341,10 +341,10 @@ initial scalar step solves the earlier regularity and reconstruction problems.
 Run from the repository root:
 
 ```powershell
-poetry run python -m development_new.newton_solve.verify_flux_regularity
-poetry run python -m development_new.newton_solve.analyze_stagnation_mechanism
+poetry run python -m development.roberto.newton_solve.verify_flux_regularity
+poetry run python -m development.roberto.newton_solve.analyze_stagnation_mechanism
 # Regenerate only the saved diagnostic plots.
-poetry run python -m development_new.newton_solve.analyze_stagnation_mechanism --plot-only
+poetry run python -m development.roberto.newton_solve.analyze_stagnation_mechanism --plot-only
 ```
 
 The first command is independent of previous nozzle runs. The second requires
