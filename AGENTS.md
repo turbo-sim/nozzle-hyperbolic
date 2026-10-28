@@ -53,11 +53,12 @@ a local cleanup or solver experiment. Check the branch rather than assuming
 | `src/nozzle_hyperbolic/` | Installable production package; import as `nozzle_hyperbolic` |
 | `models/euler_nozzle/` beneath the package | EulerNozzle physics, NumPy/JAX fluxes, state maps, boundaries, initialization, sources, closures, analytical references and FVM assembly |
 | `models/two_fluid/` | Two-fluid solver, state/matrix/flux/source code, boundaries, analytical references and model-specific closures |
-| `models/euler_annular/` | Reserved annular model namespace; currently no implemented FVM solver. Do not assume the planned model is finished |
-| `numerics/` | Shared reconstruction and linear-algebra utilities |
+| `models/euler_annular/` | General-EOS quasi-1D annular Euler prototype: swirl, characteristic flux, coupled boundary blocks, steady and physical-time drivers; see its verification report for limitations |
+| `numerics/` | Shared reconstruction, characteristic contraction, colored block Jacobians and banded linear solves |
 | `geometry/duct.py` | Duct/nozzle geometry |
+| `geometry/annular.py` | NURBSpy 1.6 NumPy midline/height geometry, arclength metrics and physical annular meshes; fixed host preprocessing, no shape AD |
 | `thermodynamics/` | Property helpers and recovery routines; fluid backends also come from JAXProp |
-| `solvers/time_marching/` | Shared time-marching utilities. Model factories still own substantial assembly/integration code; this is not yet a complete generic solver framework |
+| `solvers/finite_volume.py`, `solvers/time_marching/` | Shared conservative residual assembly and implicit Newton construction; model factories retain physical callbacks and driver policies |
 | `fvm_solver/` | Legacy compatibility imports forwarding to canonical modules. Edit the canonical implementation, not a shim or a second copy |
 | `development/` | Single development workspace; the `alberto/` and `roberto/` collections are indexed in its README |
 | `development/roberto/` | Current controlled verification examples and numerical investigations |
@@ -77,6 +78,10 @@ Important Euler navigation:
 - `numerics/reconstruction.py`: shared reconstruction/limiter arithmetic;
   `models/euler_nozzle/reconstruction.py` contains model-specific routines.
 - `models/euler_nozzle/analytical/`: steady nozzle and shock-tube references.
+- `models/euler_annular/fvm.py`: `make_annular_solver`, full boundary/interior
+  residual operators, cold initialization, steady and physical-time drivers.
+  Unknowns are `(p, v_m, ell, h)`; `v_theta=ell/r`. Numerical paths use sound
+  speed and Gruneisen, with perfect-gas formulas confined to analytical references.
 - `models/two_fluid/solver.py`: substantial model-specific implicit assembly
   and boundary construction; do not assume it shares Euler's implementation.
 
@@ -101,6 +106,7 @@ Keep the single `development/` parent; do not recreate `development_new/` or
 | [implicit_integration](development/roberto/implicit_integration/README.md) | Inner Newton work and CFL/controller sensitivities |
 | [BC_residual](development/roberto/BC_residual/README.md) | Internal versus coupled BC equations with matched implicit solver machinery and repeated timings |
 | [backpressure_sensitivity](development/roberto/backpressure_sensitivity/README.md) | Perfect-gas implicit operating map, choking/shock-exit behavior and outlet branch selection |
+| [euler_annular](development/roberto/euler_annular/README.md) | General-EOS annular solver, NURBSpy geometry, answered design decisions, analytical/constant/MUSCL verification and independent saved-state audits |
 
 The steady baseline has five regimes: supersonic exit, shocks at 35% and 70%
 of the divergent section, sonic-throat/subsonic-exit limiting flow, and fully
