@@ -1,125 +1,117 @@
-# Implicit integration: inner Newton work and CFL sensitivity
+# Implicit integration: Newton work and CFL sensitivity
 
-This study asks two separate questions: how much inner nonlinear work is useful,
-and how much the timestep controller determines progress. It reuses the same
-five [EulerNozzle physical cases](../euler_nozzle/README.md), perfect-gas backend,
-201-point mesh, original cold initialization, corrected FVS flux, and safe
-ordinary Van Leer reconstruction as the Newton/PTC comparison.
+Open **[REPORT.html](REPORT.html)**. It is one standalone offline file, with
+embedded plots, equations, recorded outcomes and downloadable CSV/JSON data.
+Colleagues can copy just this file and open it in a browser. No server,
+installation, internet connection or neighboring files are needed for viewing.
+Light/dark themes and configurable pressure-marker spacing are included.
+
+The report has four internal pages:
+
+1. **Newton caps**: maximum corrections 1, 3, 5, 10 and 100 at fixed CFL settings.
+2. **CFL / cap 100**: nine controller variants with a large Newton cap.
+3. **CFL / cap 1**: the same variants with one correction per timestep trial.
+4. **Theory**: Euler balances, eigenvalues, spatial and implicit discretization,
+   boundary handling, SER control, stopping definitions and saved-data provenance.
+
+Each results page has five-case plots for residual versus updates, total Newton
+work or recorded time; actual accepted CFL; actual inner corrections; and final
+pressure with the retained analytical reference. Rejected attempts can be
+overlaid in the CFL and inner-count views. Numerical curves use plasma colors,
+distinct line styles and large hollow pressure markers.
+
+## Retained evidence and interpretation
+
+The complete saved campaign contains **105 unique numerical solves** on the
+201-point EulerNozzle mesh, including two ghost slots, with a perfect-gas Air
+backend. All 105 recorded original residual checks and baseline-agreement
+checks pass. **21 sonic-limit analytical accuracy checks fail** and remain
+explicitly labeled. Baseline runs at caps 1 and 100 are shared between the
+three pages; repeated display does not make them independent measurements.
+
+Every configuration has **one recorded timed solve**. These are descriptive
+times, not repeated timing distributions or validated speedup estimates.
+The report distinguishes accepted outer updates, actual inner corrections,
+rejected work, root convergence and analytical accuracy. A Newton setting is a
+maximum cap, not a forced count or proof of a fully converged transient step.
+
+The report was built from existing results. **No simulations were rerun.**
+The new builder checks saved arithmetic and consistency, not the current
+numerical source against old states. The original versions, source hashes and
+historical `development_new` paths remain intact as provenance.
+
+## Directory organization
 
 ```text
 implicit_integration/
-  README.md            Setup, controlled settings, and run instructions
-  scripts/             Comparison driver
-  outputs/REPORT.md    Combined report with figures from all three studies
-  outputs/<study>/    Detailed report, figures, and results CSV
-  outputs/runs/       Individual run data, accepted histories, and rejected trials
+  README.md                entry point, interpretation and reproduction commands
+  REPORT.html              one standalone report with four internal pages
+  __init__.py              package marker
+  scripts/
+    report.py              solver-free standalone HTML builder
+    report_data.py         saved-record loader, consistency audit and plot payloads
+    audit_html.py          isolated offline browser verification
+    compare_settings.py    retained historical numerical sensitivity driver
+    report_assets/         editable CSS/JS, theory and retained setup note
+  outputs/                 ignored numerical records, figures and generated audits
 ```
 
-Open the [combined report](outputs/REPORT.md), or go directly to:
+The builder reuses the locally vendored Plotly/MathJax libraries and base visual
+styles from `BC_residual/scripts/report_assets/`; it embeds their contents and
+licenses into the HTML. The finished report has no dependency on that directory.
+Original Markdown reports and PNG/PDF exports remain in `outputs/` as retained
+artifacts; the HTML is the human-facing entry point.
 
-1. [Newton caps 1, 3, 5, 10, 100](outputs/newton_iterations/REPORT.md).
-2. [CFL sensitivity with Newton cap 100](outputs/cfl_newton100/REPORT.md).
-3. [The same CFL sensitivity with Newton cap 1](outputs/cfl_newton1/REPORT.md).
+## Rebuild only the report
 
-Each study has a five-panel residual-versus-update figure and a five-panel
-pressure-versus-position figure. Additional figures show residual versus warm
-solve time and the actual accepted CFL. Plasma colors span 0.2?0.8. The five
-cases are fully subsonic, the sonic-throat/subsonic-exit limit, shocks at 35% and
-70% of the divergent section, and adapted supersonic exit.
-
-## Meaning of the Newton settings
-
-The requested values are **maximum corrections per timestep trial**, with the
-existing relative-update stopping tolerance $10^{-8}$. A cap of 100 allows the
-inner solve to finish; it does not force 100 unnecessary corrections. Actual
-linear-solve counts, the last relative update, and whether the inner stopping
-criterion was satisfied are recorded for every accepted and rejected trial.
-
-The inner stopping criterion is the production code's relative Newton-update
-criterion, not an independently imposed norm of the transient equations. An
-inner solve hitting its cap is not automatically declared an outer failure:
-the existing domain/increment acceptance rules still govern timesteps.
-The independent outer criterion is original fixed-scale steady residual RMS
-$\leq10^{-8}$. Analytic accuracy and agreement with the cap-100 baseline root
-are checked separately. The known sonic-limit accuracy discrepancy remains
-visible even when residual convergence succeeds.
-
-## CFL sensitivities
-
-All CFL variants are tested identically at both Newton caps 100 and 1. Each
-non-baseline row changes only one controller setting:
-
-| Variant | Starting CFL | Maximum CFL | SER exponent | Maximum timestep growth per accepted update |
-|---|---:|---:|---:|---:|
-| Baseline | 20 | 500 | 1 | 1.2 |
-| Start CFL 1 | 1 | 500 | 1 | 1.2 |
-| Start CFL 100 | 100 | 500 | 1 | 1.2 |
-| Max CFL 100 | 20 | 100 | 1 | 1.2 |
-| Max CFL 100000 | 20 | 100000 | 1 | 1.2 |
-| No SER ramp | 20 | 500 | 0 | 1.2 |
-| SER exponent 2 | 20 | 500 | 2 | 1.2 |
-| Timestep growth 1.05 | 20 | 500 | 1 | 1.05 |
-| Timestep growth 2 | 20 | 500 | 1 | 2 |
-
-For the existing anchored SER rule, the requested CFL cap is
-
-$$
-C_{\rm target}=C_0\operatorname{clip}
-\left[(\mathrm{SSR}_1/\mathrm{SSR})^\beta,1,C_{\max}/C_0\right].
-$$
-
-A separate growth bound limits the next timestep relative to the preceding
-accepted timestep. Domain/increment retries can halve it further. Consequently
-actual accepted CFL can be below the base CFL, and the maximum can remain unused.
-With $\beta=0$, SER acceleration is disabled while the base CFL remains active.
-Its reference residual is established after the first accepted timestep.
-SER uses the production state-normalized SSR; the final success check uses the
-same fixed-scale spatial residual as the other development studies.
-
-The existing pressure/enthalpy/velocity increment limits (0.2, 0.1, 0.2), maximum
-eight timestep halvings, fluid, mesh, spatial discretization, and stopping rules
-are held fixed. These are controlled sensitivities, not a full factorial search
-or an optimal-controller claim. There are 105 unique solves: the baseline runs
-at caps 1 and 100 are shared between studies, not duplicated as independent runs.
-
-## Reproduction
-
-From the repository root after installing project dependencies:
+From the repository root in the existing Poetry environment:
 
 ```powershell
-poetry run python -m development.roberto.implicit_integration.scripts.compare_settings --no-show
-
-# Regenerate all reports and figures from saved run data.
-poetry run python -m development.roberto.implicit_integration.scripts.compare_settings --plot-only --no-show
-
-# Optional separate coarse/budget-limited execution check.
-poetry run python -m development.roberto.implicit_integration.scripts.compare_settings --points 31 --max-iterations 1000 --no-show --output development/roberto/implicit_integration/outputs/coarse_check
+poetry run python -B -m development.roberto.implicit_integration.scripts.report
 ```
 
-All variants restart independently from the same cold state, without analytic
-initialization or warm-start transfer. Default outer budget is 5000 accepted
-updates. Failed trials and unconverged final fields are retained and labeled.
-Accepted histories distinguish actual outer updates, cumulative linear solves,
-and all attempted timesteps. Final pressure CSVs omit ghost cells.
+This reads `outputs/summary.json` and the saved run JSON files, then replaces
+root `REPORT.html`. It imports no numerical solver, rewrites no historical
+summary or timing sample, and runs no cases. It creates:
 
-## Reuse and numerical scope
+- `outputs/saved_results_audit.json`: counts, histories, cap/inner flags, root
+  flags, field shapes, common seeds and baseline-distance consistency.
+- `outputs/report_structure_audit.json`: internal links, embedded dependencies
+  and downloadable payload checks.
+- `outputs/html_report_manifest.json`: report/asset hashes and verification that
+  all 422 saved numerical JSON/CSV files remain unchanged for the default data.
 
-The physical problem and original spatial operators come from
-`newton_solve/scripts/problem.py`; the shared implicit controller is
-`newton_solve/scripts/pseudo_time.py`. The controller now exposes optional timestep
-growth, retry-budget, and diagnostic-history controls while retaining its former
-defaults. The production compiled backward-Euler/Newton/banded kernel is used;
-this is not a new direct root solver or a substitution of a SciPy backend.
+Select another saved run directory with `--output`; use `--destination` for an
+alternative HTML filename directly at this study root. Generated HTML is not
+committed unless requested.
 
-The existing in-memory counter adapter now optionally returns the final inner
-relative update as well as the actual solve count. It adds return diagnostics;
-it does not change the production residual or update equations. No `src` file
-is changed for this study. Starting CFL is rescaled in the timestep estimate;
-changing its host setting alone would otherwise leave the factory's compiled
-CFL unchanged. This rescaling is applied consistently to the SER cap as well.
+## Verify the standalone HTML in a browser
 
-Each kernel is warmed once per case/Newton cap; first-call costs are saved
-separately. Host CFL variants reuse that kernel. Timed solves include controller,
-monitoring and rejected-trial work, but exclude compilation, plotting and final
-audits. The time comparisons are single serial measurements with one BLAS thread;
-use iteration/work counts for the stronger algorithmic conclusions.
+With Microsoft Edge installed:
+
+```powershell
+poetry run python -B -m development.roberto.implicit_integration.scripts.audit_html
+```
+
+Use `--edge <executable>` if Edge is installed elsewhere. This audit uses a
+separate study-local browser profile and a solitary report copy, disables
+network resolution, and needs no Playwright installation. It checks all four
+pages, both themes, exact saved plot arrays, marker spacing and invalid inputs,
+equation rendering, embedded downloads and JavaScript errors. Browser evidence
+and screenshots remain under `outputs/html_audit/`; no numerical solver runs.
+
+## Numerical-driver scope
+
+`compare_settings.py` is preserved without changing its numerical algorithm.
+It uses the common nozzle problem, implicit controller and an in-memory
+counter adapter from `newton_solve`. That adapter targets the historical source
+layout and needs a compatibility review before launching a new campaign against
+the evolved current solver. This reporting change does not migrate it or claim
+fresh numerical reproducibility. Use `scripts.report` for presentation updates,
+rather than the historical driver or its older Markdown/plot-only path.
+
+The original detailed setup is preserved in
+[`scripts/report_assets/historical_setup.md`](scripts/report_assets/historical_setup.md)
+and embedded in the report as an expandable historical record. Editable current
+theory for the report lives in
+[`scripts/report_assets/theory.md`](scripts/report_assets/theory.md).

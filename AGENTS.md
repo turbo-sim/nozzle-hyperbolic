@@ -185,6 +185,13 @@ development/roberto/<study>/
 
 ## Performance measurements
 
+To rebuild the implicit-integration report from the retained 105-run dataset,
+without importing numerical solvers or rerunning cases, use
+`poetry run python -B -m development.roberto.implicit_integration.scripts.report`.
+It writes root `REPORT.html` with three sensitivity pages and one theory page;
+saved timing samples and numerical JSON/CSV files remain unchanged. See that
+study's README for the optional isolated offline browser audit.
+
 For a repeated solver benchmark, default to one excluded **complete solve**
 per case/method followed by ten measured solves, unless the user specifies
 another protocol.

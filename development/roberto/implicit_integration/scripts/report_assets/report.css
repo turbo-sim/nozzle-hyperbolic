@@ -1,0 +1,46 @@
+/* Theme primitives and report layout are reused from BC_residual at build time. */
+body {min-width:0}
+.header {gap:18px}
+.brand small {font-size:10px}
+.page-switch a {padding:6px 10px}
+.report-page {scroll-margin-top:88px}
+.five-case-plot {height:900px}
+.work-plot {height:520px}
+.report-controls {display:flex;align-items:end;gap:18px;flex-wrap:wrap;padding:16px 18px;border-bottom:1px solid var(--line)}
+.report-controls label {display:block;font-size:11px;color:var(--muted);margin-bottom:5px}
+.report-controls select {min-width:250px}
+.report-controls select,.report-controls input[type="number"] {border:1px solid var(--line);border-radius:5px;background:var(--input);color:var(--ink);padding:8px 10px;font:inherit}
+.report-controls input[type="number"] {width:130px;font-variant-numeric:tabular-nums}
+.report-controls .inline-check {display:flex;align-items:center;gap:7px;padding-bottom:8px}
+.report-controls .inline-check label {margin:0}
+.report-controls small {margin-left:auto;max-width:340px}
+.study-stats {display:flex;gap:14px;flex-wrap:wrap;margin:18px 0}
+.study-stats span {padding:7px 12px;background:var(--panel);border:1px solid var(--line);border-radius:5px;font-size:12px}
+.table-scroll {overflow:auto;max-height:600px}
+.table-scroll thead {position:sticky;top:0;background:var(--panel);z-index:1}
+table {width:100%;border-collapse:collapse;font-size:11px;white-space:nowrap}
+th,td {padding:9px 11px;border-bottom:1px solid var(--line);text-align:right;font-variant-numeric:tabular-nums}
+th:first-child,td:first-child,th:nth-child(2),td:nth-child(2) {text-align:left}
+.pass {color:var(--success)}
+.fail {color:var(--warning);font-weight:600}
+.method-grid {display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:20px 0}
+.method-card {padding:20px;background:var(--panel);border:1px solid var(--line);border-radius:7px}
+.method-card p {font-size:12px;color:var(--muted);margin:0}
+.theory-content {max-width:1080px}
+.theory-content h2 {margin-top:36px;margin-bottom:14px;scroll-margin-top:88px}
+.theory-content h3 {margin-top:24px}
+.theory-content p,.theory-content li {font-size:13px;line-height:1.85}
+.theory-content table {margin:18px 0}
+.math-display {margin:20px 0;padding:12px;background:var(--panel);border:1px solid var(--line);border-radius:5px;font-size:14px}
+.record-pre {white-space:pre-wrap;overflow-wrap:anywhere;font-size:10px;max-height:420px;overflow:auto}
+.caption {padding:10px 18px;color:var(--muted);font-size:11px;line-height:1.8}
+.download-links {display:flex;flex-wrap:wrap;gap:18px;margin:15px 0}
+.case-key {font-size:11px;color:var(--muted);margin-top:14px}
+.sidebar [data-report-nav] {display:flex;flex-direction:column;gap:5px}
+.sidebar [data-report-nav] a {display:flex;align-items:baseline;gap:10px;padding:10px 12px;border-radius:5px;text-decoration:none;font-size:12px;color:var(--muted)}
+.sidebar [data-report-nav] a:hover,.sidebar [data-report-nav] a.active {background:var(--tint);color:var(--accent)}
+.sidebar [data-report-nav] a span {font:10px Consolas,monospace;opacity:.7;flex-shrink:0}
+.callout {padding:14px 16px;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:5px;background:var(--panel);font-size:12px;line-height:1.8}
+[hidden] {display:none!important}
+@media(max-width:1000px) {.header{height:auto;min-height:68px;flex-wrap:wrap;padding:12px}.page-switch{order:3;width:100%;justify-content:center}.sidebar{display:none}main{margin-left:0;padding:24px 14px}.brand small{display:none}.five-case-plot{height:1000px}.method-grid{grid-template-columns:1fr}}
+@media print {.report-page[hidden]{display:block!important}.report-page{break-before:page}.report-page:first-child{break-before:auto}.report-controls{display:none}.table-scroll{max-height:none;overflow:visible}.five-case-plot{height:900px!important}.method-grid{grid-template-columns:1fr 1fr}}
