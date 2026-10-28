@@ -1,117 +1,95 @@
-"""Read-only experimental access to the existing factory's private closures.
+"""Explicit production operators for the retained coupled-boundary study.
 
-The production file is neither edited nor monkeypatched. A separate Python
-function shares its residual code and numerical kernels, replacing only its
-two ghost-elimination closures with identity maps. This deliberately private
-adapter avoids copying the FVM formulas; parity checks guard the experiment.
-It must fail loudly if the production factory's closure layout changes.
+The factory exposes its physical residual separately from its boundary maps
+and publishes numerical construction metadata. Both study formulations use
+that same physical code and the shared colored/banded numerical engine. No
+private closure inspection, cloning or monkeypatching is required.
 """
-
-from types import FunctionType
 
 import jax
 import jax.numpy as jnp
 
-
-def closure(function):
-    function = getattr(function, "__wrapped__", function)
-    return dict(zip(function.__code__.co_freevars, function.__closure__ or ()))
+from nozzle_hyperbolic.numerics.jacobians import make_block_operators
 
 
 def value(function, name):
-    try:
-        return closure(function)[name].cell_contents
-    except KeyError as error:
-        raise RuntimeError(f"Production closure changed: missing {name}") from error
+    """Compatibility lookup for the study's three historical setting names.
+
+    CoupledStep's call sites remain unchanged, but values now come from the
+    returned kernel's explicit public metadata rather than Python closures.
+    Unsupported names fail loudly instead of inspecting implementation details.
+    """
+    aliases = {
+        "_newton_scale": "newton_scale",
+        "newton_iter": "newton_iter",
+        "newton_tol": "newton_tol",
+    }
+    metadata = getattr(function, "solver_metadata", None)
+    if metadata is None or name not in aliases or aliases[name] not in metadata:
+        raise RuntimeError(f"Source kernel does not publish study setting {name!r}")
+    return metadata[aliases[name]]
 
 
-def cell(content):
-    return (lambda: content).__closure__[0]
-
-
-def bind(function, replacements):
-    """Clone a source closure with explicit substitutions; never mutate it."""
-    slots = closure(function)
-    if not replacements.keys() <= slots.keys():
-        raise RuntimeError(
-            f"Source closure changed: {replacements.keys() - slots.keys()}"
-        )
-    return FunctionType(
-        function.__code__,
-        function.__globals__,
-        function.__name__,
-        function.__defaults__,
-        tuple(
-            cell(replacements[name]) if name in replacements else slots[name]
-            for name in function.__code__.co_freevars
-        ),
-    )
+def _metadata(problem):
+    metadata = problem.operators.get("solver_metadata")
+    if metadata is None:
+        raise RuntimeError("Source factory must publish solver_metadata with return_operators=True")
+    if metadata["nvar"] != 3:
+        raise ValueError("This retained nozzle study expects three primitive variables")
+    return metadata
 
 
 def banded_newton_for_full_state(problem, residual):
-    """Reuse source colored assembly and block Thomas code for N ghost-inclusive rows.
-
-    Only residual and cell-count bindings change. Ghost rows use the same
-    three-variable cell layout and the existing width-two local stencil.
-    """
-    newton = value(problem.step, "_newton_dU")
-    if value(newton, "linear_solver") != "banded":
+    """Build augmented study rows through the production shared block engine."""
+    metadata = _metadata(problem)
+    if metadata["linear_solver"] != "banded":
         raise ValueError("The matched comparison requires source banded Newton")
-    original_blocks = value(newton, "_jac_blocks")
-    original_columns = value(original_blocks, "_colored_columns")
-    original_solve = value(newton, "_banded_solve")
-    width = value(original_blocks, "_sw")
-    if width != 2:
-        raise ValueError("Coupled BCs require the baseline width-two MUSCL stencil")
-    count = len(problem.x)
-    columns = bind(
-        original_columns,
-        {
-            "_residual": residual,
-            "_n_colors": min(value(original_columns, "_stride"), 3 * count),
-        },
+    # Boundary equations read their boundary and nearest two physical cells.
+    # The full augmented radius is therefore at least two, including constant
+    # reconstruction; do not inherit a narrower interior-only band silently.
+    radius = max(2, metadata["stencil_radius"])
+    operators = make_block_operators(
+        residual, len(problem.x), metadata["nvar"], radius,
+        jacobian_mode=metadata["jacobian_mode"], linear_solver="banded",
     )
-    blocks = bind(original_blocks, {"_Nc": count, "_colored_columns": columns})
-    groups = -(-count // width)
-    solve = bind(original_solve, {"_Nc": count, "_M": groups, "_Ncp": groups * width})
-    direction = bind(
-        newton,
-        {
-            "_residual": residual,
-            "_jac_blocks": blocks,
-            "_banded_solve": solve,
-        },
-    )
-    return direction, blocks, solve
+
+    def solve(blocks, residual_value):
+        # Preserve CoupledStep's existing residual-to-Newton-direction contract.
+        return operators["solve_blocks"](blocks, -residual_value)
+
+    return operators["direction"], operators["jacobian_blocks"], solve
 
 
 def independent_ghost_operators(problem):
-    original = value(value(problem.step, "_newton_dU"), "_residual")
-    slots = closure(original)
-    if not {"_bc_inlet", "_bc_outlet"}.issubset(slots):
-        raise RuntimeError("Production residual no longer exposes both BC maps")
-    original_inlet = slots["_bc_inlet"].cell_contents
-    original_outlet = slots["_bc_outlet"].cell_contents
-    identity = lambda state: state
-    replaced = tuple(
-        cell(identity) if name in ("_bc_inlet", "_bc_outlet") else slots[name]
-        for name in original.__code__.co_freevars
-    )
-    raw = FunctionType(
-        original.__code__,
-        original.__globals__,
-        "experimental_residual_with_independent_ghosts",
-        original.__defaults__,
-        replaced,
-    )
+    """Expose identical physical rows with independent current ghost values.
+
+    The transient compatibility wrapper keeps the study's former signature.
+    Its old-state argument contains current boundary slots and old physical
+    slots, as explicitly assembled by CoupledStep. No boundary map is invoked
+    by this wrapper or the spatial monitor.
+    """
+    _metadata(problem)
+    required = ("physical_residual", "inlet_boundary", "outlet_boundary")
+    missing = [name for name in required if name not in problem.operators]
+    if missing:
+        raise RuntimeError(f"Source factory does not publish physical study operators: {missing}")
+    physical = problem.operators["physical_residual"]
+    shape = (len(problem.x), 3)
+
+    def transient(interior_flat, mixed_old_flat, dt):
+        mixed = mixed_old_flat.reshape(shape)
+        current = jnp.concatenate(
+            [mixed[:1], interior_flat.reshape(shape[0] - 2, 3), mixed[-1:]], axis=0
+        )
+        return physical(current, mixed, dt)
 
     @jax.jit
     def spatial(full):
-        return raw(full[1:-1].ravel(), full.ravel(), jnp.float64(1.0))
+        return physical(full, full, jnp.float64(1.0))
 
     return dict(
         spatial=spatial,
-        inlet=jax.jit(original_inlet),
-        outlet=jax.jit(original_outlet),
-        transient=raw,
+        inlet=problem.operators["inlet_boundary"],
+        outlet=problem.operators["outlet_boundary"],
+        transient=transient,
     )

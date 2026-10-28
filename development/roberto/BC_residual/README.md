@@ -1,99 +1,93 @@
-# Matched implicit integration: internal versus coupled boundary equations
+# Internal versus coupled boundary residuals
 
-This study compares exactly two treatments of the same five nozzle backpressures:
+Open **[REPORT.html](REPORT.html)**. It is one standalone HTML file with three
+internal tabs, interactive Plotly figures, typeset equations and light/dark
+themes. Copying the HTML alone is sufficient to read it offline.
 
-1. **Source/internal BCs:** call the current source timestep kernel, which
-   reconstructs ghost values inside each inner residual evaluation.
-2. **Experimental/coupled BC equations:** keep ghosts as unknowns and solve
-   their equations together with the implicit interior balances.
+- **Results:** five nozzle cases, convergence histories, final pressure profiles,
+  all timing samples with minimum/maximum/mean, physical checks and provenance.
+- **Theory:** inlet/outlet laws, eliminated and coupled implicit systems, the
+  Schur-complement connection, zero ghost storage, scaling and implementation
+  history. It distinguishes the original closure adapter from today's public
+  physical-residual/metadata interface.
+- **Recommendations:** when elimination or coupling is appropriate, local
+  solvability and two-fluid concerns, one canonical model-specific boundary
+  residual, shared assembly, and an explicit formulation selector before JIT.
 
-Both now use the **same source-native JAX Newton algorithm, colored block
-Jacobian assembly and block-banded Thomas solver code**, with the same inner
-iteration cap and relative-update stopping rule. The source path does not use
-Optimistix. The previous PySolverView/dense inner implementation has been
-removed so it cannot distort this comparison. No source file is edited.
+The report retains the measured benchmark: 100 timed solves, ten excluded full
+solves and the actual representative trajectories. The sonic-limit analytical
+check remains a failure for both methods, despite small equation residuals.
+The timings were not rerun after the adapter migration or this report cleanup.
+Recommendations about future two-fluid behavior are proposals, not measured
+robustness claims.
 
-- [IMPLICIT_REPORT.md](IMPLICIT_REPORT.md): measured outcomes, min/max/mean timing
-  table, timing distribution, five-panel convergence and five-panel pressure figures.
-- [BOUNDARY_DESIGN_RECOMMENDATIONS.md](BOUNDARY_DESIGN_RECOMMENDATIONS.md): robustness,
-  coding simplicity, two-fluid considerations and a clean two-strategy design.
-- [BC_IMPLEMENTATION.md](BC_IMPLEMENTATION.md): physical boundary equations,
-  reduced/coupled formulations, shared numerical machinery and limitations.
-- `scripts/`: comparison, tentative coupled timestep, boundary equations,
-  read-only source adapter, and plots/report generation.
-- `outputs/steady/`: all timings, excluded and measured histories, fields,
-  trial records, CSV files, figures and source hashes. The repository-level
-  `.gitignore` excludes `outputs/`; there is no local ignore file.
+## Directory organization
+
+```text
+BC_residual/
+  README.md                  entry point and reproduction commands
+  REPORT.html                complete offline results, theory and recommendations
+  __init__.py                Python package marker
+  scripts/                   numerical experiment, report builder and audits
+    report_assets/           editable HTML/CSS/JS and embedded browser libraries
+      notes/                 retained background and historical report sources
+  outputs/                   ignored data, figures, source records and audits
+```
+
+The older Markdown documents are preserved under `scripts/report_assets/notes/`
+and incorporated into the report. Detailed physical background and design
+recommendations are rendered as HTML, including equations. Original benchmark
+and smoke narratives remain expandable historical records; they are not new
+validation runs. No companion file is required to view the HTML.
+
+| Script | Purpose |
+|---|---|
+| `compare_implicit.py` | Matched source/coupled integration and repeated timing driver |
+| `boundary_system.py`, `coupled_step.py` | Experimental algebraic BC equations and timestep assembly |
+| `source_adapter.py` | Access to public production physical/solver operators |
+| `report_implicit.py` | Build the standalone HTML from saved records and notes |
+| `plot_implicit.py` | Optional static PNG/PDF export from saved results |
+| `audit_html.py` | Check a solitary report copy offline in headless Edge |
+
+## Rebuild the report without numerical solves
+
+From the repository root in the existing Poetry environment:
+
+```powershell
+poetry run python -B -m development.roberto.BC_residual.scripts.report_implicit
+```
+
+This reads `outputs/steady/summary.json`, checks saved timing arithmetic and
+representative selection, then replaces root `REPORT.html`. It uses the
+existing Markdown package, local Plotly/MathJax runtimes and no solver imports.
+Custom saved runs can be selected with `--output`; their default HTML remains
+inside that output directory. `--destination` can select another study-local
+HTML path explicitly.
 
 ## Run the benchmark
 
-From the repository root:
-
 ```powershell
-poetry run python -m development.roberto.BC_residual.scripts.compare_implicit --no-show
+poetry run python -B -m development.roberto.BC_residual.scripts.compare_implicit --no-show
 ```
 
-Defaults are 201 points and **one excluded full solve followed by ten measured
-solves per case and method**. There are 110 full solves: 10 excluded and 100
-measured. Every solve restarts from the same cold field and fresh controller
-state. Compiled kernels are built once per case and reused. Method order
-alternates between measured repeats. The first solve of each case/method is
-excluded even if part of its work was already compiled during setup.
+Defaults are 201 points, five cases, one excluded full solve and ten measured
+solves per case/treatment. Every solve resets the same initial full field and
+controller. Kernels are reused, methods alternate order, and all measured values
+are retained. See the report for effective controls and timing boundaries.
 
-The timer includes synchronized solver work, the identical monitor, timestep
-controller and rejected attempts. Problem setup, final audits, writing and
-plotting are outside it. All solves run sequentially with one BLAS thread.
-The report gives minimum, maximum and mean of all ten measured times, and
-shows every sample. `timings.csv` retains 100 rows; `summary.json` also retains
-the excluded runs and every accepted/trial history. Failed runs stay visible.
+For a smaller independent run, use `--cases shock35 --points 51 --runs 2`
+and a separate `--output` path within this study. The driver still changes no
+production source. Re-running today tests today's implementation; it does not
+recreate the historical source revision merely by reusing its settings.
 
-The benchmark explicitly pins its measured CFL 20, maximum CFL 500, SER
-exponent 1, timestep growth 1.2, and inner cap 8, independently of later changes
-to the readable steady-example defaults.
+## Browser verification
 
-The same five physical cases are used: supersonic exit, shocks at 35% and 70%
-of the divergent section, sonic-throat/subsonic-exit limiting flow, and fully
-subsonic flow. Both methods receive the same perfect-gas backend, corrected
-flux, ordinary safe Van Leer, geometry, boundary data and initial full field.
-Analytic fields are used for verification, never as initial guesses.
-
-## Figures and reports
-
-- `convergence_histories.png/.pdf`: five subplots with one actual measured
-  trajectory per method/backpressure. Each is the median-duration measured
-  run for that method/case; curves are not averages or best-run selections.
-- `pressure_distributions.png/.pdf`: final pressures from those same runs,
-  plus analytic reference curves.
-- `timings.png/.pdf`: all samples, mean markers and min?max whiskers.
-
-Regenerate the figures and root report without solving:
+With an existing Python environment containing Playwright and installed Edge:
 
 ```powershell
-poetry run python -m development.roberto.BC_residual.scripts.compare_implicit --plot-only --no-show
+python -B development/roberto/BC_residual/scripts/audit_html.py
 ```
 
-Use `--cases shock35`, `--points 51`, or `--runs 2` for a smaller check, choosing
-an alternate `--output development/roberto/BC_residual/outputs/small_mesh`
-to preserve the main dataset. Custom outputs generate separately named root
-reports. The default report is `IMPLICIT_REPORT.md`.
-
-## Scope and checks
-
-The coupled system adds six algebraic variables/rows and no ghost storage.
-The source block-assembly/linear-solve functions are reused through separate
-read-only closure bindings for the enlarged cell count. Full physical cell
-ordering retains the width-two stencil. This preserves source algorithms
-rather than replacing them with a different library. The Newton stopping
-formula applies to all unknowns of each system, including ghosts when coupled.
-
-The surrounding comparison loop uses a common fixed-scale steady RMS target
-rather than the standalone source driver's state-dependent SSR/plateau rule.
-Counts may consequently differ from that standalone example (56 versus 58 in
-the subsonic case). This does not change the source timestep update. Original
-steady residual, mass conservation and analytic accuracy are audited after
-every solve, outside timing. The known sonic-limit analytic error remains.
-
-The pytest suite is reserved for production `src/` code. Development-only
-boundary formulation tests have been removed. The benchmark retains its
-original-residual, algebraic-boundary, mass-conservation, analytic and source-hash
-audits; recorded reports describe the checks performed at measurement time.
+The audit copies only the HTML to an isolated folder, disables networking and
+checks tabs, themes, numerical plot arrays, timing samples, downloads, deep links
+and continuous equation layout. Audit files and browser state stay in `outputs/`.

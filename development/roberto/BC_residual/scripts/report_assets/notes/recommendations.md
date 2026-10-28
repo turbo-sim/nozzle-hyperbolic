@@ -34,7 +34,7 @@ The right default can differ by physical boundary model.
 These are design recommendations, not new two-fluid results. The completed
 [Euler benchmark](IMPLICIT_REPORT.md) found all 100 measured solves converged,
 with essentially identical histories/fields and coupled mean costs about
-4.5?6.6% higher. That modest Euler overhead is not a performance prediction for
+4.5-6.6% higher. That modest Euler overhead is not a performance prediction for
 a two-fluid system or a general EOS. No source implementation changes are
 proposed as part of writing this note.
 
@@ -276,10 +276,12 @@ For a clean first implementation:
 5. Verify boundary residuals, AD derivatives, reduced/coupled timestep agreement
    where elimination is regular, and deliberately invalid/no-local-root cases.
 
-The current experimental closure adapter is a way to study the question
-without editing `src`, **not** the production architecture I recommend. A later
-refactor should expose explicit spatial/boundary assembly interfaces rather
-than depend on private Python closure layout.
+The original benchmark used a read-only closure adapter to study the question
+without editing `src`. The current adapter has since migrated to public
+physical-residual and solver-metadata interfaces, as described in the theory
+tab. This compatibility migration did not rerun the 100-sample benchmark.
+A production formulation selector around a canonical physical boundary residual
+remains a recommendation; it is not implemented by this reporting change.
 
 I would not initially add per-boundary mixed strategies, automatic mode changes
 halfway through a solve, or a broad `auto` selector. They multiply packing,

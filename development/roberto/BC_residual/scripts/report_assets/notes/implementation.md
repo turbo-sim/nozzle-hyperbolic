@@ -140,7 +140,7 @@ Unknowns and residual rows are arranged in physical cell order: inlet ghost,
 interior cells, outlet ghost, with three variables per cell. Both new boundary
 rows depend on at most their ghost and the nearest two physical cells. Thus
 the source width-two coloring and block-banded algorithms remain valid. Only
-cell-count/padding bindings change. Extra ghost cells alter superblock grouping
+cell-count/padding metadata change. Extra ghost cells alter superblock grouping
 and can change floating-point roundoff; identical trajectories are not assumed.
 
 Interior rows retain the exact source form
@@ -151,12 +151,36 @@ while retaining **old interior values** for the storage term. It must not lag
 the ghosts in time. A dedicated dependency test and a full source-timestep
 parity test guard this distinction.
 
-The read-only adapter creates separate function objects from existing factory
-closures, substituting the coupled residual and enlarged row count. Original
-functions, closure cells and source files are not mutated. Dense AD and dense
-linear solves are used only as independent verification, never as the measured
-coupled solver. Eight focused checks span odd/even sizes and verify that the
-colored stencil and block solve remain valid.
+At the time of the reported 100 measured solves, the read-only adapter created
+separate function objects from existing factory closures, substituting the
+coupled residual and enlarged row count. Original functions, closure cells and
+source files were not mutated. Dense AD and dense linear solves were used only
+as independent verification, never as the measured coupled solver. Eight
+focused checks spanned odd/even sizes and verified the colored stencil and
+block solve. These measurement-time implementation details and retained timing
+data remain historical provenance.
+
+The current adapter instead uses explicit production interfaces. With
+`return_operators=True`, the nozzle factory publishes
+`physical_residual(U_new, U_old, dt)` for full `(N,3)` states, the unchanged
+`inlet_boundary`/`outlet_boundary` maps, and `solver_metadata`. The returned
+step also publishes that numerical metadata. The physical operator applies no
+boundary map; the adapter supplies current ghost slots and old physical slots
+explicitly. It assembles the enlarged Jacobian and Newton direction through the
+shared `make_block_operators` engine, without closure inspection, function
+cloning or duplicated physical/linear-solver formulas. Existing four/five-return
+factory tuple contracts remain unchanged.
+
+A separate 21-point subsonic compatibility smoke ran one excluded and one
+retained cold solve per method after this migration. Both methods reached the
+original spatial/boundary targets in 21 accepted updates; their final pressure
+fields differed by at most $3.2\times10^{-10}$ Pa. An independent dense
+linearization verified the augmented banded correction, and dependency checks
+verified current-ghost flux coupling and zero old-ghost storage dependence.
+See the [smoke log](../euler_annular/outputs/implementation_baseline/boundary_adapter_smoke.log)
+and [raw audits](../euler_annular/outputs/implementation_baseline/boundary_adapter_smoke.json).
+The original 100 timing samples were not rerun; this small compatibility check
+makes no new performance or five-case robustness claim.
 
 The common steady monitor uses each actual full state, identical spatial/EOS
 code and the same fixed equation scales. It does not call the internal inlet
