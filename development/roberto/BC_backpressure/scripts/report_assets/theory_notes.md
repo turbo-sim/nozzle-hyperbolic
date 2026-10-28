@@ -1,6 +1,6 @@
 # Current and pressure-wave outlet boundary conditions
 
-The report's [Theory & equations page](THEORY.html) presents the complete
+The report's [Theory & equations page](#theory) presents the complete
 equations as continuous typeset blocks. This note summarizes the implemented
 model and controls without changing the imported source.
 

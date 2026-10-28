@@ -14,14 +14,14 @@ window.REPORT_BUILD=@@BUILD@@;
 <style>@@CSS@@</style>
 @@HEAD_EXTRA@@
 </head>
-<body data-page="@@PAGE@@">
+<body data-page="uniform">
 <header class="header">
-  <a class="brand" href="REPORT.html" data-page-link><svg viewBox="0 0 40 40" fill="none" aria-hidden="true"><path d="M3 6C13 6 13 15 20 15s7-9 17-9M3 34c10 0 10-9 17-9s7 9 17 9" stroke="currentColor" stroke-width="2"/><path d="M4 20h31m-5-4 5 4-5 4" stroke="currentColor" stroke-width="1.5"/></svg>Euler nozzle <small>Backpressure boundary study</small></a>
-  <nav class="page-switch" aria-label="Report pages"><a href="REPORT.html" data-page-link @@UNIFORM_CURRENT@@>01 &middot; Uniform start</a><a href="ADAPTED.html" data-page-link @@ADAPTED_CURRENT@@>02 &middot; Adapted start</a><a href="THEORY.html" data-page-link @@THEORY_CURRENT@@>03 &middot; Theory &amp; equations</a></nav>
+  <a class="brand" href="#uniform"><svg viewBox="0 0 40 40" fill="none" aria-hidden="true"><path d="M3 6C13 6 13 15 20 15s7-9 17-9M3 34c10 0 10-9 17-9s7 9 17 9" stroke="currentColor" stroke-width="2"/><path d="M4 20h31m-5-4 5 4-5 4" stroke="currentColor" stroke-width="1.5"/></svg>Euler nozzle <small>Backpressure boundary study</small></a>
+  <nav class="page-switch" aria-label="Report pages"><a href="#uniform" data-report-tab="uniform" aria-current="page">01 &middot; Uniform start</a><a href="#adapted" data-report-tab="adapted">02 &middot; Adapted start</a><a href="#theory" data-report-tab="theory">03 &middot; Theory &amp; equations</a></nav>
   <div class="header-actions"><button id="print-report" type="button">Print / PDF</button><div class="theme-switch" role="group" aria-label="Color theme"><button data-theme-choice="light" aria-pressed="true">Light</button><button data-theme-choice="dark" aria-pressed="false">Dark</button></div></div>
 </header>
-<aside class="sidebar"><div class="eyebrow">@@SIDEBAR_LABEL@@</div><nav aria-label="On this page">@@NAV@@</nav><div class="sidebar-foot">Offline document<br>Fixed numerical evidence.<br>Interactive presentation.<br><a href="THEORY.md">Theory note</a></div></aside>
-<main class="@@MAIN_CLASS@@">
+<aside class="sidebar"><div class="eyebrow"><span id="sidebar-label">Uniform start</span></div><nav aria-label="On this page">@@NAV@@</nav><div class="sidebar-foot">Offline document<br>Fixed numerical evidence.<br>Interactive presentation.<br><a href="#theory">Theory &amp; equations</a></div></aside>
+<main class="results-main">
 <noscript><p class="noscript">Enable JavaScript for interactive figures and locally rendered equations. No network connection is required.</p></noscript>
 @@BODY@@
 <footer><span>Euler nozzle &middot; Perfect-gas boundary verification</span><span>Self-contained report &middot; <button id="license-button" type="button" style="padding:0;border:0;background:none;font-size:11px;color:var(--accent);text-decoration:underline">Embedded library licenses</button></span></footer>

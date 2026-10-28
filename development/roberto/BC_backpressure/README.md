@@ -1,110 +1,85 @@
-# Backpressure boundary-condition comparison
+# Backpressure boundary-condition study
 
-Open [REPORT.html](REPORT.html). Three linked, offline pages share light/dark themes:
+Open **[REPORT.html](REPORT.html)**. This is one standalone, offline HTML file:
+copying it alone is sufficient to read the complete study, use the interactive
+plots and render the equations. It embeds the numerical results, audit evidence,
+styles, Plotly and MathJax. Light and dark themes are available.
 
-1. **Uniform initialization**: the two outlet treatments start from uniform
-   stagnation conditions, $p=200$ kPa, $T=300$ K and $u=0$ m/s.
-2. **[Adapted initialization](ADAPTED.html)**: both start from the same numerical
-   adapted expansion, obtained by implicit integration.
-3. **[Theory and equations](THEORY.html)**: the two outlet laws, finite-volume
-   assembly, implicit corrections and CFL controller. See also [THEORY.md](THEORY.md).
+The report has three internal tabs:
 
-Perfect-gas air flows through the existing 0.2 m symmetric nozzle with
-exit/throat area ratio two, reservoir pressure 200 kPa and temperature 300 K.
-Two backpressures put analytical shocks at 35% and 70% of the divergent section.
-Analytical profiles define/check cases; they do not initialize the numerical fields.
-The mesh contains 201 points, including two algebraic ghosts (597 interior unknowns).
+1. **Uniform start**: current and pressure-wave outlet treatments initialized
+   at uniform stagnation conditions, compared against analytical shocked profiles.
+2. **Adapted start**: the same comparison initialized from a numerical adapted
+   expansion, testing whether the imposed backpressure can initiate shock entry.
+3. **Theory and equations**: physical setup, Euler balances, both outlet laws,
+   wall safeguard, implicit integration, CFL control, verification criteria and
+   limitations. The original implementation note is included as a supplementary
+   source-text appendix.
 
-Only two outlets are compared with otherwise matched implicit Euler integration:
+Each results tab includes the solver settings, residual and actual accepted CFL
+histories, final pressure/Mach profiles, verification outcomes and downloadable
+CSV. The saved evidence contains eight comparisons on the same 201-point nozzle
+mesh with a perfect-gas property backend. No numerical solutions were rerun
+when consolidating the presentation.
 
-- The current Mach-selected pressure/extrapolation boundary.
-- A nonlinear pressure-wave boundary flux with a temporary one-way wall safeguard.
+## Directory organization
 
-Both use corrected FVS interior fluxes, ordinary MUSCL Van Leer, colored AD and
-banded linear solves. The new law replaces the final numerical flux with the
-physical incoming-wave trace flux when necessary. Its wall treatment is an
-iteration safeguard, not a model for exterior-reservoir backflow; it must be
-inactive at the verified final solution.
+```text
+BC_backpressure/
+  README.md             contents, organization and reproduction commands
+  REPORT.html           complete standalone report, with three internal tabs
+  scripts/              experimental implementation, drivers and audits
+    report_assets/      editable templates, styling, theory note and vendor libraries
+  outputs/              ignored numerical records, source snapshots and audit artifacts
+```
 
-## Recorded outcomes
+The two root files are the human-facing entry points. Scripts remain separate
+so the study can be reproduced and the report rebuilt. Generated working data
+stay under `outputs/`; the final HTML report deliberately lives at the study root.
 
-| Initialization | Case | Current BC updates / shock verified | Pressure-wave BC updates / shock verified |
-|---|---|---|---|
-| Uniform stagnation | shock35 | 148 / yes | 135 / yes |
-| Uniform stagnation | shock70 | 252 / yes | 233 / yes |
-| Adapted expansion | shock35 | 0 / no | 869 / yes |
-| Adapted expansion | shock70 | 0 / no | 642 / yes |
+| Script | Purpose |
+|---|---|
+| `outlet_laws.py` | Current and experimental pressure-wave/wall outlet laws |
+| `problem.py` | Imported source physics with study-local boundary-flux assembly |
+| `time_integration.py` | Matched fixed-growth CFL control and verified implicit steps |
+| `run_study.py`, `launch.py` | Numerical comparisons and source-snapshot isolation |
+| `report.py` | Build the single HTML file from saved results; no numerical solves |
+| `audit_outlet_laws.py` | Local conservation, wave selection, JIT and AD checks |
+| `audit_html.py` | Check an isolated copy of the HTML offline in headless Edge |
 
-Both treatments work from rest in these two cases. The pressure-wave treatment's
-main demonstrated benefit is admitting a shock from an initially supersonic
-exit, where the current outlet ignores the imposed pressure and remains at a
-valid discrete supersonic root. A small residual alone does not verify branch
-selection. The new outlet is not uniformly more accurate: its maximum normalized
-mean error is smaller for shock35 and slightly larger for shock70, all below
-0.006 for the verified endpoints. No general speed or robustness guarantee
-follows from this single mesh and pair of backpressures.
-
-Saved-state and source-hash checks passed for all eight records; all 2,279
-accepted steps satisfy the strict inner criteria. The 22 local boundary checks
-and three-page browser audit also passed, including both themes, exact plotted
-residual/CFL arrays and equation blocks without internal scrolling.
-
-## CFL and inner Newton settings
-
-The study adopts the conservative recommendation from the
-[annular CFL investigation](../euler_annular/cfl_investigation/REPORT.md):
-initial CFL **0.2**, accepted-step CFL growth **1.2**, rejected-trial shrink
-**0.5**, maximum CFL $10^6$, a maximum of **eight Newton corrections** and
-**twelve retries** per update. These are fixed-growth CFL controls, with no SER
-or work-threshold ramp. Growth applies to CFL, not directly to dimensional dt.
-
-The unchanged nozzle full-step Newton engine is used for both variants;
-the annular backtracking engine is not substituted. Both relative Newton
-correction and fixed-storage-scaled implicit residual must be below $10^{-10}$.
-The original steady residual target remains $10^{-8}$. Full-state increment
-limits remain 0.2 for pressure, 0.1 for enthalpy and 0.2 for scaled velocity.
-The study-local controller records rejected work and every accepted actual CFL.
-
-The earlier SER/one-correction results are superseded in the report. The two
-initializations and both outlets have been rerun with these matched settings.
-Single recorded durations include checked-step first-call JIT compilation;
-other first-call costs are recorded separately. This is not a speed benchmark.
-
-## Reproduce
+## Rebuild the report
 
 From the repository root in the existing Poetry environment:
+
+```powershell
+poetry run python -B -m development.roberto.BC_backpressure.scripts.report
+```
+
+This reads `outputs/recommended_cfl/summary.json` and the recorded audits, then
+replaces `REPORT.html`. It does not import or execute the numerical solver.
+Use `--output <path-inside-this-study>` to select another saved run directory.
+The HTML itself requires none of these supporting files for viewing.
+
+## Run or audit the numerical study
 
 ```powershell
 poetry run python -B -m development.roberto.BC_backpressure.scripts.launch
 poetry run python -B -m development.roberto.BC_backpressure.scripts.launch --resume
 poetry run python -B -m development.roberto.BC_backpressure.scripts.launch --audit-only
-poetry run python -B -m development.roberto.BC_backpressure.scripts.launch --plot-only
 poetry run python -B -m development.roberto.BC_backpressure.scripts.audit_outlet_laws
 ```
 
-The default output is `outputs/recommended_cfl/`; use `--resume` when it already
-exists, or `--output` with a new path inside this study for a fresh run.
-`--plot-only` regenerates all three HTML pages without solving.
-`--audit-only` independently reevaluates saved fields, seeds, Newton acceptance
-and CFL records, then rebuilds the reports. The launcher snapshots working source
-on the first run and reuses it on resume. Production and other study directories
-remain read-only; `-B` prevents external bytecode writes.
+Use `--resume` when the default results already exist, or select a new study-local
+`--output` directory for a fresh run. The launcher records and reuses a working
+source snapshot; production source and other studies remain unchanged. Numerical
+settings, findings and their interpretation are documented in the report.
 
-| Location | Purpose |
-|---|---|
-| `scripts/outlet_laws.py` | Current outlet and pressure-wave/wall traces |
-| `scripts/problem.py` | Reused FVM physics, local boundary-flux assembly and implicit-defect monitor |
-| `scripts/time_integration.py` | Fixed-growth CFL controller and verified step acceptance |
-| `scripts/run_study.py` | Matched starts, eight comparisons and saved-state audit |
-| `scripts/launch.py` | Source snapshot and isolated child imports |
-| `scripts/audit_html.py` | Optional headless Edge audit using an existing Playwright environment |
-| `scripts/audit_outlet_laws.py` | Local conservation, wave-selection and JIT/AD checks |
-| `scripts/report.py`, `scripts/report_assets/` | Offline themed reports, plots and equations |
-| `outputs/recommended_cfl/` | Eight comparison records, controller histories, audits and source snapshot |
+The browser audit needs an existing Python environment with Playwright and Edge:
 
-Generated outputs follow the repository ignore rules. The committed HTML embeds
-its displayed numerical data, audit evidence and local plotting/equation libraries.
-Source assembly requires the current factory's public physical-residual,
-boundary and solver-metadata operators. Source fingerprints identify that
-working-tree baseline, which includes changes outside this study; this study's
-commit does not include or alter those unrelated changes.
+```powershell
+python -B development/roberto/BC_backpressure/scripts/audit_html.py
+```
+
+It copies only `REPORT.html` to an isolated directory, disables networking, and
+checks all three tabs, both themes, plot arrays, controls, CSV downloads,
+deep links and equation layout. Its browser state and evidence stay in `outputs/`.

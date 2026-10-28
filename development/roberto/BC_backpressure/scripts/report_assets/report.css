@@ -107,3 +107,9 @@ footer {margin-top:39px;padding-top:18px;border-top:1px solid var(--line);displa
 @media(max-width:1280px) {.header{padding:0 19px;gap:17px}.brand small{display:none}.sidebar{width:185px;padding:25px 12px 18px}main{margin-left:185px;padding:30px 25px 48px}h1{font-size:32px}.plot{height:390px}}
 @media(prefers-reduced-motion:reduce) {html{scroll-behavior:auto}*,*::before,*::after{animation:none!important;transition:none!important}}
 @media print {.header,.sidebar,.controls,.modebar{display:none!important}main{margin:0;padding:0;max-width:none}:root{--canvas:#fff;--panel:#fff;--ink:#18314d;--muted:#62758b;--line:#d9e2ee}.panel,.math-display{break-inside:avoid}.theory-content{max-width:none}body{min-width:0;font-size:11px}h1{font-size:28px}h2{font-size:21px}footer{font-size:10px}}
+
+[hidden] {display:none!important}
+[data-report-nav] {display:flex;flex-direction:column;gap:5px}
+.supplementary-note {margin-top:28px}
+.printing [data-report-page] {display:block!important}
+@media print {[data-report-page] {display:block!important;break-before:page}[data-report-page]:first-child{break-before:auto}}

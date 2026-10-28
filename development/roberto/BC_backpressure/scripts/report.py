@@ -1,4 +1,4 @@
-"""Build the three-page, offline implicit-Euler boundary-condition report.
+"""Build the single-file, offline implicit-Euler boundary-condition report.
 
 Only current/source and pressure-wave outlet records enter the presentation.
 Numerical arrays and histories are read-only. Plotly and MathJax are vendored
@@ -217,210 +217,213 @@ def panels(report, kind):
     )
 
 
-def shell(page, body, build, css, scripts, licenses, head=""):
-    template = (ASSETS / "shell.html").read_text(encoding="utf-8")
-    results = page != "theory"
-    nav = navigation(
-        [
-            ("case", "Case & setup"),
-            ("method", "Implicit solver settings"),
-            ("convergence", "Residual histories"),
-            ("cfl", "Actual CFL histories"),
-            ("pressure", "Pressure profiles"),
-            ("mach", "Mach profiles"),
-            ("outcomes", "Verification outcomes"),
-            ("audit", "Audit & provenance"),
-        ]
-        if results
-        else [
-            ("balances", "Euler balances"),
-            ("current", "Current outlet"),
-            ("wave", "Pressure-wave outlet"),
-            ("wall", "One-way wall treatment"),
-            ("flux", "Boundary-face flux"),
-            ("implicit", "Implicit corrections"),
-            ("controller", "Timestep & CFL"),
-            ("verification", "Verification & limits"),
-        ]
-    )
-    values = {
-        "TITLE": (
-            (
-                "Uniform initialization"
-                if page == "uniform"
-                else "Adapted initialization"
-            )
-            if results
-            else "Theory and equations"
+def result_body(data, initialization):
+    """Reuse one results template for both initializations."""
+    result_body = (ASSETS / "results.html").read_text(encoding="utf-8")
+    for kind in ("residual", "cfl", "pressure", "mach"):
+        result_body = result_body.replace(
+            f"@@{kind.upper()}_PANELS@@", panels(data, kind)
+        )
+    uniform = initialization == "uniform"
+    replacements = {
+        "HEADING": (
+            "Uniform stagnation initialization"
+            if uniform
+            else "From an adapted expansion to an internal shock"
         ),
-        "PAGE": page,
-        "BUILD": json_safe(build),
-        "CSS": css,
-        "HEAD_EXTRA": head,
-        "UNIFORM_CURRENT": 'aria-current="page"' if page == "uniform" else "",
-        "ADAPTED_CURRENT": 'aria-current="page"' if page == "adapted" else "",
-        "THEORY_CURRENT": "" if results else 'aria-current="page"',
-        "SIDEBAR_LABEL": "Case & results" if results else "Theory & equations",
-        "NAV": nav,
-        "MAIN_CLASS": "results-main" if results else "theory-main",
-        "BODY": body,
-        "SCRIPTS": scripts,
-        "LICENSES": html.escape(licenses),
+        "INTRO": (
+            "A uniform field at reservoir pressure and enthalpy, with zero velocity, initializes both backpressure cases. Algebraic ghost values are completed by each boundary law."
+            if uniform
+            else "The same numerically converged adapted field initializes both backpressure cases. This isolates whether each outlet can admit an upstream-moving compression from a supersonic exit."
+        ),
+        "INITIAL_LABEL": "Uniform stagnation" if uniform else "Adapted",
+        "INITIAL_SETUP": (
+            "Every solve receives identical uniform interior coordinates: p = 200 kPa, T = 300 K and u = 0 m/s."
+            if uniform
+            else "Every solve receives the same copied numerical adapted interior coordinates."
+        ),
+        "HISTORY_NOTE": (
+            "Each curve includes the common uniform initial state and all accepted updates. Compare residual reduction together with the verified final shock branch."
+            if uniform
+            else "The source control is a single point at index zero: it stops at the initial Euler root without developing a shock. No source CFL curve exists because no timestep is accepted."
+        ),
     }
-    for key, value in values.items():
-        template = template.replace(f"@@{key}@@", value)
-    if re.search(r"@@[A-Z_]+@@", template):
-        raise ValueError("An unresolved template marker remains")
-    return template
+    for key, value in replacements.items():
+        result_body = result_body.replace(f"@@{key}@@", value)
+    return result_body
+
+
+def scoped_body(body, prefix):
+    """Give every panel a unique ID and keep local navigation inside this file."""
+    body = body.replace('href="THEORY.html"', 'href="#theory"')
+    body = body.replace('href="REPORT.html"', 'href="#uniform"')
+    body = re.sub(r'<a href="THEORY.md">.*?</a> or ', "", body)
+    ids = set(re.findall(r'\bid="([^"]+)"', body))
+    body = re.sub(r'\bid="([^"]+)"', lambda m: f'id="{prefix}-{m[1]}"', body)
+    return re.sub(
+        r'href="#([^"]+)"',
+        lambda m: f'href="#{prefix}-{m[1]}"' if m[1] in ids else m[0],
+        body,
+    )
 
 
 def render(report, output: Path, destination: Path):
-    """Create REPORT.html, ADAPTED.html, THEORY.html, outcome CSVs and rendering manifest."""
+    """Generate one offline REPORT.html containing both studies and all theory."""
     output, destination = Path(output).resolve(), Path(destination).resolve()
     if not output.is_relative_to(STUDY) or not destination.is_relative_to(STUDY):
         raise ValueError("All report artifacts must remain inside BC_backpressure")
-    output.mkdir(parents=True, exist_ok=True)
     raw_summary = (output / "summary.json").read_bytes()
-    summary_hash = digest(raw_summary)
     if json.loads(raw_summary) != report:
         raise ValueError("Passed report differs from the saved numerical summary")
-    data = selected_report(report, "uniform")
+    summary_hash = digest(raw_summary)
     verification, audit_hashes = audit_bundle(output, summary_hash)
-    csv_text = outcome_csv(data)
-    css = (ASSETS / "report.css").read_text(encoding="utf-8")
-    app = (ASSETS / "report.js").read_text(encoding="utf-8")
-    vendor = ASSETS / "vendor"
-    plotly = gzip.decompress((vendor / "plotly-2.35.2.min.js.gz").read_bytes()).decode(
-        "utf-8"
-    )
-    mathjax = gzip.decompress(
-        (vendor / "mathjax-3.2.2-tex-svg.js.gz").read_bytes()
-    ).decode("utf-8")
     provenance = {
         "summary_sha256": summary_hash,
         "audit_sha256": audit_hashes,
-        "retained_solution_and_history_sha256": data["metadata"].get(
-            "solution_and_history_sha256"
-        ),
         "renderer_executes_solves": False,
         "source_code_read_only": True,
         "production_source_sha256": report["source_before"],
         "shared_imports_sha256": report["shared_before"],
     }
     build = {
-        "summary_sha256": summary_hash,
+        **provenance,
         "renderer_sha256": digest(Path(__file__).read_bytes()),
-        "audit_sha256": audit_hashes,
-        "scope": "Two outlet laws; uniform and adapted starts; implicit Euler only",
+        "scope": "Single offline document; two outlet laws; uniform and adapted starts; implicit Euler only",
         "library_versions": {"plotly_js": "2.35.2", "mathjax": "3.2.2"},
     }
-    common_script = f"<script>{script_safe(app)}</script>"
-    pages = []
-    for initialization, filename in (
-        ("uniform", destination.name),
-        ("adapted", "ADAPTED.html"),
-    ):
+    bundles, bodies = {}, []
+    csv_hashes = {}
+    for initialization in ("uniform", "adapted"):
         data = selected_report(report, initialization)
         csv_text = outcome_csv(data)
         (output / f"outcomes_{initialization}.csv").write_text(
             csv_text, encoding="utf-8"
         )
-        bundle = {
-            "report": data,
-            "verification": verification,
-            "csv": csv_text,
-            "provenance": provenance,
-        }
-        result_body = (ASSETS / "results.html").read_text(encoding="utf-8")
-        for kind in ("residual", "cfl", "pressure", "mach"):
-            result_body = result_body.replace(
-                f"@@{kind.upper()}_PANELS@@", panels(data, kind)
-            )
-        uniform = initialization == "uniform"
-        replacements = {
-            "HEADING": (
-                "Uniform stagnation initialization"
-                if uniform
-                else "From an adapted expansion to an internal shock"
-            ),
-            "INTRO": (
-                "A uniform field at reservoir pressure and enthalpy, with zero velocity, initializes both backpressure cases. Algebraic ghost values are completed by each boundary law."
-                if uniform
-                else "The same numerically converged adapted field initializes both backpressure cases. This isolates whether each outlet can admit an upstream-moving compression from a supersonic exit."
-            ),
-            "INITIAL_LABEL": "Uniform stagnation" if uniform else "Adapted",
-            "INITIAL_SETUP": (
-                "Every solve receives identical uniform interior coordinates: p = 200 kPa, T = 300 K and u = 0 m/s."
-                if uniform
-                else "Every solve receives the same copied numerical adapted interior coordinates."
-            ),
-            "HISTORY_NOTE": (
-                "Each curve includes the common uniform initial state and all accepted updates. Compare residual reduction together with the verified final shock branch."
-                if uniform
-                else "The source control is a single point at index zero: it stops at the initial Euler root without developing a shock. No source CFL curve exists because no timestep is accepted."
-            ),
-        }
-        for key, value in replacements.items():
-            result_body = result_body.replace(f"@@{key}@@", value)
-        result_scripts = (
-            f'<script id="report-data" type="application/json">{json_safe(bundle)}</script>'
-            f"<script>{script_safe(plotly)}</script>{common_script}"
+        csv_hashes[initialization] = digest(csv_text.encode("utf-8"))
+        bundles[initialization] = dict(
+            report=data, verification=verification, csv=csv_text, provenance=provenance
         )
-        content = shell(
-            initialization,
-            result_body,
-            build,
-            css,
-            result_scripts,
-            "Plotly.js 2.35.2\n\n"
-            + (vendor / "PLOTLY_LICENSE.txt").read_text(encoding="utf-8"),
+        body = scoped_body(result_body(data, initialization), initialization)
+        hidden = "" if initialization == "uniform" else " hidden"
+        bodies.append(
+            f'<div id="{initialization}" data-report-page="{initialization}"{hidden}>{body}</div>'
         )
-        pages.append((destination.with_name(filename), content))
+    theory = scoped_body((ASSETS / "theory.html").read_text(encoding="utf-8"), "theory")
+    note = (ASSETS / "theory_notes.md").read_text(encoding="utf-8")
+    theory += (
+        '<details class="supplementary-note"><summary>Supplementary implementation note (Markdown source)</summary>'
+        f'<div class="details-body"><pre>{html.escape(note)}</pre></div></details>'
+    )
+    bodies.append(f'<div id="theory" data-report-page="theory" hidden>{theory}</div>')
+    result_nav = [
+        ("case", "Case & setup"),
+        ("method", "Implicit solver settings"),
+        ("convergence", "Residual histories"),
+        ("cfl", "Actual CFL histories"),
+        ("pressure", "Pressure profiles"),
+        ("mach", "Mach profiles"),
+        ("outcomes", "Verification outcomes"),
+        ("audit", "Audit & provenance"),
+    ]
+    theory_nav = [
+        ("balances", "Euler balances"),
+        ("current", "Current outlet"),
+        ("wave", "Pressure-wave outlet"),
+        ("wall", "One-way wall treatment"),
+        ("flux", "Boundary-face flux"),
+        ("implicit", "Implicit corrections"),
+        ("controller", "Timestep & CFL"),
+        ("verification", "Verification & limits"),
+    ]
+    nav = "".join(
+        f'<div data-report-nav="{page}"'
+        + ("" if page == "uniform" else " hidden")
+        + ">"
+        + navigation([(f"{page}-{key}", label) for key, label in items])
+        + "</div>"
+        for page, items in (
+            ("uniform", result_nav),
+            ("adapted", result_nav),
+            ("theory", theory_nav),
+        )
+    )
+    vendor = ASSETS / "vendor"
+
+    def runtime(name):
+        return script_safe(
+            gzip.decompress((vendor / name).read_bytes()).decode("utf-8")
+        )
+
     math_config = """<script>
 window.MathJax={loader:{load:[]},tex:{inlineMath:[['$','$']],displayMath:[['$$','$$']],processEscapes:true,packages:['base','ams','newcommand','noundefined','configmacros']},svg:{fontCache:'local'},options:{enableMenu:false},startup:{pageReady:()=>MathJax.startup.defaultPageReady().then(()=>{document.body.dataset.theoryReady='true';window.dispatchEvent(new CustomEvent('backpressure-theory-ready'));})}};
 </script>"""
-    theory_body = (ASSETS / "theory.html").read_text(encoding="utf-8")
-    theory = shell(
-        "theory",
-        theory_body,
-        build,
-        css,
-        common_script + f'<script id="MathJax-script">{script_safe(mathjax)}</script>',
-        "MathJax 3.2.2\n\n"
-        + (vendor / "MATHJAX_LICENSE.txt").read_text(encoding="utf-8"),
-        math_config,
+    app = (ASSETS / "report.js").read_text(encoding="utf-8")
+    scripts = (
+        f'<script id="report-data" type="application/json">{json_safe(bundles)}</script>'
+        f'<script>{runtime("plotly-2.35.2.min.js.gz")}</script>'
+        f"<script>{script_safe(app)}</script>"
+        f'<script id="MathJax-script">{runtime("mathjax-3.2.2-tex-svg.js.gz")}</script>'
     )
-    theory_path = destination.with_name("THEORY.html")
-    pages.append((theory_path, theory))
-    for path, content in pages:
-        if re.search(r"<(?:script|img)[^>]+src\s*=", content, re.I):
-            raise ValueError("Report pages must not load external scripts or images")
-        path.write_bytes(content.encode("utf-8"))
+    values = {
+        "TITLE": "Backpressure boundary-condition verification",
+        "BUILD": json_safe(build),
+        "CSS": (ASSETS / "report.css").read_text(encoding="utf-8"),
+        "HEAD_EXTRA": math_config,
+        "NAV": nav,
+        "BODY": "\n".join(bodies),
+        "SCRIPTS": scripts,
+        "LICENSES": html.escape(
+            "Plotly.js 2.35.2\n\n"
+            + (vendor / "PLOTLY_LICENSE.txt").read_text(encoding="utf-8")
+            + "\n\nMathJax 3.2.2\n\n"
+            + (vendor / "MATHJAX_LICENSE.txt").read_text(encoding="utf-8")
+        ),
+    }
+    content = (ASSETS / "shell.html").read_text(encoding="utf-8")
+    for key, value in values.items():
+        content = content.replace(f"@@{key}@@", value)
+    if re.search(r"@@[A-Z_]+@@", content):
+        raise ValueError("Unresolved report template marker")
+    if re.search(r"<(?:script|img)[^>]+src\s*=", content, re.I):
+        raise ValueError("Standalone report must not load external scripts or images")
+    destination.write_bytes(content.encode("utf-8"))
     if (output / "summary.json").read_bytes() != raw_summary:
-        raise ValueError("Numerical data changed while the report was rendered")
+        raise ValueError("Numerical data changed while rendering")
     manifest = {
         **build,
         "input_summary_matches_retained_runs": True,
-        "n_cases": len(data["cases"]),
+        "n_cases": 2,
         "n_saved_implicit_runs": 8,
-        "renderer_executes_solves": False,
+        "standalone_html": True,
         "assets_sha256": {
             p.relative_to(ASSETS).as_posix(): digest(p.read_bytes())
             for p in ASSETS.rglob("*")
             if p.is_file()
         },
         "artifacts": {
-            p.name: {"sha256": digest(p.read_bytes()), "bytes": p.stat().st_size}
-            for p, _ in pages
+            destination.name: dict(
+                sha256=digest(destination.read_bytes()),
+                bytes=destination.stat().st_size,
+            )
         },
-        "outcome_csv_sha256": digest(csv_text.encode("utf-8")),
+        "outcome_csv_sha256": csv_hashes,
     }
     manifest_path = output / "html_report_manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-    return {
-        "report": destination,
-        "adapted": destination.with_name("ADAPTED.html"),
-        "theory": theory_path,
-        "csv": [output / "outcomes_uniform.csv", output / "outcomes_adapted.csv"],
-        "manifest": manifest_path,
-    }
+    return dict(report=destination, manifest=manifest_path)
+
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--output", type=Path, default=STUDY / "outputs" / "recommended_cfl"
+    )
+    args = parser.parse_args()
+    output = args.output.resolve()
+    render(
+        json.loads((output / "summary.json").read_text(encoding="utf-8")),
+        output,
+        STUDY / "REPORT.html",
+    )

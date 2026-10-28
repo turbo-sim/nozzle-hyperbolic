@@ -1,4 +1,4 @@
-"""Verify generated report pages in headless Edge (optional Playwright tool).
+"""Verify the standalone report in headless Edge (optional Playwright tool).
 
 Run with a Python environment already containing playwright. All browser state,
 audit evidence and screenshots remain under this study's ignored outputs/.
@@ -28,12 +28,17 @@ def main():
         )
         page = browser.pages[0]
         page.on("pageerror", lambda error: errors.append(str(error)))
-        for filename, initialization in (
-            ("REPORT.html", "uniform"),
-            ("ADAPTED.html", "adapted"),
-            ("THEORY.html", None),
-        ):
-            page.goto((STUDY / filename).as_uri() + "?theme=light")
+        # Copy just one HTML into a separate folder: no supporting files.
+        standalone = output / "standalone_copy"
+        standalone.mkdir(exist_ok=True)
+        isolated = standalone / "report.html"
+        isolated.write_bytes((STUDY / "REPORT.html").read_bytes())
+        browser.set_offline(True)
+        requests = []
+        page.on("request", lambda request: requests.append(request.url))
+        page.goto(isolated.as_uri() + "?theme=light#uniform")
+        for initialization in ("uniform", "adapted", "theory"):
+            page.click(f'[data-report-tab="{initialization}"]')
             page.wait_for_function(
                 "document.documentElement.dataset.reportReady === 'true'"
             )
@@ -45,21 +50,23 @@ def main():
                 checks = page.evaluate(
                     """() => {
                     const root = document.documentElement;
-                    const bundle = window.backpressureBCReport?.bundle;
-                    const links = [...document.querySelectorAll('.page-switch a')];
+                    const tab = document.body.dataset.page;
+                    const bundle = window.backpressureBCReport.bundles[tab];
+                    const panel = document.getElementById(tab);
+                    const links = [...document.querySelectorAll('[data-report-tab]')];
                     return {
                         theme: root.dataset.theme,
-                        initialization: bundle?.report.metadata.selected_initialization || null,
-                        plots: document.querySelectorAll('.js-plotly-plot').length,
+                        initialization: bundle?.report.metadata.selected_initialization || 'theory',
+                        plots: panel.querySelectorAll('.js-plotly-plot').length,
                         page_links: links.map(a => a.getAttribute('href')),
                         active_page_count: links.filter(a=>a.getAttribute('aria-current') === 'page').length,
                         page_overflow: root.scrollWidth > innerWidth,
-                        math_count: document.querySelectorAll('mjx-container').length,
+                        math_count: panel.querySelectorAll('mjx-container').length,
                         math_errors: document.querySelectorAll('[data-mml-node="merror"]').length,
-                        scrollable_equations: [...document.querySelectorAll('.math-display')].filter(e=>e.scrollWidth>e.clientWidth+2 || ['auto','scroll'].includes(getComputedStyle(e).overflowX)).length,
+                        scrollable_equations: [...panel.querySelectorAll('.math-display')].filter(e=>e.scrollWidth>e.clientWidth+2 || ['auto','scroll'].includes(getComputedStyle(e).overflowX)).length,
                         plot_data_match: !bundle || bundle.report.cases.every((c,i)=> {
-                            const residual = document.getElementById(`residual-${i}`).data;
-                            const cfl = document.getElementById(`cfl-${i}`).data;
+                            const residual = document.getElementById(`${tab}-residual-${i}`).data;
+                            const cfl = document.getElementById(`${tab}-cfl-${i}`).data;
                             return c.runs.every(r=> {
                                 const name = r.variant === 'source' ? 'Current/source BC' : 'New pressure-wave BC';
                                 const rt = residual.find(t=>t.name===name);
@@ -74,31 +81,40 @@ def main():
                 )
                 assert checks["theme"] == theme
                 assert checks["initialization"] == initialization
-                assert checks["plots"] == (8 if initialization else 0)
+                assert checks["plots"] == (0 if initialization == "theory" else 8)
                 assert checks["active_page_count"] == 1
                 assert len(checks["page_links"]) == 3
-                assert all(f"theme={theme}" in link for link in checks["page_links"])
+                assert checks["page_links"] == ["#uniform", "#adapted", "#theory"]
                 assert not checks["page_overflow"]
                 assert checks["math_errors"] == checks["scrollable_equations"] == 0
                 assert checks["plot_data_match"]
-                if not initialization:
+                if initialization == "theory":
                     assert checks["math_count"] > 20
                 page.screenshot(
-                    path=str(output / f"{filename[:-5].lower()}_{theme}.png")
+                    path=str(output / f"standalone_{initialization}_{theme}.png")
                 )
-                records.append(dict(page=filename, **checks))
-            if initialization:
-                page.check("#show-initial")
+                records.append(dict(tab=initialization, **checks))
+            if initialization != "theory":
+                page.check(f"#{initialization}-show-initial")
                 page.wait_for_function(
                     "document.documentElement.dataset.reportReady === 'true'"
                 )
-                assert page.locator("#pressure-0").evaluate("e => e.data.length") == 4
-                page.click("#reset-plots")
+                page.evaluate(
+                    "async tab => await window.backpressureBCReport.controllers[tab].ready()",
+                    initialization,
+                )
+                assert (
+                    page.locator(f"#{initialization}-pressure-0").evaluate(
+                        "e => e.data.length"
+                    )
+                    == 4
+                )
+                page.click(f"#{initialization}-reset-plots")
                 page.wait_for_function(
                     "document.documentElement.dataset.reportReady === 'true'"
                 )
                 with page.expect_download() as event:
-                    page.click("#download-csv")
+                    page.click(f"#{initialization}-download-csv")
                 event.value.save_as(str(output / f"outcomes_{initialization}.csv"))
                 assert (
                     len(
@@ -108,17 +124,33 @@ def main():
                     )
                     == 5
                 )
-                page.locator("#cfl").screenshot(
+                page.locator(f"#{initialization}-cfl").screenshot(
                     path=str(output / f"cfl_{initialization}.png")
                 )
+        assert not any(
+            url.startswith(("http:", "https:")) for url in requests
+        ), requests
+        # Deep links survive reload and address a section inside this same file.
+        page.goto(isolated.as_uri() + "#adapted-convergence")
+        page.wait_for_function(
+            "document.documentElement.dataset.reportReady === 'true'"
+        )
+        assert page.locator("body").get_attribute("data-page") == "adapted"
         assert not errors, errors
         browser.close()
-    result = dict(passed=True, pages=records, browser_errors=errors)
+    result = dict(
+        passed=True,
+        standalone_copy=True,
+        offline=True,
+        pages=records,
+        browser_errors=errors,
+        requests=requests,
+    )
     (output / "browser_audit.json").write_text(
         json.dumps(result, indent=2), encoding="utf-8"
     )
     print(
-        "PASS: three pages, both themes, numerical plot arrays, controls and continuous equations"
+        "PASS: one standalone offline HTML, three tabs, both themes, numerical plot arrays, controls and continuous equations"
     )
 
 

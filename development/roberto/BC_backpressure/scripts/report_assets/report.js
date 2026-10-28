@@ -1,19 +1,20 @@
-/* Offline presentation of fixed implicit-Euler evidence. No numerical solves. */
+/* One offline document: shared libraries, independent result panels and theory. */
 (() => {
   "use strict";
-  const $ = id => document.getElementById(id);
+  const bundles = JSON.parse(document.getElementById("report-data").textContent);
   const themeKey = "nozzle-backpressure-bc.report.theme";
-  const payloadElement = $("report-data");
-  const BUNDLE = payloadElement ? JSON.parse(payloadElement.textContent) : null;
-  const DATA = BUNDLE?.report;
   const names = {source: "Current/source BC", pressure_wave: "New pressure-wave BC"};
   const format = (x, digits = 3) => Number.isFinite(x) ? x.toExponential(digits) : "undefined";
   const escape = x => String(x ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-  const plots = new Map();
-  let revision = 0;
-  let queue = Promise.resolve();
-  let pending = 0;
-  let themeChannel;
+  const controllers = {};
+  let active = "uniform";
+  let ready = Promise.resolve();
+  let mathResolve;
+  const mathReady = new Promise(resolve => { mathResolve = resolve; });
+  window.addEventListener("backpressure-theory-ready", () => {
+    document.getElementById("theory-theory-status").textContent = "Equations rendered locally; no network connection required";
+    mathResolve();
+  });
 
   function palette() {
     const css = getComputedStyle(document.documentElement);
@@ -22,59 +23,19 @@
       axis: value("--line"), grid: value("--grid"), source: value("--source"),
       pressure_wave: value("--working"), reference: value("--reference"), initial: value("--initial")};
   }
-
-  function setTheme(theme, persist = true) {
-    if (!["light", "dark"].includes(theme)) return;
-    const changed = document.documentElement.dataset.theme !== theme;
-    document.documentElement.dataset.theme = theme;
-    document.querySelectorAll("[data-theme-choice]").forEach(button => {
-      button.setAttribute("aria-pressed", String(button.dataset.themeChoice === theme));
-    });
-    document.querySelectorAll("a[data-page-link]").forEach(link => {
-      link.dataset.pageBase ||= link.getAttribute("href").split("?")[0];
-      link.setAttribute("href", `${link.dataset.pageBase}?theme=${theme}`);
-    });
-    if (persist) {
-      try { localStorage.setItem(themeKey, theme); } catch {}
-      try { themeChannel?.postMessage(theme); } catch {}
-    }
-    if (changed && DATA) scheduleFigures();
-  }
-
-  try {
-    themeChannel = new BroadcastChannel(themeKey);
-    themeChannel.onmessage = event => setTheme(event.data, false);
-  } catch {}
-  window.addEventListener("storage", event => {
-    if (event.key === themeKey) setTheme(event.newValue, false);
-  });
-  document.querySelectorAll("[data-theme-choice]").forEach(button => {
-    button.addEventListener("click", () => setTheme(button.dataset.themeChoice));
-  });
-  $("print-report")?.addEventListener("click", () => window.print());
-  $("license-button")?.addEventListener("click", () => {
-    const details = $("license-details");
-    details.hidden = false;
-    details.open = !details.open;
-    details.scrollIntoView();
-  });
-  setTheme(document.documentElement.dataset.theme, false);
-
   function fail(error) {
     document.documentElement.dataset.reportError = error.message;
-    const status = $("report-status") || $("theory-status");
-    if (status) status.textContent = "Presentation error: " + error.message;
     console.error(error);
   }
 
-  if (!DATA) {
-    window.addEventListener("backpressure-theory-ready", () => {
-      $("theory-status").textContent = "Equations rendered locally · no network connection required";
-      document.documentElement.dataset.reportReady = "true";
-    });
-    return;
-  }
-
+  function initializeResults(initialization, BUNDLE) {
+    const root = document.getElementById(initialization);
+    const $ = id => document.getElementById(`${initialization}-${id}`);
+    const DATA = BUNDLE.report;
+    const plots = new Map();
+    let revision = 0;
+    let queue = Promise.resolve();
+    let pending = 0;
   const uniform = DATA.metadata.selected_initialization === "uniform";
   const cases = DATA.cases;
   const runs = cases.flatMap(c => c.runs.map(r => ({...r, case: c})));
@@ -185,14 +146,14 @@
 
   function scheduleFigures() {
     pending += 1;
-    document.documentElement.dataset.reportReady = "false";
+    root.dataset.figuresReady = "false";
     queue = queue.then(drawFigures).then(() => {
       pending -= 1;
       if (!pending) {
-        document.documentElement.dataset.reportReady = "true";
+        root.dataset.figuresReady = "true";
         $("report-status").textContent = `${cases.length} target cases · ${runs.length} saved implicit runs · all figures use fixed numerical data`;
       }
-    }).catch(fail);
+    }).catch(error => { fail(error); throw error; });
     return queue;
   }
 
@@ -232,7 +193,77 @@
     const url = URL.createObjectURL(new Blob([BUNDLE.csv], {type: "text/csv;charset=utf-8"}));
     const a = document.createElement("a"); a.href = url; a.download = `BC_backpressure_${DATA.metadata.selected_initialization}_outcomes.csv`; a.click(); URL.revokeObjectURL(url);
   });
-  window.backpressureBCReport = {bundle: BUNDLE, ready: () => queue, plots};
-  tables();
-  scheduleFigures();
+
+    tables();
+    return {bundle: BUNDLE, plots, ready: () => queue, render: scheduleFigures};
+  }
+  for (const initialization of ["uniform", "adapted"]) {
+    controllers[initialization] = initializeResults(initialization, bundles[initialization]);
+  }
+
+  function activate(tab, target = tab) {
+    if (!["uniform", "adapted", "theory"].includes(tab)) tab = "uniform";
+    active = tab;
+    document.body.dataset.page = tab;
+    document.documentElement.dataset.reportReady = "false";
+    document.querySelectorAll("[data-report-page]").forEach(panel => { panel.hidden = panel.dataset.reportPage !== tab; });
+    document.querySelectorAll("[data-report-nav]").forEach(nav => { nav.hidden = nav.dataset.reportNav !== tab; });
+    document.querySelectorAll("[data-report-tab]").forEach(link => {
+      if (link.dataset.reportTab === tab) link.setAttribute("aria-current", "page");
+      else link.removeAttribute("aria-current");
+    });
+    document.getElementById("sidebar-label").textContent = {
+      uniform: "Uniform start", adapted: "Adapted start", theory: "Theory & equations"
+    }[tab];
+    ready = Promise.all([mathReady, controllers[tab]?.render()]).then(() => {
+      if (active !== tab) return;
+      document.documentElement.dataset.reportReady = "true";
+      if (target === tab) window.scrollTo({top: 0, left: 0, behavior: "instant"});
+      else document.getElementById(target)?.scrollIntoView({behavior: "instant"});
+    }).catch(fail);
+    return ready;
+  }
+  function navigate() {
+    const target = decodeURIComponent(location.hash.slice(1)) || "uniform";
+    return activate(target.split("-")[0], target);
+  }
+  document.addEventListener("click", event => {
+    const link = event.target.closest('a[href^="#"]');
+    if (!link) return;
+    const target = link.getAttribute("href").slice(1);
+    const tab = target.split("-")[0];
+    if (!["uniform", "adapted", "theory"].includes(tab)) return;
+    event.preventDefault();
+    history.pushState(null, "", `#${target}`);
+    activate(tab, target);
+  });
+  window.addEventListener("hashchange", navigate);
+  function setTheme(theme) {
+    document.documentElement.dataset.theme = theme;
+    document.querySelectorAll("[data-theme-choice]").forEach(button => {
+      button.setAttribute("aria-pressed", String(button.dataset.themeChoice === theme));
+    });
+    try { localStorage.setItem(themeKey, theme); } catch {}
+    activate(active, active);
+  }
+  document.querySelectorAll("[data-theme-choice]").forEach(button => {
+    button.addEventListener("click", () => setTheme(button.dataset.themeChoice));
+    button.setAttribute("aria-pressed", String(button.dataset.themeChoice === document.documentElement.dataset.theme));
+  });
+  document.getElementById("print-report").addEventListener("click", async () => {
+    document.body.classList.add("printing");
+    await Promise.all([mathReady, ...Object.values(controllers).map(c => c.render())]);
+    window.print();
+    document.body.classList.remove("printing");
+    activate(active);
+  });
+  document.getElementById("license-button").addEventListener("click", () => {
+    const details = document.getElementById("license-details");
+    details.hidden = false;
+    details.open = !details.open;
+    details.scrollIntoView();
+  });
+  window.backpressureBCReport = {bundles, controllers, ready: () => ready,
+    get active() { return active; }, selectTab: activate};
+  navigate();
 })();
