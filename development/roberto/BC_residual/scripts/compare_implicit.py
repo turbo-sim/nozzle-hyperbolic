@@ -19,7 +19,7 @@ for key in ("OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "OMP_NUM_THREADS"):
 import jax.numpy as jnp
 import numpy as np
 
-from development.roberto.boundary_conditions.scripts.coupled_step import CoupledStep
+from development.roberto.BC_residual.scripts.coupled_step import CoupledStep
 from development.roberto.euler_nozzle import verify_euler_nozzle_steady as baseline
 from development.roberto.newton_solve.scripts.investigate_ptc import json_value
 from development.roberto.newton_solve.scripts.problem import SteadyNozzleProblem
@@ -183,7 +183,7 @@ def main():
         parser.error("Use at least five points and positive budgets/run count")
     args.output = args.output.resolve()
     if args.plot_only:
-        from development.roberto.boundary_conditions.scripts.report_implicit import (
+        from development.roberto.BC_residual.scripts.report_implicit import (
             write_report,
         )
 
@@ -292,7 +292,7 @@ def main():
     assert before == source_hashes(root), "Source files changed during experiment"
     report["source_files_unchanged"] = True
     save(report, args.output)
-    from development.roberto.boundary_conditions.scripts.report_implicit import write_report
+    from development.roberto.BC_residual.scripts.report_implicit import write_report
 
     write_report(args.output)
 

@@ -4,10 +4,10 @@ import jax
 import jax.numpy as jnp
 import jaxprop as jxp
 
-from development.roberto.boundary_conditions.scripts.boundary_system import (
+from development.roberto.BC_residual.scripts.boundary_system import (
     boundary_constraints,
 )
-from development.roberto.boundary_conditions.scripts.source_adapter import (
+from development.roberto.BC_residual.scripts.source_adapter import (
     independent_ghost_operators,
     banded_newton_for_full_state,
     value,

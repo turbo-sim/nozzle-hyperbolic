@@ -30,7 +30,7 @@ removed so it cannot distort this comparison. No source file is edited.
 From the repository root:
 
 ```powershell
-poetry run python -m development.roberto.boundary_conditions.scripts.compare_implicit --no-show
+poetry run python -m development.roberto.BC_residual.scripts.compare_implicit --no-show
 ```
 
 Defaults are 201 points and **one excluded full solve followed by ten measured
@@ -69,11 +69,11 @@ Analytic fields are used for verification, never as initial guesses.
 Regenerate the figures and root report without solving:
 
 ```powershell
-poetry run python -m development.roberto.boundary_conditions.scripts.compare_implicit --plot-only --no-show
+poetry run python -m development.roberto.BC_residual.scripts.compare_implicit --plot-only --no-show
 ```
 
 Use `--cases shock35`, `--points 51`, or `--runs 2` for a smaller check, choosing
-an alternate `--output development/roberto/boundary_conditions/outputs/small_mesh`
+an alternate `--output development/roberto/BC_residual/outputs/small_mesh`
 to preserve the main dataset. Custom outputs generate separately named root
 reports. The default report is `IMPLICIT_REPORT.md`.
 

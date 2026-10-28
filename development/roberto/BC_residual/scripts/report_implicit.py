@@ -5,7 +5,7 @@ import json
 import os
 from pathlib import Path
 
-from development.roberto.boundary_conditions.scripts.plot_implicit import LABELS, plot
+from development.roberto.BC_residual.scripts.plot_implicit import LABELS, plot
 
 
 def write_report(output):

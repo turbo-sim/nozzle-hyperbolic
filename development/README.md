@@ -16,7 +16,7 @@ Run modules from the repository root using the project environment:
 
 ```powershell
 poetry run python -m development.roberto.euler_nozzle.verify_euler_nozzle_steady --no-show
-poetry run python -m development.roberto.boundary_conditions.scripts.compare_implicit --no-show
+poetry run python -m development.roberto.BC_residual.scripts.compare_implicit --no-show
 poetry run python -m development.alberto.euler_nozzle.shock_tube_fvs
 ```
 
