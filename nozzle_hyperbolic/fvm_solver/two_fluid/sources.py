@@ -542,7 +542,7 @@ def two_fluid_closure(
 # ---------------------------------------------------------------------------
 # D_s_primitive  — Städtke Table B.46 with k → k*rho correction
 # ---------------------------------------------------------------------------
-
+# NB: used only for verification
 def D_s_primitive(U_h, eos_g: PhaseProps, eos_l: PhaseProps,
                   cq: CommonQty, closure: TwoFluidClosure, k) -> jnp.ndarray:
     """
@@ -644,7 +644,7 @@ def D_s_primitive(U_h, eos_g: PhaseProps, eos_l: PhaseProps,
 # ---------------------------------------------------------------------------
 # D_VE_conservative  — D_VE = J Phi^{-1} D_s
 # ---------------------------------------------------------------------------
-
+# NB: used only for verification
 def D_VE_conservative(U_h, eos_g: PhaseProps, eos_l: PhaseProps,
                       cq: CommonQty, closure: TwoFluidClosure, k) -> jnp.ndarray:
     """
