@@ -1,6 +1,6 @@
 """Independent reference and saved-field residual audits, without new timesteps.
 
-Run: poetry run python -m development.roberto.backpressure_analysis.scripts.audit_results
+Run: poetry run python -m development.roberto.backpressure_sensitivity.scripts.audit_results
 """
 
 import argparse
@@ -12,8 +12,8 @@ import jaxprop as jxp
 import numpy as np
 
 from development.roberto.euler_nozzle import verify_euler_nozzle_steady as baseline
-from development.roberto.backpressure_analysis.scripts.run_sweep import ImplicitNozzle, STUDY, hashes
-from development.roberto.backpressure_analysis.scripts.reference import PerfectGasReference
+from development.roberto.backpressure_sensitivity.scripts.run_sweep import ImplicitNozzle, STUDY, hashes
+from development.roberto.backpressure_sensitivity.scripts.reference import PerfectGasReference
 from nozzle_hyperbolic.models.euler_nozzle.analytical.nozzle_exact_real_gas import nozzle_exact_real_gas
 
 

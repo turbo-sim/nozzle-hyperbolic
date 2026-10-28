@@ -100,7 +100,7 @@ Keep the single `development/` parent; do not recreate `development_new/` or
 | [newton_solve](development/roberto/newton_solve/README.md) | Retained Newton/PTC/implicit comparison and consolidated explanations of earlier failures |
 | [implicit_integration](development/roberto/implicit_integration/README.md) | Inner Newton work and CFL/controller sensitivities |
 | [BC_residual](development/roberto/BC_residual/README.md) | Internal versus coupled BC equations with matched implicit solver machinery and repeated timings |
-| [backpressure_analysis](development/roberto/backpressure_analysis/README.md) | Perfect-gas implicit operating map, choking/shock-exit behavior and outlet branch selection |
+| [backpressure_sensitivity](development/roberto/backpressure_sensitivity/README.md) | Perfect-gas implicit operating map, choking/shock-exit behavior and outlet branch selection |
 
 The steady baseline has five regimes: supersonic exit, shocks at 35% and 70%
 of the divergent section, sonic-throat/subsonic-exit limiting flow, and fully

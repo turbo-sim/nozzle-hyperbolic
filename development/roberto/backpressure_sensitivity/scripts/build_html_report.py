@@ -1,7 +1,7 @@
 """Build the self-contained Plotly report from saved fields; never run a solver.
 
 Run from the repository root:
-  poetry run python -m development.roberto.backpressure_analysis.scripts.build_html_report
+  poetry run python -m development.roberto.backpressure_sensitivity.scripts.build_html_report
 
 Plotly's JavaScript runtime is embedded once. It can come from an installed
 Plotly package, the neighboring TurboDash environment, or --plotly-js. This
@@ -20,7 +20,7 @@ from matplotlib import colormaps
 from matplotlib.colors import to_hex
 import numpy as np
 
-from development.roberto.backpressure_analysis.scripts.reference import PerfectGasReference
+from development.roberto.backpressure_sensitivity.scripts.reference import PerfectGasReference
 
 STUDY = Path(__file__).resolve().parents[1]
 ROOT = Path(__file__).resolve().parents[4]

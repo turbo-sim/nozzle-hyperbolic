@@ -1,7 +1,7 @@
 """Implicit nozzle backpressure sweep; source kernels and BCs remain unchanged.
 
 Run from the repository root:
-  poetry run python -m development.roberto.backpressure_analysis.scripts.run_sweep
+  poetry run python -m development.roberto.backpressure_sensitivity.scripts.run_sweep
 
 Each operating point is a steady pseudo-time solve. Pressure is a dynamic
 JAX argument to the unchanged source factory, allowing one compiled kernel
@@ -29,7 +29,7 @@ import jaxprop as jxp
 import numpy as np
 
 from development.roberto.euler_nozzle import verify_euler_nozzle_steady as baseline
-from development.roberto.backpressure_analysis.scripts.reference import PerfectGasReference
+from development.roberto.backpressure_sensitivity.scripts.reference import PerfectGasReference
 from nozzle_hyperbolic.geometry.duct import get_symmetric_nozzle
 from nozzle_hyperbolic.models.euler_nozzle.fvm import make_jax_stadtke_step
 from nozzle_hyperbolic.models.euler_nozzle.initialization import stadtke_puh_initialization_simple
@@ -229,7 +229,7 @@ def main():
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
     if args.plot_only:
-        from development.roberto.backpressure_analysis.scripts.plot_results import render
+        from development.roberto.backpressure_sensitivity.scripts.plot_results import render
         render(json.loads((args.output / 'summary.json').read_text(encoding='utf-8')), args.output)
         return
     model = ImplicitNozzle(args.n_points)
@@ -287,7 +287,7 @@ def main():
     report['source_unchanged'] = report['source_before'] == report['source_after']
     assert report['source_unchanged'], 'Production source changed during the study'
     save(report, args.output)
-    from development.roberto.backpressure_analysis.scripts.plot_results import render
+    from development.roberto.backpressure_sensitivity.scripts.plot_results import render
     render(report, args.output)
     print('Saved', args.output, flush=True)
 
