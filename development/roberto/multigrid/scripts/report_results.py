@@ -462,6 +462,7 @@ def audit_documents(output, report, *, pages=("results","theory"), download_coun
         def __init__(self):
             super().__init__();self.ids=[];self.hrefs=[];self.dependencies=[];self.downloads=[];self.styles=[];self.pages=[]
             self.in_style=False
+            self.in_script=False;self.script_html_comment_markers=0
         def handle_starttag(self, tag, attrs):
             values=dict(attrs)
             if "id" in values:self.ids.append(values["id"])
@@ -475,10 +476,13 @@ def audit_documents(output, report, *, pages=("results","theory"), download_coun
                 self.dependencies.append(values["href"])
             if values.get("style"):self.styles.append(values["style"])
             if tag=="style":self.in_style=True
+            if tag=="script":self.in_script=True
         def handle_endtag(self,tag):
             if tag=="style":self.in_style=False
+            if tag=="script":self.in_script=False
         def handle_data(self,data):
             if self.in_style:self.styles.append(data)
+            if self.in_script:self.script_html_comment_markers+=data.count("<!--")
     doc=Inspector();doc.feed(report.read_text(encoding="utf-8"))
     broken=[]
     for href in doc.hrefs:
@@ -498,10 +502,12 @@ def audit_documents(output, report, *, pages=("results","theory"), download_coun
     application_network_calls=bool(re.search(r'\b(?:fetch\s*\(|XMLHttpRequest|import\s*\()',JS+PAGE_JS+THEME_JS))
     result=dict(pass_=bool(len(doc.ids)==len(set(doc.ids)) and not broken and not doc.dependencies
                           and not css_dependencies and not application_network_calls
+                          and not doc.script_html_comment_markers
                           and sorted(doc.pages)==sorted(pages) and len(downloads)==download_count),
         file=report.name,internal_pages=doc.pages,unique_ids=len(doc.ids)==len(set(doc.ids)),
         ids=len(doc.ids),broken_links=broken,file_or_network_resource_dependencies=doc.dependencies,
         css_dependencies=css_dependencies,application_network_calls=application_network_calls,
+        raw_script_html_comment_markers=doc.script_html_comment_markers,
         embedded_downloads=downloads,standalone_html=True,browser_runtime_checked=False,
         note="Structural portability audit: internal pages, fragment links, embedded resources and decoded download payloads. No browser rendering claim.")
     (output/"report_audit.json").write_text(json.dumps(result,indent=2)+'\n',encoding="utf-8")
@@ -593,6 +599,9 @@ def main():
         downloads+=four_downloads
 
     mathjax=gzip.decompress((ASSETS/"vendor/mathjax-3.2.2-tex-svg.js.gz").read_bytes()).decode()
+    # VS Code rewrites HTML-comment markers even inside inline JavaScript regexes.
+    # Hex-escape the opener in MathJax's regex, preserving its matching behavior.
+    mathjax=mathjax.replace("<!--",r"\x3C!--")
     mathscripts='''<script>window.MathJax={loader:{load:[]},tex:{inlineMath:[['$','$']],displayMath:[['$$','$$']],processEscapes:true,packages:['base','ams','newcommand','noundefined','configmacros']},svg:{fontCache:'local'},options:{enableMenu:false},startup:{typeset:false}};</script><script>'''+re.sub(r'</script',r'<\\/script',mathjax,flags=re.I)+'</script>'
     theory=THEORY
     hierarchy=summary.get("metadata",{}).get("hierarchy_points",[51,101,201,401])
