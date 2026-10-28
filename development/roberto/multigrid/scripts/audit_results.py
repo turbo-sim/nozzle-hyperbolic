@@ -117,9 +117,20 @@ def audit(output):
             root = bool(reached_fine and stages[-1]["native_success"]
                         and rms <= ROOT_TOL and bc_map <= ROOT_TOL and bc_equations <= ROOT_TOL
                         and admissible and mass_imbalance <= 1e-4 and max_balance <= 1e-5)
-            count_checks, transfers = [], []
+            count_checks, transfers, stage_checks = [], [], []
             for index, stage in enumerate(stages):
                 history, trials = stage["history"], stage["trial_history"]
+                stage_problem, stage_constraints = problem_for(row["case_id"], row["reconstruction"], stage["n_points"])
+                stage_state = jnp.asarray(stage["final_state"], dtype=jnp.float64)
+                stage_physical = np.asarray(stage_problem.operators["physical_residual"](stage_state, stage_state, jnp.float64(1))).ravel()
+                stage_rms = float(np.sqrt(np.mean((stage_physical/stage_problem.residual_scale)**2)))
+                declared = float(stage["tolerance"])
+                stage_bc = float(np.max(np.abs(np.asarray(stage_constraints(stage_state)))))
+                stage_consistent = bool(np.isclose(stage_rms, stage["history"][-1]["residual_rms"], rtol=1e-7, atol=1e-12)
+                                        and bool(stage["native_success"]) == bool(stage_rms <= declared))
+                stage_checks.append(dict(points=stage["n_points"], declared_tolerance=declared, original_spatial_rms=stage_rms,
+                                         boundary_equation_max=stage_bc, native_success=stage["native_success"],
+                                         residual_target_met=bool(stage_rms<=declared), status_consistent=stage_consistent))
                 counted_steps = len(history)-1
                 counted_trials = len(trials)
                 counted_rejects = sum(not t["accepted"] for t in trials)
@@ -151,7 +162,8 @@ def audit(output):
             timing_sum = bool(row["wall_s"]+1e-6 >= component_wall)
             recorded_root = bool(row["root_success"])
             integrity = bool(root == recorded_root and all(count_checks) and aggregate_counts
-                             and timing_sum and all(t["pass"] for t in transfers))
+                             and timing_sum and all(t["pass"] for t in transfers)
+                             and all(s["status_consistent"] for s in stage_checks))
             result.update({"integrity_pass": integrity, "root": root,
                 "recorded_root": recorded_root, "spatial_rms": rms,
                 "boundary_map_max": bc_map, "boundary_equation_max": bc_equations,
@@ -159,7 +171,7 @@ def audit(output):
                 "integrated_balance": balance.tolist(), "conservation_max": max_balance,
                 "stage_counts_pass": all(count_checks), "aggregate_counts_pass": aggregate_counts,
                 "component_wall_s": component_wall, "timing_sum_pass": timing_sum,
-                "transfers": transfers,
+                "transfers": transfers, "stage_residual_checks": stage_checks,
                 "reached_fine": reached_fine,
                 "shock_proxy_m": shock_proxy(problem.x[1:-1], full[1:-1, 1]) if row["case_id"].startswith("shock") else None})
             comparison_fields = {"p": full[:, 0]/problem.p0,
@@ -208,11 +220,16 @@ def audit(output):
 
     sources = source_audit(summary["metadata"])
     measured_records = [r for r in records if not r["excluded"]]
-    audit_data = {"pass": bool(sources["pass"] and all(r["integrity_pass"] for r in records)
+    shared_before = summary["metadata"].get("shared_import_hashes_before")
+    shared_after = summary["metadata"].get("shared_import_hashes_after")
+    shared_current = ({name: hashlib.sha256((REPO/name).read_bytes()).hexdigest() for name in shared_before}
+                      if shared_before else None)
+    shared_pass = shared_before is None or shared_before == shared_after == shared_current
+    audit_data = {"pass": bool(sources["pass"] and shared_pass and all(r["integrity_pass"] for r in records)
                                and measured_records and all(r["root"] for r in measured_records)
                                and all(r.get("branch_check", {}).get("pass", False) for r in measured_records)
                                and all(c["pass"] for c in comparisons)),
-        "source": sources, "runs": len(records), "measured_runs": len(measured_records),
+        "source": sources, "shared_imports_pass": shared_pass, "runs": len(records), "measured_runs": len(measured_records),
         "thresholds": {"spatial_rms": ROOT_TOL, "boundary_max": ROOT_TOL,
             "mass_imbalance": 1e-4, "integrated_balance": 1e-5,
             "scaled_primitive_agreement": MATCH_TOL, "shock_agreement_cells": 2},

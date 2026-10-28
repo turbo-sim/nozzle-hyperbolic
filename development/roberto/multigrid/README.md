@@ -6,7 +6,7 @@ not implement FAS. The earlier [annular design assessment](MULTIGRID_NOTES.md)
 remains a proposal for a different model; its coupled boundary formulation is
 not silently substituted into this EulerNozzle benchmark.
 
-## Generate results and reports
+## Generate the original study and the combined report
 
 Run from the repository root in the existing Poetry environment:
 
@@ -59,6 +59,125 @@ poetry run python -m development.roberto.multigrid.scripts.report_results --outp
 ```
 
 One measured sample is a smoke check, not the default timing benchmark.
+
+## Latest four-grid rerun: 1e-8 at every stage
+
+The default HTML opens **Four grids (tight)**. The other tabs retain the tight
+two-grid campaign, the original four-grid campaign with coarse tolerance 1e-5,
+and the shared theory. Existing numerical archives are preserved.
+
+This rerun uses **50 / 100 / 200 / 400 source intervals**, corresponding to
+**51 / 101 / 201 / 401 sampled points** including two ghost slots. Every stage
+stops at the same original spatial RMS **1e-8**. The physical unknown counts
+are 49 / 99 / 199 / 399. Physics, initial-guess rule, interpolation, CFL/SER
+control, one-correction implicit kernel and fine-grid verification are unchanged.
+
+```powershell
+poetry run python -B -u -m development.roberto.multigrid.scripts.run_four_grid
+poetry run python -B -m development.roberto.multigrid.scripts.audit_results --output development/roberto/multigrid/outputs/four_grid_tight
+poetry run python -B -m development.roberto.multigrid.scripts.report_results
+python -B development/roberto/multigrid/scripts/audit_html.py
+```
+
+Results are isolated in `outputs/four_grid_tight/`. As in the existing campaigns,
+one complete solve per configuration is excluded, followed by ten measured cold
+starts, alternating method order. Each hierarchy stage, transfer, monitor and
+rejected attempt contributes to total time. The runner refuses to overwrite an
+existing completed summary; choose another study-local `--output` for a repeat.
+
+All 132 new attempts reach their final steady roots. Independent checks verify
+all **330 stage endpoints** against 1e-8, plus unchanged source/shared helpers,
+counts, transfers, physical boundary equations, conservation and branch selection.
+The unchanged profile-agreement gate passes for both MUSCL shock cases and both
+subsonic controls. Constant-reconstruction shock35/shock70 remain beyond the
+1e-4 profile threshold, so their timing ratios are unqualified. The overall audit
+returns nonzero for those two comparison failures despite passing root/integrity
+checks; the report preserves this distinction.
+
+Relative to the fresh single-grid controls, qualified MUSCL shock35 and shock70
+sequences are about **3.75x** and **5.23x** faster. Subsonic constant and MUSCL
+sequences remain about **7.50x** and **1.41x** slower. The report shows all ten
+samples, min/max/mean, per-stage residuals and costs, and a comparison with the
+tight two-grid results. The campaigns are separate timing batches; paired
+controls within each campaign qualify its ratios. The coarsest mesh also differs
+between the two- and four-grid paths, so no universal optimum is inferred.
+
+`scripts/run_four_grid.py` and `run_two_grid.py` share one tight-hierarchy runner;
+`scripts/tight_grid_report.py` reuses one analysis/plot path for both experiments.
+The renderer discovers both datasets automatically; `--four-grid-output` and
+`--two-grid-output` select explicit paths when needed. All three campaigns offer
+separate embedded audit, summary, timing CSV and timing/work PDF downloads.
+
+## Additional two-grid, tight-tolerance experiment
+
+The standalone report now has a separate **Two grids (tight)** page, while
+retaining the original four-grid results and the shared theory page.
+
+The requested 40 and 400 elements are interpreted as **40 and 400 intervals
+between sampled source points**: 41 and 401 points, including the two algebraic
+ghost slots, hence 39 and 399 interior unknown cells. This keeps the exact same
+401-point fine-grid equations as the original comparison. It is the existing
+source mesh convention, not 40/400 agglomerated finite-volume unknowns.
+
+Both stages solve to the original fixed-scale spatial RMS **1e-8**. The implicit
+kernel still performs one Newton correction per attempted pseudo-step; the
+spatial stopping tolerance does not make each backward-Euler timestep exact.
+Three cases and both constant/MUSCL reconstructions use the same physics,
+boundary maps, interpolation, CFL/SER controller and final verification targets.
+
+```powershell
+poetry run python -B -u -m development.roberto.multigrid.scripts.run_two_grid
+poetry run python -B -m development.roberto.multigrid.scripts.audit_results --output development/roberto/multigrid/outputs/two_grid_tight
+poetry run python -B -m development.roberto.multigrid.scripts.report_results
+```
+
+The runner preserves the original dataset and writes `outputs/two_grid_tight/`.
+It refuses to overwrite a completed summary; select a fresh `--output` path
+for another campaign. Both methods receive one excluded complete solve and ten
+measured cold starts per case/reconstruction. The fresh single-grid control
+and the complete two-grid sequence are timed with the existing matched policy.
+All stage solves, transfers, monitors and rejected attempts are included.
+
+The report generator automatically appends this dataset when present, or accepts
+`--two-grid-output` for an explicit study-local dataset. It embeds separate
+summary, audit, timing CSV and timing/work PDF downloads for each campaign.
+`scripts/tight_grid_report.py` reuses the original plot/analysis code with
+independent controls, rather than duplicating numerical solvers.
+
+### Recorded findings
+
+All 132 attempts (120 measured and 12 excluded) reach their final steady roots.
+The independent audit checks all 198 stage endpoints against their declared
+1e-8 spatial target; all meet it. Source and shared imported helpers remain
+unchanged. These are steady-equation checks, separate from analytical accuracy.
+
+The unchanged 1e-4 profile-agreement gate passes for MUSCL shock70 and both
+subsonic controls. MUSCL shock70 is about **5.26 times faster** than its fresh
+single-grid control. Subsonic constant and MUSCL take about **4.57** and **1.68**
+times the single-grid time, respectively. Shock35 with constant/MUSCL and
+shock70 with constant fail profile agreement, so their retained time ratios
+are descriptive rather than verified same-root acceleration claims. The overall
+audit intentionally returns nonzero for those three failed comparison gates;
+there are no root or integrity failures and no relaxed thresholds.
+
+All four shocked case/reconstruction combinations require more fine-grid
+updates than the retained four-grid sequence. The new experiment changes both
+the hierarchy and coarse tolerance. It does not establish which change causes
+the different trajectory. Original four-grid wall times come from an earlier
+campaign, so the fresh paired single-grid controls are the basis for the new
+performance statements. Coarse/fine endpoint costs, residuals and profile
+agreement are shown explicitly in the report.
+
+Optional offline browser verification uses an existing Playwright/Edge environment:
+
+```powershell
+python -B development/roberto/multigrid/scripts/audit_html.py
+```
+
+This checks all three result pages and theory, light/dark themes, case/reconstruction
+and marker controls, exact plotted histories and all twelve embedded downloads.
+It copies only the HTML to an isolated directory; browser state and screenshots
+remain under `outputs/`.
 
 ## Matched physical and numerical setup
 

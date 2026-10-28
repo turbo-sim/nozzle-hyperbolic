@@ -137,7 +137,7 @@ def make_payload(summary, groups):
                 root_success=rep.get("root_success"), same_root=rep.get("same_root"),
                 diagnostics=rep["stages"][-1].get("diagnostics", {}),
                 fields=rep["stages"][-1]["fields"], levels=history(rep,setup["n_points"]-2),
-                stages=[{k:s.get(k) for k in ("n_points","wall_s","transfer_s","iterations","trials","rejected_trials","diagnostics","fields")} for s in rep["stages"]],
+                stages=[{k:s.get(k) for k in ("n_points","wall_s","transfer_s","iterations","trials","rejected_trials","diagnostics","fields","tolerance","native_success")} for s in rep["stages"]],
                 samples=[dict(repeat=r["repeat"], wall_s=r["wall_s"], iterations=r["iterations"],
                     fine_iterations=r.get("fine_iterations"), equivalent_fine_updates=r.get("equivalent_fine_updates"),
                     rejected_trials=r.get("rejected_trials"), root_success=r.get("root_success"), same_root=r.get("same_root")) for r in measured(runs)],
@@ -235,7 +235,7 @@ def static_figures(summary, groups, payload, output):
             save_figure(fig,figures/f"stages_{case['case_id']}_{run['reconstruction']}")
 
 
-def results_content(summary, groups, audit):
+def results_content(summary, groups, audit, *, finding_override=None, failure_message=None):
     rows=[]; speedups=[]; excluded=[]; csv_rows=[]
     for (cid,recon,method),runs in groups.items():
         samples=measured(runs); times=[r["wall_s"] for r in samples]
@@ -267,6 +267,8 @@ def results_content(summary, groups, audit):
             finding=f"{sum(x[2]>1 for x in speedups)} configurations are faster and {sum(x[2]<1 for x in speedups)} are slower after including all hierarchy work."
     elif all(r.get("root_success") for r in summary["runs"]) and audit:
         finding="All measured solves reach steady roots. Matched MUSCL shock solutions are faster, while both subsonic controls are slower. Constant-reconstruction shock paths retain small near-sonic profile differences and their time ratios remain descriptive."
+    if finding_override is not None:
+        finding=finding_override
     meta=summary.get("metadata",{})
     settings=summary["setups"][0].get("settings",{})
     hierarchy=meta.get("hierarchy_points",[51,101,201,401])
@@ -278,6 +280,8 @@ def results_content(summary, groups, audit):
     body=body.replace('<div class="hero-meta">',f'<p><strong>{html.escape(finding)}</strong></p><div class="hero-meta">',1)
     if audit and not audit.get("pass",False):
         warning='<div class="callout" style="margin-top:18px"><div><strong>Root checks pass; two strict profile-agreement comparisons fail.</strong> Both constant-reconstruction shock sequences converge with the same detected shock locations, but differ from single-grid profiles near the sonic throat beyond the predeclared 10<sup>−4</sup> fixed-scale state threshold. Maximum scaled differences are approximately 6.94 × 10<sup>−4</sup> (shock35) and 8.83 × 10<sup>−4</sup> (shock70). Peak pressure differences are about 112 and 143 Pa. These time ratios are retained as descriptive measurements and are not validated same-root acceleration claims. The tolerance is unchanged; root uniqueness or the cause of the near-sonic discrepancy has not been established.</div></div>'
+        if failure_message is not None:
+            warning=failure_message
         body=body.replace('<section id="performance">',warning+'<section id="performance">',1)
     body+=table(["Case","Reconstruction","Method","n","Roots","Same root","Mean [s]","Min–max [s]","All updates","Fine updates","Fine-equivalent Newton work","Rejected trials"],rows)
     speedrows=[[cid,RECON.get(recon,recon),fmt(ratio,4)+"×",("Faster" if ratio>1 else "Slower") if valid else "Unqualified: root audit incomplete or differs"] for cid,recon,ratio,valid in speedups]
@@ -388,68 +392,53 @@ function profilePlot(){const c=selectCase(),traces=[],skip=Number(document.getEl
 for(let mi=0;mi<2;mi++){const method=['single_grid','grid_sequence'][mi];for(let ki=0;ki<2;ki++){const key=['p','M'][ki],scale=key==='p'?1e-3:1,idx=mi*2+ki,xa=idx?'x'+(idx+1):'x',ya=idx?'y'+(idx+1):'y';traces.push({x:rx,y:ref[key].map(v=>v*scale),name:'Analytical',mode:'lines',line:{color:css('--ink'),width:2,dash:'dash'},legendgroup:'analytical',showlegend:idx===0,xaxis:xa,yaxis:ya});for(const r of c.runs.filter(x=>x.method===method)){const f=r.fields,color=r.reconstruction==='constant'?'#9c179e':'#fca636';traces.push({x:f.x_m,y:f[key].map(v=>v*scale),name:reconNames[r.reconstruction],mode:'lines',line:{color,width:1.6,dash:r.reconstruction==='constant'?'solid':'dashdot'},legendgroup:r.reconstruction,showlegend:idx===0,xaxis:xa,yaxis:ya});const xx=[],yy=[];for(let i=r.reconstruction==='constant'?0:Math.floor(stride/2);i<f.x_m.length;i+=stride){xx.push(f.x_m[i]);yy.push(f[key][i]*scale);}traces.push({x:xx,y:yy,name:reconNames[r.reconstruction]+' markers',mode:'markers',marker:{color:css('--panel'),line:{color,width:1.8},size:8,symbol:'circle'},legendgroup:r.reconstruction,showlegend:false,xaxis:xa,yaxis:ya,hoverinfo:'skip'});}}}
 const ann=[{text:'Single grid',x:.21,y:1.08},{text:'Coarse to fine',x:.21,y:.48}].map(a=>({...a,xref:'paper',yref:'paper',showarrow:false,font:{size:13,color:css('--ink')}}));const z=layout({height:760,annotations:ann,xaxis:axis('x [m]',{domain:[0,.43],anchor:'y'}),yaxis:axis('Static pressure [kPa]',{domain:[.59,1]}),xaxis2:axis('x [m]',{domain:[.57,1],anchor:'y2'}),yaxis2:axis('Mach number [-]',{domain:[.59,1],anchor:'x2'}),xaxis3:axis('x [m]',{domain:[0,.43],anchor:'y3'}),yaxis3:axis('Static pressure [kPa]',{domain:[0,.40],anchor:'x3'}),xaxis4:axis('x [m]',{domain:[.57,1],anchor:'y4'}),yaxis4:axis('Mach number [-]',{domain:[0,.40],anchor:'x4'})});Plotly.react('profiles',traces,z,cfg);}
 function channel(){const c=selectCase(),x=c.x_m,A=c.area_m2;Plotly.react('channel',[{x,y:A.map(v=>v*1e4),mode:'lines',line:{color:'#9c179e',width:2},name:'Nozzle area'}],layout({xaxis:axis('Axial position x [m]'),yaxis:axis('Cross-sectional area [cm²]'),showlegend:false}),cfg);}
-function stages(){const skip=Number(document.getElementById('skip').value);if(!Number.isInteger(skip)||skip<0)return;const c=selectCase(),recon=document.getElementById('recon').value,r=c.runs.find(x=>x.method==='grid_sequence'&&x.reconstruction===recon),ref=c.reference_fine||c.reference,traces=[],palette=['#6a00a8','#b12a90','#e16462','#fca636'];if(!r)return;const stride=skip+1;
+function stages(){const skip=Number(document.getElementById('skip').value);if(!Number.isInteger(skip)||skip<0)return;const c=selectCase(),recon=document.getElementById('recon').value,r=c.runs.find(x=>x.method==='grid_sequence'&&x.reconstruction===recon),ref=c.reference_fine||c.reference,traces=[],palette=r&&r.stages.length===2?['#6a00a8','#fca636']:['#6a00a8','#b12a90','#e16462','#fca636'];if(!r)return;const stride=skip+1;
 for(let j=0;j<2;j++){const key=['p','M'][j],scale=j?1:1e-3;traces.push({x:ref.x_m||c.x_m,y:ref[key].map(v=>v*scale),name:'Analytical',mode:'lines',line:{color:css('--ink'),dash:'dash',width:2},showlegend:j===0,xaxis:j?'x2':'x',yaxis:j?'y2':'y'});r.stages.forEach((s,i)=>{let f=s.fields;traces.push({x:f.x_m,y:f[key].map(v=>v*scale),name:s.n_points+' points',mode:'lines',line:{color:palette[i%palette.length],dash:['dot','dash','dashdot','solid'][i%4],width:1.8},legendgroup:String(i),showlegend:j===0,xaxis:j?'x2':'x',yaxis:j?'y2':'y'});let xx=[],yy=[];for(let k=i;k<f.x_m.length;k+=stride){xx.push(f.x_m[k]);yy.push(f[key][k]*scale);}traces.push({x:xx,y:yy,mode:'markers',marker:{color:css('--panel'),line:{color:palette[i%palette.length],width:1.5},size:7},showlegend:false,legendgroup:String(i),xaxis:j?'x2':'x',yaxis:j?'y2':'y',hoverinfo:'skip'});});}
 Plotly.react('stage-profiles',traces,layout({height:460,xaxis:axis('x [m]',{domain:[0,.43]}),yaxis:axis('Static pressure [kPa]'),xaxis2:axis('x [m]',{domain:[.57,1],anchor:'y2'}),yaxis2:axis('Mach number [-]',{anchor:'x2'})}),cfg);
-let fields=['Points','Accepted updates','Attempted Newton corrections','Rejected trials','Stage solve [s]','Transfer [s]','Endpoint residual','Compression proxy [m]'];let rows=r.stages.map(s=>[s.n_points,s.iterations,s.trials,s.rejected_trials,s.wall_s.toPrecision(4),s.transfer_s.toPrecision(3),s.diagnostics.residual_rms.toExponential(3),s.diagnostics.shock_proxy_m===null?'—':s.diagnostics.shock_proxy_m.toPrecision(4)]);document.getElementById('stage-table').innerHTML='<div class="panel table-wrap"><table><thead><tr>'+fields.map(s=>'<th>'+s+'</th>').join('')+'</tr></thead><tbody>'+rows.map(r=>'<tr>'+r.map(v=>'<td class="numeric">'+v+'</td>').join('')+'</tr>').join('')+'</tbody></table></div>';}
+let fields=['Points','Declared spatial RMS target','Accepted updates','Attempted Newton corrections','Rejected trials','Stage solve [s]','Transfer [s]','Endpoint residual','Compression proxy [m]'];let rows=r.stages.map(s=>[s.n_points,s.tolerance.toExponential(1),s.iterations,s.trials,s.rejected_trials,s.wall_s.toPrecision(4),s.transfer_s.toPrecision(3),s.diagnostics.residual_rms.toExponential(3),s.diagnostics.shock_proxy_m===null?'—':s.diagnostics.shock_proxy_m.toPrecision(4)]);document.getElementById('stage-table').innerHTML='<div class="panel table-wrap"><table><thead><tr>'+fields.map(s=>'<th>'+s+'</th>').join('')+'</tr></thead><tbody>'+rows.map(r=>'<tr>'+r.map(v=>'<td class="numeric">'+v+'</td>').join('')+'</tr>').join('')+'</tbody></table></div>';}
 function redraw(){timing();historyPlot();profilePlot();stages();channel();}
 document.getElementById('case').innerHTML=DATA.map((c,i)=>'<option value="'+i+'">'+c.label+'</option>').join('');document.getElementById('recon').innerHTML=RECONS.map(r=>'<option value="'+r+'">'+reconNames[r]+'</option>').join('');document.getElementById('case').onchange=()=>{historyPlot();profilePlot();stages();};document.getElementById('recon').onchange=()=>{historyPlot();stages();};document.getElementById('skip').oninput=()=>{profilePlot();if(Number.isInteger(Number(document.getElementById('skip').value))&&Number(document.getElementById('skip').value)>=0)stages();};
 window.redraw=redraw;redraw();
 '''
 
 
-THEME_JS = '''function theme(value){document.documentElement.dataset.theme=value;try{localStorage.setItem('nozzle-grid-sequence-theme',value);}catch{}document.querySelectorAll('[data-theme-choice]').forEach(b=>b.setAttribute('aria-pressed',b.dataset.themeChoice===value));if(window.redraw&&!document.getElementById('results').hidden)redraw();}document.querySelectorAll('[data-theme-choice]').forEach(b=>b.onclick=()=>theme(b.dataset.themeChoice));theme(document.documentElement.dataset.theme);'''
-
+THEME_JS = r'''function theme(value){document.documentElement.dataset.theme=value;try{localStorage.setItem('nozzle-grid-sequence-theme',value);}catch{}document.querySelectorAll('[data-theme-choice]').forEach(b=>b.setAttribute('aria-pressed',b.dataset.themeChoice===value));for(const [page,study] of Object.entries(window.gridStudies||{}))if(!document.getElementById(page).hidden)study.redraw();}document.querySelectorAll('[data-theme-choice]').forEach(b=>b.onclick=()=>theme(b.dataset.themeChoice));theme(document.documentElement.dataset.theme);'''
 
 PAGE_JS = r'''
 let theoryTypeset=false, theoryTypesetTask=null;
-async function typesetTheory(){
-  if(theoryTypeset)return;
-  if(!theoryTypesetTask)theoryTypesetTask=MathJax.startup.promise.then(async()=>{
-    await MathJax.typesetPromise([document.getElementById('theory')]);
-    theoryTypeset=true;
-  });
-  await theoryTypesetTask;
-}
+async function typesetTheory(){if(theoryTypeset)return;if(!theoryTypesetTask)theoryTypesetTask=MathJax.startup.promise.then(async()=>{await MathJax.typesetPromise([document.getElementById('theory')]);theoryTypeset=true;});await theoryTypesetTask;}
 function routePage(scroll=true){
-  let key='results';try{key=decodeURIComponent(location.hash.slice(1))||key;}catch{}
-  const target=document.getElementById(key)||document.getElementById('results');
-  const page=target.closest('[data-report-page]')?.dataset.reportPage||'results';
-  document.querySelectorAll('[data-report-page]').forEach(p=>p.hidden=p.dataset.reportPage!==page);
-  document.querySelectorAll('[data-page-nav]').forEach(p=>p.hidden=p.dataset.pageNav!==page);
-  document.querySelectorAll('[data-page-link]').forEach(a=>{if(a.dataset.pageLink===page)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current');});
-  document.getElementById('sidebar-heading').textContent=page==='results'?'Results and verification':'Method and equations';
-  document.querySelectorAll('.sidebar a').forEach(a=>a.classList.toggle('active',a.hash==='#'+key));
-  document.title=(page==='results'?'Results':'Method and equations')+' · EulerNozzle grid sequencing';
-  requestAnimationFrame(()=>{
-    if(page==='results'){
-      if(window.redraw)redraw();
-      document.querySelectorAll('#results .js-plotly-plot').forEach(p=>Plotly.Plots.resize(p));
-    }else typesetTheory().catch(console.error);
-    if(scroll)target.scrollIntoView({block:'start'});
-  });
+ const defaultPage=document.body.dataset.defaultPage||'results';let key=defaultPage;try{key=decodeURIComponent(location.hash.slice(1))||key;}catch{}
+ const target=document.getElementById(key)||document.getElementById(defaultPage);
+ const page=target.closest('[data-report-page]')?.dataset.reportPage||'results';
+ document.querySelectorAll('[data-report-page]').forEach(p=>p.hidden=p.dataset.reportPage!==page);
+ document.querySelectorAll('[data-page-nav]').forEach(p=>p.hidden=p.dataset.pageNav!==page);
+ document.querySelectorAll('[data-page-link]').forEach(a=>{if(a.dataset.pageLink===page)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current');});
+ document.getElementById('sidebar-heading').textContent={results:'Original, looser coarse target',four_grid:'Four grids, tight tolerance',two_grid:'Two grids, tight tolerance',theory:'Method and equations'}[page];
+ document.querySelectorAll('.sidebar a').forEach(a=>a.classList.toggle('active',a.hash==='#'+key));
+ document.title={results:'Original four grids',four_grid:'Four grids (tight)',two_grid:'Two grids (tight)',theory:'Method and equations'}[page]+' - EulerNozzle grid sequencing';
+ window.multigridPageReady=new Promise((resolve,reject)=>requestAnimationFrame(async()=>{try{
+   const study=window.gridStudies?.[page];
+   if(study){await study.redraw();await Promise.all([...document.querySelectorAll('#'+page+' .js-plotly-plot')].map(p=>Plotly.Plots.resize(p)));}
+   else await typesetTheory();
+   if(scroll)target.scrollIntoView({block:'start',behavior:'instant'});
+   resolve();
+ }catch(e){console.error(e);document.documentElement.dataset.reportError=e.message;reject(e);}}));
 }
 window.addEventListener('hashchange',()=>routePage());
-window.addEventListener('beforeprint',()=>{
-  document.querySelectorAll('[data-report-page]').forEach(p=>p.hidden=false);
-});
+window.addEventListener('beforeprint',()=>{document.querySelectorAll('[data-report-page]').forEach(p=>p.hidden=false);});
 window.addEventListener('afterprint',()=>routePage(false));
 document.getElementById('print').onclick=async()=>{
-  document.querySelectorAll('[data-report-page]').forEach(p=>p.hidden=false);
-  await typesetTheory();
-  document.querySelectorAll('#results .js-plotly-plot').forEach(p=>Plotly.Plots.resize(p));
-  requestAnimationFrame(()=>requestAnimationFrame(()=>window.print()));
+ document.querySelectorAll('[data-report-page]').forEach(p=>p.hidden=false);
+ await typesetTheory();await Promise.all(Object.values(window.gridStudies||{}).map(s=>s.redraw()));
+ requestAnimationFrame(()=>requestAnimationFrame(()=>window.print()));
 };
-window.addEventListener('keydown',event=>{
-  if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='p'){
-    event.preventDefault();document.getElementById('print').click();
-  }
-});
+window.addEventListener('keydown',event=>{if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='p'){event.preventDefault();document.getElementById('print').click();}});
 routePage(Boolean(location.hash));
 '''
 
 
-def embed_downloads(body, output):
+def embed_downloads(body, output, name_prefix=""):
     """Replace repository-relative downloads with exact self-contained bytes."""
     mime={".json":"application/json", ".csv":"text/csv", ".pdf":"application/pdf"}
     records=[]
@@ -461,13 +450,13 @@ def embed_downloads(body, output):
         if not path.is_relative_to(output) or not path.is_file():
             raise ValueError(f"Missing or out-of-scope report download: {relative}")
         raw=path.read_bytes()
-        records.append(dict(name=path.name,bytes=len(raw),sha256=hashlib.sha256(raw).hexdigest()))
+        records.append(dict(name=name_prefix+path.name,bytes=len(raw),sha256=hashlib.sha256(raw).hexdigest()))
         uri=f"data:{mime.get(path.suffix,'application/octet-stream')};base64,"+base64.b64encode(raw).decode()
-        return f'href="{uri}" download="{html.escape(path.name,quote=True)}"'
+        return f'href="{uri}" download="{html.escape(name_prefix+path.name,quote=True)}"'
     return re.sub(r'href="([^"]+)"',replace,body),records
 
 
-def audit_documents(output, report):
+def audit_documents(output, report, *, pages=("results","theory"), download_count=4):
     """Reject neighboring-file dependencies in the shareable HTML artifact."""
     class Inspector(HTMLParser):
         def __init__(self):
@@ -509,7 +498,7 @@ def audit_documents(output, report):
     application_network_calls=bool(re.search(r'\b(?:fetch\s*\(|XMLHttpRequest|import\s*\()',JS+PAGE_JS+THEME_JS))
     result=dict(pass_=bool(len(doc.ids)==len(set(doc.ids)) and not broken and not doc.dependencies
                           and not css_dependencies and not application_network_calls
-                          and sorted(doc.pages)==["results","theory"] and len(downloads)==4),
+                          and sorted(doc.pages)==sorted(pages) and len(downloads)==download_count),
         file=report.name,internal_pages=doc.pages,unique_ids=len(doc.ids)==len(set(doc.ids)),
         ids=len(doc.ids),broken_links=broken,file_or_network_resource_dependencies=doc.dependencies,
         css_dependencies=css_dependencies,application_network_calls=application_network_calls,
@@ -520,7 +509,7 @@ def audit_documents(output, report):
     return result
 
 
-def shell(body, theory, scripts=""):
+def shell(body, theory, scripts="", two_grid=None, four_grid=None):
     css=(ASSETS/"report.css").read_text(encoding="utf-8")
     css+='\n.history-plot{height:470px}.profiles-plot{height:760px}section .table-wrap{margin-top:18px}main{max-width:1750px}.theory-content{max-width:1100px} @media(max-width:680px){.history-plot{height:600px!important}.profiles-plot{height:800px!important}}'
     css+='\n[hidden]{display:none!important}.report-page{margin:0;scroll-margin-top:88px}.report-page:focus{outline:none}@media print{body .report-page[hidden]{display:block!important}#theory{break-before:page}.report-page{break-inside:auto}}'
@@ -528,9 +517,22 @@ def shell(body, theory, scripts=""):
     theory_sections=(("equations","Euler balances"),("implicit","Implicit method"),("sequencing","Grid sequencing"),("acceleration","Shock acceleration"),("work","Timing and work"),("limits","Scope"))
     def nav(sections):
         return "".join(f'<a href="#{key}"><span>{i+1:02}</span>{text}</a>' for i,(key,text) in enumerate(sections))
+    extra_link = '<a href="#two_grid" data-page-link="two_grid">02 &middot; Two grids (tight)</a>' if two_grid else ''
+    four_link = '<a href="#four_grid" data-page-link="four_grid" aria-current="page">01 &middot; Four grids (tight)</a>' if four_grid else ''
+    default_page = 'four_grid' if four_grid else 'results'
+    original_link = ('<a href="#results" data-page-link="results">03 &middot; Original</a>' if four_grid
+                     else '<a href="#results" data-page-link="results" aria-current="page">01 &middot; Four grids</a>')
+    theory_number = '04' if four_grid else ('03' if two_grid else '02')
+    two_sections = (("two-experiment","Experiment and targets"),) + tuple(("two-"+key,label) for key,label in results_sections) + (("two-agreement","Profile agreement"),("two-tight-stages","Both stage residuals"),("two-historical-comparison","Four-grid context"))
+    extra_nav = f'<nav data-page-nav="two_grid" hidden>{nav(two_sections)}</nav>' if two_grid else ''
+    four_sections = tuple((key.replace('two-','four-',1),label.replace("Both stage","All stage")) for key,label in two_sections) + ((("four-tight-comparison","Two-grid comparison"),) if two_grid else ())
+    four_nav = f'<nav data-page-nav="four_grid">{nav(four_sections)}</nav>' if four_grid else ''
+    four_panel = f'<div class="report-page" id="four_grid" data-report-page="four_grid">{four_grid}</div>' if four_grid else ''
+    original_hidden = ' hidden' if four_grid else ''
+    extra_panel = f'<div class="report-page" id="two_grid" data-report-page="two_grid" hidden>{two_grid}</div>' if two_grid else ''
     licenses=(ASSETS/"vendor/PLOTLY_LICENSE.txt").read_text(encoding="utf-8")+'\n\n'+(ASSETS/"vendor/MATHJAX_LICENSE.txt").read_text(encoding="utf-8")
-    return f'''<!doctype html><html lang="en" data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light dark"><title>EulerNozzle · Grid sequencing</title><script>try{{document.documentElement.dataset.theme=localStorage.getItem('nozzle-grid-sequence-theme')||(matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light')}}catch{{}}</script><style>{css}</style></head><body>
-<header class="header"><a class="brand" href="#results">EulerNozzle <small>Grid sequencing</small></a><nav class="page-switch" aria-label="Report pages"><a href="#results" data-page-link="results" aria-current="page">01 · Results</a><a href="#theory" data-page-link="theory">02 · Method & equations</a></nav><div class="header-actions"><button id="print">Print / PDF</button><div class="theme-switch"><button data-theme-choice="light">Light</button><button data-theme-choice="dark">Dark</button></div></div></header><aside class="sidebar"><div class="eyebrow" id="sidebar-heading">Results and verification</div><nav data-page-nav="results">{nav(results_sections)}</nav><nav data-page-nav="theory" hidden>{nav(theory_sections)}</nav><div class="sidebar-foot"><span class="status-dot"></span>Single-file offline report<br>Results + theory included<br>No FAS implementation</div></aside><main><div class="report-page" id="results" data-report-page="results">{body}</div><div class="report-page" id="theory" data-report-page="theory" hidden>{theory}</div><footer><span>EulerNozzle · Coarse-to-fine implicit startup</span><span>Share this HTML file · No installation or internet required</span></footer><details><summary>Embedded library licenses</summary><pre>{html.escape(licenses)}</pre></details></main>{scripts}<script>{THEME_JS}</script><script>{PAGE_JS}</script></body></html>'''
+    return f'''<!doctype html><html lang="en" data-theme="light"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light dark"><title>EulerNozzle · Grid sequencing</title><script>try{{document.documentElement.dataset.theme=localStorage.getItem('nozzle-grid-sequence-theme')||(matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light')}}catch{{}}</script><style>{css}</style></head><body data-default-page="{default_page}">
+<header class="header"><a class="brand" href="#{default_page}">EulerNozzle <small>Grid sequencing</small></a><nav class="page-switch" aria-label="Report pages">{four_link}{extra_link}{original_link}<a href="#theory" data-page-link="theory">{theory_number} &middot; Method & equations</a></nav><div class="header-actions"><button id="print">Print / PDF</button><div class="theme-switch"><button data-theme-choice="light">Light</button><button data-theme-choice="dark">Dark</button></div></div></header><aside class="sidebar"><div class="eyebrow" id="sidebar-heading">Results and verification</div>{four_nav}<nav data-page-nav="results"{original_hidden}>{nav(results_sections)}</nav>{extra_nav}<nav data-page-nav="theory" hidden>{nav(theory_sections)}</nav><div class="sidebar-foot"><span class="status-dot"></span>Single-file offline report<br>Results + theory included<br>No FAS implementation</div></aside><main>{four_panel}{extra_panel}<div class="report-page" id="results" data-report-page="results"{original_hidden}>{body}</div><div class="report-page" id="theory" data-report-page="theory" hidden>{theory}</div><footer><span>EulerNozzle · Coarse-to-fine implicit startup</span><span>Share this HTML file · No installation or internet required</span></footer><details><summary>Embedded library licenses</summary><pre>{html.escape(licenses)}</pre></details></main>{scripts}<script>{THEME_JS}</script><script>{PAGE_JS}</script></body></html>'''
 
 
 def main():
@@ -538,6 +540,8 @@ def main():
     parser.add_argument("--output",type=Path,default=STUDY/"outputs")
     parser.add_argument("--report",type=Path,default=STUDY/"REPORT.html",
                         help="Single shareable HTML file, directly in the study root")
+    parser.add_argument("--two-grid-output",type=Path,help="Separate two-grid dataset to append; detected automatically for the main report")
+    parser.add_argument("--four-grid-output",type=Path,help="Uniformly tight four-grid dataset; detected automatically")
     args=parser.parse_args(); output=args.output.resolve()
     destination=args.report.resolve()
     if not output.is_relative_to(STUDY.resolve()):
@@ -549,6 +553,18 @@ def main():
     summary=json.loads(source.read_text(encoding="utf-8"))
     numerical_files=[source,output/"audit.json",*sorted((output/"runs").glob("*.json"))]
     numerical_hashes={p:digest(p) for p in numerical_files if p.exists()}
+    two_output = args.two_grid_output.resolve() if args.two_grid_output else output/"two_grid_tight"
+    include_two = (two_output/"summary.json").is_file()
+    if include_two:
+        if not two_output.is_relative_to(STUDY):raise ValueError("Two-grid data outside study")
+        for path in [two_output/"summary.json",two_output/"audit.json",*sorted((two_output/"runs").glob("*.json"))]:
+            numerical_hashes[path]=digest(path)
+    four_output = args.four_grid_output.resolve() if args.four_grid_output else output/"four_grid_tight"
+    include_four = (four_output/"summary.json").is_file()
+    if include_four:
+        if not four_output.is_relative_to(STUDY):raise ValueError("Four-grid data outside study")
+        for path in [four_output/"summary.json",four_output/"audit.json",*sorted((four_output/"runs").glob("*.json"))]:
+            numerical_hashes[path]=digest(path)
     groups=group_runs(summary,output)
     payload=make_payload(summary,groups)
     static_figures(summary,groups,payload,output)
@@ -559,7 +575,23 @@ def main():
         writer=csv.DictWriter(handle,fieldnames=list(csv_rows[0]));writer.writeheader();writer.writerows(csv_rows)
     body,downloads=embed_downloads(body,output)
     plotly=gzip.decompress((ASSETS/"vendor/plotly-2.35.2.min.js.gz").read_bytes()).decode()
-    scripts='<script>'+re.sub(r'</script',r'<\\/script',plotly,flags=re.I)+'</script><script>'+JS.replace('PAYLOAD',safe_json(payload))+'</script>'
+    import sys
+    from .tight_grid_report import build_page, study_script, compare_tight_experiments
+    rr=sys.modules[__name__]
+    scripts='<script>'+re.sub(r'</script',r'<\/script',plotly,flags=re.I)+'</script>'+study_script(rr,payload,'results')
+    two_body = None
+    if include_two:
+        two_body,two_payload,two_downloads,two_summary,two_audit=build_page(rr,two_output,summary,groups)
+        scripts+=study_script(rr,two_payload,'two_grid','two-')
+        downloads+=two_downloads
+    four_body = None
+    if include_four:
+        four_body,four_payload,four_downloads,four_summary,four_audit=build_page(rr,four_output,summary,groups,intervals=(50,100,200,400),prefix="four-")
+        if include_two:
+            four_body+=compare_tight_experiments(rr,four_output,two_output)
+        scripts+=study_script(rr,four_payload,'four_grid','four-')
+        downloads+=four_downloads
+
     mathjax=gzip.decompress((ASSETS/"vendor/mathjax-3.2.2-tex-svg.js.gz").read_bytes()).decode()
     mathscripts='''<script>window.MathJax={loader:{load:[]},tex:{inlineMath:[['$','$']],displayMath:[['$$','$$']],processEscapes:true,packages:['base','ams','newcommand','noundefined','configmacros']},svg:{fontCache:'local'},options:{enableMenu:false},startup:{typeset:false}};</script><script>'''+re.sub(r'</script',r'<\\/script',mathjax,flags=re.I)+'</script>'
     theory=THEORY
@@ -567,8 +599,13 @@ def main():
     hierarchy_text=", ".join(map(str,hierarchy[:-1]))+" and "+str(hierarchy[-1])
     theory=theory.replace("51, 101, 201 and 401",hierarchy_text)
     theory=theory.replace("401-point",f"{hierarchy[-1]}-point").replace("on 401 points",f"on {hierarchy[-1]} points").replace("on 51 points",f"on {hierarchy[0]} points")
-    destination.write_bytes(shell(body,theory,scripts+mathscripts).encode("utf-8"))
-    document_audit=audit_documents(output,destination)
+    if include_two:
+        theory += r'<section class="theory-content"><h2 id="two-grid-theory">Two grids with equally tight convergence</h2><p>The additional experiment uses 40 and 400 source mesh intervals: 41/401 sampled points, including two ghost slots and 39/399 interior unknown cells. Both stages stop at fixed-scale original spatial RMS 1e-8. The fine equations, flux, boundary maps and one-correction pseudo-time kernel are unchanged. A fresh single-grid control is timed in the same campaign.</p><div class="math-block">$$T_{2}=T_{41}+T_{\mathrm{transfer}}+T_{401\mid41},\qquad r_{41}\le10^{-8},\quad r_{401}\le10^{-8}.$$</div><p>These are steady residual targets, not tighter inner backward-Euler solves. A converged coarse field is still a solution of a different discrete system. Removing intermediate levels can reduce startup work while increasing fine-grid relaxation or changing the selected discrete profile. This experiment changes both the hierarchy and coarse tolerance; it does not isolate either cause. Full-state agreement and branch checks remain necessary before interpreting a time ratio as acceleration.</p></section>'
+    if include_four:
+        theory += r'<section class="theory-content"><h2 id="four-grid-theory">Four grids with one tight target</h2><p>The new primary experiment retains 50/100/200/400 source intervals, hence 51/101/201/401 points, and applies original spatial RMS 1e-8 to every stage. It changes only coarse stopping tolerances relative to the original four-grid study. The single-grid control is freshly measured; the original loose-coarse data and tight two-grid data remain separate.</p><div class="math-block">$$r_{51},r_{101},r_{201},r_{401}\le10^{-8},\qquad T_4=\sum_{\ell}T_{\ell}+T_{\mathrm{transfer}}.$$</div><p>These targets concern steady equations, not the accuracy of an individual one-correction pseudo-time step. Every transfer resets the retained SER controller. A tighter coarse solve can change the subsequent trajectory or discrete profile; the measured full cost and unrelaxed profile checks determine whether initialization accelerates the target solve.</p></section>'
+    destination.write_bytes(shell(body,theory,scripts+mathscripts,two_grid=two_body,four_grid=four_body).encode("utf-8"))
+    pages=tuple(p for p in (("four_grid",) if include_four else ()) + (("two_grid",) if include_two else ()) + ("results","theory"))
+    document_audit=audit_documents(output,destination,pages=pages,download_count=4*(1+int(include_two)+int(include_four)))
     for path,expected in numerical_hashes.items():
         if digest(path)!=expected:
             raise ValueError(f"Numerical data changed during report generation: {path}")
@@ -582,12 +619,22 @@ def main():
     manifest=dict(summary_sha256=digest(source),audit_sha256=digest(audit_file) if audit else None,
         files={p.relative_to(STUDY).as_posix():digest(p) for p in [destination,output/"timing_samples.csv",output/"report_audit.json",*sorted((output/"figures").glob('*'))]},
         artifact_paths_relative_to="development/roberto/multigrid",
-        report=destination.name,standalone_html=True,internal_pages=["results","theory"],
+        report=destination.name,standalone_html=True,internal_pages=list(pages),
         embedded_downloads=downloads,numerical_files_checked=len(numerical_hashes),numerical_data_unchanged=True,
         representative_policy="lower median-duration measured actual run; no averaged trajectories",
         generated_artifacts_only=True,document_structure_pass=document_audit["pass_"])
+    if include_two:
+        manifest["two_grid_dataset"] = dict(summary_sha256=digest(two_output/"summary.json"),audit_sha256=digest(two_output/"audit.json"),
+            hierarchy_points=two_summary["metadata"]["hierarchy_points"],mesh_intervals=two_summary["metadata"]["mesh_intervals"],
+            coarse_tolerance=two_summary["metadata"]["coarse_tolerance"],fine_tolerance=two_summary["metadata"]["fine_tolerance"],
+            retained_attempts=len(two_summary["runs"]),stage_targets_verified=all(s["residual_target_met"] for r in two_audit["results"] for s in r["stage_residual_checks"]))
+    if include_four:
+        manifest["four_grid_dataset"] = dict(summary_sha256=digest(four_output/"summary.json"),audit_sha256=digest(four_output/"audit.json"),
+            hierarchy_points=four_summary["metadata"]["hierarchy_points"],mesh_intervals=four_summary["metadata"]["mesh_intervals"],
+            coarse_tolerance=four_summary["metadata"]["coarse_tolerance"],fine_tolerance=four_summary["metadata"]["fine_tolerance"],
+            retained_attempts=len(four_summary["runs"]),stage_targets_verified=all(s["residual_target_met"] for r in four_audit["results"] for s in r["stage_residual_checks"]))
     (output/"report_manifest.json").write_text(json.dumps(manifest,indent=2)+'\n',encoding="utf-8")
-    print(f"Generated {destination}; results + theory in one file; {len(summary['runs'])} retained samples; numerical data unchanged")
+    print(f"Generated {destination}; pages={list(pages)}; retained attempts={len(summary['runs']) + (len(two_summary['runs']) if include_two else 0) + (len(four_summary['runs']) if include_four else 0)}; numerical data unchanged")
 
 
 if __name__=="__main__":

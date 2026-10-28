@@ -154,7 +154,7 @@ def solve_method(problems, method, *, coarse_tolerance, max_iterations):
                                   and finest["native_success"] and finest["diagnostics"]["root_success"]))
 
 
-def main():
+def main(argv=None):
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cases", nargs="+", choices=list(CASES), default=list(CASES))
     parser.add_argument("--reconstructions", nargs="+", choices=["constant", "muscl_van_leer"],
@@ -164,7 +164,7 @@ def main():
     parser.add_argument("--coarse-tolerance", type=float, default=1e-5)
     parser.add_argument("--max-iterations", type=int, default=5000)
     parser.add_argument("--output", type=Path, default=STUDY/"outputs")
-    args=parser.parse_args()
+    args=parser.parse_args(argv)
     if args.repeats<1 or any(n<5 for n in args.points) or sorted(set(args.points))!=args.points:
         parser.error("Require positive repeats and strictly increasing mesh sizes >=5")
     output=args.output.resolve()
