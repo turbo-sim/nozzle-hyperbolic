@@ -13,7 +13,7 @@
 
 ## Cloning git repository and installing dependencies
 
-Install Python 3.11-3.13 and Poetry, then clone the repository and install the
+Install Python 3.12-3.13 and Poetry, then clone the repository and install the
 locked dependencies. Poetry keeps the environment in the project's `.venv/`
 directory; Conda is not required.
 
