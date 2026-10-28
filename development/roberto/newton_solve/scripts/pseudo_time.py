@@ -15,6 +15,7 @@ def solve_implicit(
     dt_growth_factor=None,
     max_halvings=8,
     record_controls=False,
+    state_is_admissible=None,
 ):
     """Record accepted pseudo-time updates against the common steady norm.
 
@@ -31,6 +32,10 @@ def solve_implicit(
     otherwise 1.2; an explicit keyword overrides it. Other controller settings
     retain the historical defaults. Control
     histories record all trials separately from accepted physical updates.
+    ``state_is_admissible(full_state)`` optionally supplies a study-specific
+    domain check. The default retains the historical positive p/u/h policy;
+    rest-start studies can explicitly admit zero or signed velocity while
+    requiring positive pressure and enthalpy. No source kernel is changed.
     """
     if dt_growth_factor is None:
         dt_growth_factor = problem.settings.get("dt_growth_factor", 1.2)
@@ -112,7 +117,11 @@ def solve_implicit(
             )
             valid = (
                 np.isfinite(new).all()
-                and np.all(new[1:-1] > 0.0)
+                and (
+                    np.all(new[1:-1] > 0.0)
+                    if state_is_admissible is None
+                    else bool(state_is_admissible(new))
+                )
                 and all(v <= limit for v, limit in zip(increments, (0.2, 0.1, 0.2)))
             )
             if record_controls:
@@ -144,7 +153,9 @@ def solve_implicit(
         accepted_control = dict(
             dt_s=dt, effective_cfl=dt * s["CFL"] / base_dt, existing_ssr=previous_ssr
         )
-        if first_ssr is None:
+        # At a rest start the native momentum-relative SSR can be nonfinite.
+        # Wait for a meaningful finite reference before enabling the SER ramp.
+        if first_ssr is None and np.isfinite(previous_ssr):
             first_ssr = previous_ssr
         rms = record(index)
     if rms <= residual_rms_tol:
