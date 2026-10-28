@@ -278,7 +278,7 @@ def render(report, output: Path, destination: Path):
     """Create REPORT.html, ADAPTED.html, THEORY.html, outcome CSVs and rendering manifest."""
     output, destination = Path(output).resolve(), Path(destination).resolve()
     if not output.is_relative_to(STUDY) or not destination.is_relative_to(STUDY):
-        raise ValueError("All report artifacts must remain inside backpressure_BC")
+        raise ValueError("All report artifacts must remain inside BC_backpressure")
     output.mkdir(parents=True, exist_ok=True)
     raw_summary = (output / "summary.json").read_bytes()
     summary_hash = digest(raw_summary)

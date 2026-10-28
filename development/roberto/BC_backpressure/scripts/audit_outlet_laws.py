@@ -14,7 +14,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from development.roberto.backpressure_BC.scripts.outlet_laws import make_outlet_law
+from development.roberto.BC_backpressure.scripts.outlet_laws import make_outlet_law
 
 jax.config.update("jax_enable_x64", True)
 

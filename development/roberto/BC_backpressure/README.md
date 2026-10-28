@@ -75,11 +75,11 @@ other first-call costs are recorded separately. This is not a speed benchmark.
 From the repository root in the existing Poetry environment:
 
 ```powershell
-poetry run python -B -m development.roberto.backpressure_BC.scripts.launch
-poetry run python -B -m development.roberto.backpressure_BC.scripts.launch --resume
-poetry run python -B -m development.roberto.backpressure_BC.scripts.launch --audit-only
-poetry run python -B -m development.roberto.backpressure_BC.scripts.launch --plot-only
-poetry run python -B -m development.roberto.backpressure_BC.scripts.audit_outlet_laws
+poetry run python -B -m development.roberto.BC_backpressure.scripts.launch
+poetry run python -B -m development.roberto.BC_backpressure.scripts.launch --resume
+poetry run python -B -m development.roberto.BC_backpressure.scripts.launch --audit-only
+poetry run python -B -m development.roberto.BC_backpressure.scripts.launch --plot-only
+poetry run python -B -m development.roberto.BC_backpressure.scripts.audit_outlet_laws
 ```
 
 The default output is `outputs/recommended_cfl/`; use `--resume` when it already

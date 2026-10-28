@@ -40,7 +40,7 @@ def main():
     args, forwarded = parser.parse_known_args()
     output = args.output.resolve()
     if not output.is_relative_to(STUDY.resolve()):
-        raise ValueError("All study outputs must remain inside backpressure_BC")
+        raise ValueError("All study outputs must remain inside BC_backpressure")
     output.mkdir(parents=True, exist_ok=True)
     source, hashes = snapshot(output)
     environment = dict(
@@ -64,7 +64,7 @@ def main():
         "-B",
         "-u",
         "-m",
-        "development.roberto.backpressure_BC.scripts.run_study",
+        "development.roberto.BC_backpressure.scripts.run_study",
         "--output",
         str(output),
         *forwarded,

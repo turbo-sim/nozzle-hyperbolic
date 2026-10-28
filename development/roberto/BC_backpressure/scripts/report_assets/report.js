@@ -230,7 +230,7 @@
   for (const id of ["show-analytical", "show-initial", "pressure-range"]) $(id).addEventListener("change", scheduleFigures);
   $("download-csv").addEventListener("click", () => {
     const url = URL.createObjectURL(new Blob([BUNDLE.csv], {type: "text/csv;charset=utf-8"}));
-    const a = document.createElement("a"); a.href = url; a.download = `backpressure_BC_${DATA.metadata.selected_initialization}_outcomes.csv`; a.click(); URL.revokeObjectURL(url);
+    const a = document.createElement("a"); a.href = url; a.download = `BC_backpressure_${DATA.metadata.selected_initialization}_outcomes.csv`; a.click(); URL.revokeObjectURL(url);
   });
   window.backpressureBCReport = {bundle: BUNDLE, ready: () => queue, plots};
   tables();
