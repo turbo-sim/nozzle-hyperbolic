@@ -33,7 +33,7 @@ Two directories are **generated** and are not committed:
 ## Quickstart
 
 ```bash
-cd case_study/flashing-nozzle-data
+cd cases/flashing-nozzle-data
 
 # validate every source folder and build the master case table
 python scripts/build_index.py

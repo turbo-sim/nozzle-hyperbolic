@@ -45,8 +45,8 @@ from matplotlib.lines import Line2D
 import yaml
 import jaxprop as jxp
 
-from case_study.nicfd.nicfd_figures.config_loader import load_config
-from case_study.nicfd.nicfd_figures.nozzle_silhouette import add_nozzle
+from cases.nicfd.nicfd_figures.config_loader import load_config
+from cases.nicfd.nicfd_figures.nozzle_silhouette import add_nozzle
 from nozzle_hyperbolic.models.two_fluid.analytical import (
     isentropic_ic,
     isentropic_shock_ic,

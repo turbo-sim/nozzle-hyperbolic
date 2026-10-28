@@ -116,7 +116,7 @@ except ImportError:                     # pragma: no cover
 HERE = pathlib.Path(__file__).resolve().parent
 DEV = HERE.parent
 sys.path.insert(0, str(DEV))
-from case_study.nicfd.grid_convergence_gci import gci_3grid, FORMAL_ORDER, P_MIN, P_MAX  # noqa: E402
+from cases.nicfd.grid_convergence_gci import gci_3grid, FORMAL_ORDER, P_MIN, P_MAX  # noqa: E402
 
 FS = 1.25
 

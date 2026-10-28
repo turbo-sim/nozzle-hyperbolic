@@ -1,5 +1,15 @@
 # Nozzle-hyperbolic
 
+## Repository layout
+
+- [src/nozzle_hyperbolic/](src/nozzle_hyperbolic/): installable solver package.
+- [cases/](cases/README.md): physical applications and literature datasets,
+  including [validation data](cases/validation/notes.md).
+- [development/](development/README.md): Alberto's legacy research scripts and
+  Roberto's controlled verification and numerical studies.
+- [tests/](tests/): production tests.
+- [docs/](docs/): architecture, derivations and numerical findings.
+
 
 ## Cloning git repository and installing dependencies
 

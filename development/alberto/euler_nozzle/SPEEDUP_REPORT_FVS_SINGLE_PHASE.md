@@ -268,7 +268,7 @@ python validation_fvs_shock_nozzle.py [settings/settings_fvs_validation_lettieri
 ### 8.1 Grid convergence: 3-grid GCI (N = 300 / 500 / 850)
 
 `dev_scripts/gci_fvs_validation.py` (Celik et al. 2008, Fs = 1.25; the GCI
-maths is imported from `case_study/nicfd/grid_convergence_gci.py`).  h = 0.329
+maths is imported from `cases/nicfd/grid_convergence_gci.py`).  h = 0.329
 / 0.197 / 0.116 mm, r32 = 1.669, r21 = 1.701.  The exact solution is known, so
 every GCI band is checked against the true error of the fine grid.  Report:
 `results/fvs_validation_gci_20261007_144830/`.

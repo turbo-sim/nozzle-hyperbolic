@@ -18,7 +18,7 @@ record, plots).  This folder only holds the case:
 
 Relative paths in the settings file (eos table_dir, geometry file_path) are
 resolved from this folder.  The results folder is set by save_options.repo_main,
-which main_two_fluid.py resolves from dev_scripts/ - hence the '../case_study/...'
+which main_two_fluid.py resolves from dev_scripts/ - hence the '../cases/...'
 there.
 
 Environment: the project's poetry venv (jax, jaxprop, nurbspy, CoolProp 7.2).

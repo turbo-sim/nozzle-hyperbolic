@@ -62,7 +62,8 @@ a local cleanup or solver experiment. Check the branch rather than assuming
 | `development/` | Single development workspace; the `alberto/` and `roberto/` collections are indexed in its README |
 | `development/roberto/` | Current controlled verification examples and numerical investigations |
 | `development/alberto/` | Legacy research code, grouped by topic; see its README and execution audit |
-| `case_study/`, `validation_cases/` | Existing cases and inputs; inspect their imports/settings before changing them |
+| `cases/` | Physical applications and reference datasets; start with its README and inspect each case's imports/settings |
+| `cases/validation/` | Literature validation data and associated processing/plotting scripts |
 | `tests/` | Production pytest tests only |
 | `docs/` | Organization/audit documents, physical derivations and historical findings; verify dated claims against the current checkout |
 

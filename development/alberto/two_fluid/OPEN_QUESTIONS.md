@@ -356,7 +356,7 @@ branches blended through it rather than switched by `lax.cond`. Expose it in
 the settings (`sources.blend`). Default `linear` until A/B'd.
 
 **Probe.** Restart the N400 thick-ghost case-4 solution
-(`case_study/data_assimilation/results/thick_N400_thick_N400_muscl_van_albada_20261014_172944`)
+(`cases/data_assimilation/results/thick_N400_thick_N400_muscl_van_albada_20261014_172944`)
 with each option and compare the plateau SSR and where the remaining drift sits.
 
 ## 12. Thick-ghost stages plateau at SSR ~1e-5: the algebraic momentum pin — TODO
@@ -377,5 +377,5 @@ by ~1e-10 (round-off) while the SSR stays at 1.419e-5.
 suggests 1e-6) and check whether the plateau disappears.
 
 **Probe.** Restart from
-`case_study/data_assimilation/results/verify_S1_N100_muscl_van_albada_20261014_164504`
+`cases/data_assimilation/results/verify_S1_N100_muscl_van_albada_20261014_164504`
 (cheap, N=100) with `numerics.pin_mom_tau: 1.0e-6`.

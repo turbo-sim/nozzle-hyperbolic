@@ -102,5 +102,5 @@ run:
                                     # <1%, transient stalls wander by ~10%)
 
 save_options:
-  repo_main: ../case_study/data_assimilation/results
+  repo_main: ../cases/data_assimilation/results
   repo_run: c4_cold

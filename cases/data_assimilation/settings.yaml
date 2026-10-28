@@ -108,7 +108,7 @@ run:
 # repo_main is resolved from dev_scripts/ by main_two_fluid.py; this puts the
 # results in ./results of this folder.
 save_options:
-  repo_main: ../case_study/data_assimilation/results
+  repo_main: ../cases/data_assimilation/results
   repo_run: test_new_area
 
 time_control:
@@ -117,4 +117,4 @@ time_control:
 
 ic:
   type: restart
-  run: ../case_study/data_assimilation/results/test_new_area_N200_muscl_van_albada_20261014_161335
+  run: ../cases/data_assimilation/results/test_new_area_N200_muscl_van_albada_20261014_161335

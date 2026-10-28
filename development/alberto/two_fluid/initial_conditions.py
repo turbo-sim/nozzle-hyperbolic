@@ -443,7 +443,7 @@ def nozzlex_initial_condition(
 def ic_from_nozzlex_pickle(pkl_path, x_grid, *, phase1="auto"):
     """
     Build a two-fluid time-marching IC from a SAVED nozzlex solution pickle,
-    e.g. the output of case_study/elliot_1979/diffrax_nozzle_two_fluid_jump.py:
+    e.g. the output of cases/elliot_1979/diffrax_nozzle_two_fluid_jump.py:
 
         {'pass1': {...}, 'pass2': {...|None}, 'pass3': {...|None}}
 

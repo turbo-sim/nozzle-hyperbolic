@@ -215,7 +215,7 @@ slightly less than quadratic); relevant for adjoints (§7).  With
 - Local time stepping (per-cell dt).
 - HEM solver (`fvm.py` `make_jax_stadtke_step`): same fixed 8 Newton iterations plus a
   **dense** `jnp.linalg.solve` on a banded system — the same ideas apply.
-- `sensitivity_study.py` and `case_study/r1233zde_inlet_sensitivity/run_simulation.py`
+- `sensitivity_study.py` and `cases/r1233zde_inlet_sensitivity/run_simulation.py`
   build the solver themselves and do not forward the new switches yet.
 
 ---
