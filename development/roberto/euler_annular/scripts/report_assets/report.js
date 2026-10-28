@@ -114,6 +114,20 @@
   }
   function currentCase() { return DATA.cases.find(c=>c.id===state.caseId); }
   function currentMesh() { return currentCase().meshes.find(m=>m.cells===state.cells); }
+  function directionMarkers(arrows, horizontal, vertical, color, minimumLength=0) {
+    // Marker sizes are pixels: short projected chords must not hide arrowheads.
+    const visible=arrows.filter(a=>Math.hypot(
+      a.head[horizontal]-a.tail[horizontal],a.head[vertical]-a.tail[vertical])>minimumLength);
+    if(!visible.length)return null;
+    return {type:"scatter",mode:"markers",zorder:5,
+      x:visible.map(a=>a.head[horizontal]),y:visible.map(a=>a.head[vertical]),
+      marker:{symbol:"arrow",size:15,color,angleref:"up",
+        angle:visible.map(a=>Math.atan2(a.head[horizontal]-a.tail[horizontal],
+          a.head[vertical]-a.tail[vertical])*180/Math.PI),
+        line:{color,width:.5}},
+      name:"Flow direction",legendgroup:"paths",showlegend:false,hoverinfo:"skip",
+      meta:{role:"flow-direction",fixed_pixel_size:15}};
+  }
   async function channelView(view) {
     const channelId=state.channelCase==="current" ? state.caseId : state.channelCase;
     const record=DATA.channels.cases[channelId],g=record.geometry,p=palette();
@@ -174,14 +188,12 @@
         traces.push({type:"scatter",mode:"lines",x:path.y,y:path.z,line:{color:blue,width:2},
           name:"Illustrative flow paths",legendgroup:"paths",showlegend:i===0,
           hovertemplate:"y = %{x:.5f} m<br>z = %{y:.5f} m<extra>Axial projection of the 3D flow path</extra>"});
-        path.arrows.forEach(a=>{
-          // A purely axial chord has no directional arrow in this projection.
-          if(Math.hypot(a.head[1]-a.tail[1],a.head[2]-a.tail[2])<=1e-12*outer)return;
-          annotations.push({x:a.head[1],y:a.head[2],ax:a.tail[1],ay:a.tail[2],
-            xref:"x",yref:"y",axref:"x",ayref:"y",showarrow:true,text:"",arrowcolor:blue,
-            arrowwidth:1.6,arrowhead:2,arrowsize:1.3});
-        });
+        const markers=directionMarkers(path.arrows,1,2,blue,1e-12*outer);
+        if(markers)traces.push(markers);
       });
+      if(!traces.some(t=>t.meta?.role==="flow-direction"))annotations.push({
+        xref:"paper",yref:"paper",x:.5,y:1.04,showarrow:false,
+        text:"Flow is axial: no transverse direction in this projection",font:{size:10,color:blue}});
       layout={...layout,xaxis:axis("Transverse y [m]"),
         yaxis:axis("Transverse z [m]",{scaleanchor:"x",scaleratio:1}),annotations};
     } else if(view==="meridional") {
@@ -193,8 +205,8 @@
         name:side==="minus" ? "Channel walls" : "Channel wall",legendgroup:"walls",showlegend:side==="minus",line:{color:wall,width:2},hoverinfo:"skip"});
       record.cross_gap_paths.forEach((path,i)=>{
         traces.push({type:"scatter",mode:"lines",x:path.x,y:path.r,line:{color:blue,width:2},name:"Illustrative direction paths",legendgroup:"paths",showlegend:i===0,hoverinfo:"skip"});
-        path.arrows.forEach(a=>annotations.push({x:a.head[0],y:a.head[1],ax:a.tail[0],ay:a.tail[1],
-          xref:"x",yref:"y",axref:"x",ayref:"y",showarrow:true,text:"",arrowcolor:blue,arrowwidth:1.6,arrowhead:2,arrowsize:1.3}));
+        const markers=directionMarkers(path.arrows,0,1,blue);
+        if(markers)traces.push(markers);
       });
       layout={...layout,xaxis:axis("Axial coordinate x [m]"),yaxis:axis("Radius r [m]",{scaleanchor:"x",scaleratio:1}),annotations};
     }
@@ -207,7 +219,7 @@
   }
   async function renderChannel() {
     await Promise.all([channelView("meridional"),channelView("frontal"),channelView("annular")]);
-    $("channel-caption").textContent="Left: equal-scale meridional section of the actual NURBS walls. Center: frontal projection along the axial x direction, using the same (y,z) paths as the 3D view and the projected passage envelope. Right: the revolved annular channel. All paths and direction arrows share one color. Arrows follow increasing meridional distance, including radial inflow; purely axial motion has no frontal direction arrow. Swirl paths use saved finest-grid MUSCL velocities and illustrate quasi-1D flow direction without resolving a cross-gap velocity profile.";
+    $("channel-caption").textContent="Left: equal-scale meridional section of the actual NURBS walls. Center: frontal projection along the axial x direction, using the same (y,z) paths as the 3D view and the projected passage envelope. Right: the revolved annular channel. All paths and arrows share one color. The 2D arrowheads have a fixed pixel size and are drawn above the streamlines to remain visible. Arrows follow increasing meridional distance, including radial inflow; purely axial motion is labeled in the frontal view because it has no transverse direction. Swirl paths use saved finest-grid MUSCL velocities and illustrate quasi-1D flow direction without resolving a cross-gap velocity profile.";
   }
   function methodRows(mesh) { return methods.map(m=>mesh.methods[m]); }
   function historyRows(history, accepted=true) {

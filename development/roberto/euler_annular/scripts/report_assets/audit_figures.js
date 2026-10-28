@@ -145,6 +145,20 @@ async function auditFigureDefinitions({vm, source, html, assert, setTimeout, cle
     const input=element("marker-skip"),old=app.state.stride;input.value=invalid;
     await input.handlers.input({target:input});assert(app.state.stride===old,"Invalid input changed stride");
   }
+  let visible2DArrowheads=0;
+  function checkArrowMarkers(trace,arrows,h,v,color,minimumLength=0) {
+    const expected=arrows.filter(a=>Math.hypot(a.head[h]-a.tail[h],a.head[v]-a.tail[v])>minimumLength);
+    assert(trace&&trace.mode==="markers"&&trace.zorder===5,"Arrowheads must be drawn above the lines");
+    assert(trace.marker.symbol==="arrow"&&trace.marker.size===15&&trace.marker.angleref==="up","Arrowheads must keep a visible pixel size");
+    assert(trace.marker.color===color,"Arrowheads must use the streamline color");
+    exact(trace.x,expected.map(a=>a.head[h]),"Arrowhead horizontal position");
+    exact(trace.y,expected.map(a=>a.head[v]),"Arrowhead vertical position");
+    trace.marker.angle.forEach((degrees,i)=>{
+      const a=expected[i],dx=a.head[h]-a.tail[h],dy=a.head[v]-a.tail[v],length=Math.hypot(dx,dy),radians=degrees*Math.PI/180;
+      assert(Math.abs(Math.sin(radians)-dx/length)<1e-12&&Math.abs(Math.cos(radians)-dy/length)<1e-12,"Arrowhead points against the projected flow");
+    });
+    visible2DArrowheads+=expected.length;
+  }
   for(const id of Object.keys(payload.channels.cases)) {
     app.state.channelCase=id;await app.renderChannel();
     const record=payload.channels.cases[id];
@@ -152,9 +166,9 @@ async function auditFigureDefinitions({vm, source, html, assert, setTimeout, cle
       const traces=element("channel-"+view).data;
       assert(traces.length>0,"Missing simultaneous channel view");
       assert(traces.every(t=>!(t.name??"").includes("control")),"Control polygon/points shown");
-      const pathsInView=traces.filter(t=>t.legendgroup==="paths");
+      const pathsInView=traces.filter(t=>t.legendgroup==="paths"&&t.mode==="lines");
       assert(pathsInView.every(t=>t.line.color==="#2462d1"&&(t.opacity??1)===1),"Streamlines must share one color and opacity");
-      assert((element("channel-"+view).layout.annotations??[]).every(a=>a.arrowcolor==="#2462d1"),"2D arrow color differs");
+      assert((element("channel-"+view).layout.annotations??[]).filter(a=>a.showarrow).every(a=>a.arrowcolor==="#2462d1"),"2D arrow color differs");
       if(view==="annular") {
         const paths=traces.filter(t=>t.type==="scatter3d"&&t.legendgroup?.includes("path"));
         assert(paths.length===record.paths_3d.length,"3D paths missing");
@@ -163,17 +177,22 @@ async function auditFigureDefinitions({vm, source, html, assert, setTimeout, cle
         assert(cones.length===record.paths_3d.length,"Flow arrows missing");
         assert(cones.every(t=>t.colorscale.every(c=>c[1]==="#2462d1")),"3D arrow color differs");
       } else if(view==="frontal") {
-        const paths=traces.filter(t=>t.legendgroup==="paths");
+        const paths=traces.filter(t=>t.legendgroup==="paths"&&t.mode==="lines");
         assert(paths.length===record.paths_3d.length,"Frontal paths missing");
         paths.forEach((t,i)=>{exact(t.x,record.paths_3d[i].y,"Frontal y projection");exact(t.y,record.paths_3d[i].z,"Frontal z projection");});
         const outer=Math.max(...record.walls.minus.r,...record.walls.plus.r);
         const arrows=record.paths_3d.flatMap(p=>p.arrows).filter(a=>Math.hypot(a.head[1]-a.tail[1],a.head[2]-a.tail[2])>1e-12*outer);
         const layout=element("channel-frontal").layout;
         assert(layout.yaxis.scaleanchor==="x"&&layout.yaxis.scaleratio===1,"Frontal axes distort the flow paths");
-        exact(layout.annotations.map(a=>[a.x,a.y,a.ax,a.ay]),arrows.map(a=>[a.head[1],a.head[2],a.tail[1],a.tail[2]]),"Frontal arrow projection");
+        const heads=traces.filter(t=>t.meta?.role==="flow-direction");
+        assert(heads.length===record.paths_3d.length,"A frontal streamline has no direction marker trace");
+        heads.forEach((t,i)=>checkArrowMarkers(t,record.paths_3d[i].arrows,1,2,"#2462d1",1e-12*outer));
+        assert(heads.reduce((n,t)=>n+t.x.length,0)===arrows.length,"Projected arrowheads omitted");
       } else {
         assert(element("channel-meridional").layout.yaxis.scaleanchor==="x","Section is not equal scale");
-        assert(element("channel-meridional").layout.annotations.length===record.cross_gap_paths.reduce((n,p)=>n+p.arrows.length,0),"2D arrows missing");
+        const heads=traces.filter(t=>t.meta?.role==="flow-direction");
+        assert(heads.length===record.cross_gap_paths.length,"A meridional streamline has no direction marker trace");
+        heads.forEach((t,i)=>checkArrowMarkers(t,record.cross_gap_paths[i].arrows,0,1,"#2462d1"));
       }
       channels++;
     }
@@ -204,11 +223,12 @@ async function auditFigureDefinitions({vm, source, html, assert, setTimeout, cle
   assert(element("field-plot").data[2].line.color==="#b277ef","Dark reference contrast");
   for(const view of ["meridional","frontal","annular"]){
     const traces=element("channel-"+view).data;
-    assert(traces.filter(t=>t.legendgroup==="paths").every(t=>t.line.color==="#88b7ff"),"Dark-theme streamline colors differ");
-    assert((element("channel-"+view).layout.annotations??[]).every(a=>a.arrowcolor==="#88b7ff"),"Dark-theme arrows differ");
+    assert(traces.filter(t=>t.legendgroup==="paths"&&t.mode==="lines").every(t=>t.line.color==="#88b7ff"),"Dark-theme streamline colors differ");
+    assert((element("channel-"+view).layout.annotations??[]).filter(a=>a.showarrow).every(a=>a.arrowcolor==="#88b7ff"),"Dark-theme arrows differ");
     assert(traces.filter(t=>t.type==="cone").every(t=>t.colorscale.every(c=>c[1]==="#88b7ff")),"Dark 3D arrows differ");
+    assert(traces.filter(t=>t.meta?.role==="flow-direction").every(t=>t.marker.color==="#88b7ff"&&t.marker.size===15),"Dark 2D arrowheads differ");
   }
   assert(!elements.has("transient-plot"),"Removed contact graph was rendered");
   assert(!elements.has("channel-plot"),"Old single geometry graph was rendered");
-  return {passed:true,field_figures:figures,full_line_points_checked:points,channel_views:channels,synthetic_future_balance_traces:8,internal_pages_checked:4,embedded_evidence_download_checked:true,visual_browser_QA:false};
+  return {passed:true,field_figures:figures,full_line_points_checked:points,channel_views:channels,visible_2D_arrowheads_checked:visible2DArrowheads,synthetic_future_balance_traces:8,internal_pages_checked:4,embedded_evidence_download_checked:true,visual_browser_QA:false};
 }
