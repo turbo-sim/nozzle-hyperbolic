@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="description" content="An interactive numerical investigation of perfect-gas nozzle flow from stagnant conditions through choking, internal shocks and supersonic discharge.">
+  <title>Backpressure continuation in a quasi-one-dimensional Euler nozzle</title>
+  <style>__STYLE__</style>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to report</a>
+  <div class="report-shell">
+    <aside class="report-rail" aria-label="Report navigation">
+      <a class="report-mark" href="#summary" aria-label="Nozzle backpressure report, overview">
+        <span class="mark-line" aria-hidden="true"></span>
+        <span>NOZZLE<br>HYPERBOLIC</span>
+      </a>
+      <p class="rail-label">Technical report</p>
+      <nav aria-label="Contents">
+        <ol class="contents">
+          <li><a href="#summary">Abstract</a></li>
+          <li><a href="#setup">Model &amp; numerical method</a></li>
+          <li><a href="#physics">Analytical regimes</a></li>
+          <li><a href="#operating-map">Continuation results</a></li>
+          <li><a href="#transitions">Critical transitions</a></li>
+          <li><a href="#profiles">Field distributions</a></li>
+          <li><a href="#branches">Steady-state multiplicity</a></li>
+          <li><a href="#convergence">Convergence</a></li>
+          <li><a href="#quality">Accuracy &amp; conservation</a></li>
+          <li><a href="#data">Operating-point data</a></li>
+          <li><a href="#reproducibility">Limitations &amp; reproducibility</a></li>
+        </ol>
+      </nav>
+      <div class="rail-footer">
+        <p>Perfect-gas Euler<br>Implicit steady marching</p>
+      </div>
+    </aside>
+
+    <main id="main-content" class="report-main">
+      <header id="summary" class="report-header">
+        <div class="eyebrow">NUMERICAL VERIFICATION REPORT <span class="eyebrow-divider">/</span> 28 OCTOBER 2026</div>
+        <h1>Backpressure continuation in a quasi-one-dimensional Euler nozzle</h1>
+        <p class="report-deck">Steady-state operating regimes, shock departure and boundary-condition sensitivity with implicit FVS time marching.</p>
+        <div class="report-meta"><span>104 residual-verified states</span><span>201-point mesh</span><span>Source unchanged</span></div>
+        <div class="header-actions"><button id="print-report" class="button button-quiet" type="button">Print report</button></div>
+        <p id="report-status" class="report-status" role="status" aria-live="polite">Loading interactive figures from the results embedded in this report.</p>
+        <noscript><p class="notice">The scientific narrative and setup remain readable without JavaScript. Enable JavaScript to explore the Plotly figures, select operating points and download the embedded data.</p></noscript>
+      </header>
+
+      <section class="section section-overview" aria-labelledby="overview-title">
+        <h2 id="overview-title">Abstract</h2>
+        <p class="lead">A descending backpressure-continuation study is performed for inviscid, adiabatic perfect-gas flow through a symmetric converging-diverging nozzle. The unchanged implicit Euler solver is evaluated at 87 continuation points, 14 independent simple starts and three supersonic restarts. All 104 saved states meet the original spatial-residual criterion. Comparison with analytical solutions nevertheless identifies delayed choking, persistent outlet shock capture and multiple discrete steady states at identical imposed backpressure. Residual convergence, conservation and physical branch selection must therefore be assessed independently.</p>
+        <div class="table-wrap summary-results">
+          <table>
+            <caption>Principal quantitative results · 201-point mesh</caption>
+            <thead><tr><th scope="col">Diagnostic</th><th scope="col">Analytical reference</th><th scope="col">Numerical observation</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">First choking backpressure p<sub>b</sub>/p<sub>0</sub></th><td class="numeric">0.93711174</td><td class="numeric">0.9342–0.9340, descending path</td></tr>
+              <tr><th scope="row">Shock-at-exit / shock-release p<sub>b</sub>/p<sub>0</sub></th><td class="numeric">0.51314809</td><td class="numeric">0.425–0.420, descending path</td></tr>
+              <tr><th scope="row">Choked mass flow</th><td class="numeric">0.07003015 kg/s</td><td class="numeric">0.06995144 kg/s; −0.1124%</td></tr>
+              <tr><th scope="row">Last-interior Mach at p<sub>b</sub>/p<sub>0</sub> = 0.42</th><td>Supersonic interior branch</td><td>2.1871 with continuation; 0.5008 with simple cold start</td></tr>
+              <tr><th scope="row">Maximum independently audited spatial RMS</th><td>Target: 10<sup>−8</sup></td><td class="numeric">9.78 × 10<sup>−9</sup></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="scope-line">Numerical transition intervals are sampled brackets for this mesh and continuation direction. They do not establish continuum transition pressures or physical hysteresis.</p>
+      </section>
+
+      <section id="setup" class="section" aria-labelledby="setup-title">
+        <div class="section-heading"><p class="section-kicker">1</p><h2 id="setup-title">Physical model and numerical method</h2></div>
+        <div class="text-columns">
+          <div>
+            <h3>Investigation objective</h3>
+            <p>The existing five-case verification baseline is extended to an operating-pressure map. The objective is to quantify the solver response near choking and shock departure, and to establish when the implemented outlet condition ceases to transmit ambient-pressure information into the discrete equations.</p>
+            <p>The principal diagnostics are mass-flow saturation, shock location, last-interior thermodynamic state, entropy-flux rise and sensitivity to numerical initialization.</p>
+          </div>
+          <div>
+            <h3>Continuation protocol</h3>
+            <p>Starting from a uniform stagnant reservoir state, backpressure decreases from p<sub>b</sub>/p<sub>0</sub> = 1 to 0.02. Each point starts from the previous converged <em>numerical</em> field. Analytical profiles and shock positions are used only as references.</p>
+            <p>The study contains <strong>87 descending points</strong>, <strong>14 independent simple starts</strong>, and <strong>three supersonic-restart probes</strong>. Each point is a separate steady pseudo-time solve; this is not a time-accurate pressure ramp.</p>
+          </div>
+        </div>
+        <div class="setup-layout">
+          <div class="table-wrap setup-table-wrap">
+            <table class="setup-table">
+              <caption>Shared baseline conditions</caption>
+              <tbody>
+                <tr><th scope="row">Physical model</th><td>Quasi-1D, inviscid, adiabatic Euler; area-variation source</td></tr>
+                <tr><th scope="row">Fluid backend</th><td>JAXProp <code>FluidPerfectGas</code>, Air</td></tr>
+                <tr><th scope="row">Reservoir</th><td>p<sub>0</sub> = 200 kPa; T<sub>0</sub> = 300 K</td></tr>
+                <tr><th scope="row">Nozzle</th><td>L = 0.2 m; A<sub>t</sub> = 1.5 × 10<sup>−4</sup> m²; A<sub>in</sub> = A<sub>e</sub> = 2A<sub>t</sub></td></tr>
+                <tr><th scope="row">Gas constants</th><td>γ = 1.40169049; R = 287.04739 J/(kg K)</td></tr>
+                <tr><th scope="row">Grid</th><td>201 points including two algebraic boundary/ghost points; Δx = 1 mm</td></tr>
+                <tr><th scope="row">Spatial method</th><td>Regularized Städtke FVS; ordinary Van Leer MUSCL</td></tr>
+                <tr><th scope="row">Implicit update</th><td>Source backward-Euler/Newton kernel; one Newton correction per accepted update; colored AD Jacobian; banded linear solve</td></tr>
+                <tr><th scope="row">Convergence</th><td>Fixed-scale spatial RMS and native SSR below 10<sup>−8</sup>, with an exact-rest exception for native SSR</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <figure class="chart-panel geometry-panel">
+            <div id="geometry-chart" class="plot plot-geometry" role="img" aria-label="Interactive nozzle geometry showing area variation and throat location" aria-describedby="geometry-caption"></div>
+            <figcaption id="geometry-caption">The same symmetric converging-diverging geometry is used at every pressure. The throat is at x = 0.100 m. Last-interior diagnostics sample x = 0.199 m; the nominal exit/ghost is at x = 0.200 m.</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section id="physics" class="section" aria-labelledby="physics-title">
+        <div class="section-heading"><p class="section-kicker">2</p><h2 id="physics-title">Analytical operating regimes</h2></div>
+        <p>The perfect-gas reference combines the isentropic area–Mach relation with normal-shock conservation. The exit has both a subsonic and a supersonic area–Mach root. These give different pressure landmarks.</p>
+        <div class="equation" aria-label="Perfect-gas isentropic area-Mach and static-pressure relations">A/A* = (1/M) { [2/(γ + 1)] [1 + (γ − 1)M²/2] }<sup>(γ + 1)/[2(γ − 1)]</sup><br>p/p<sub>0</sub> = [1 + (γ − 1)M²/2]<sup>−γ/(γ − 1)</sup></div>
+        <div class="table-wrap">
+          <table class="landmark-table">
+            <thead><tr><th scope="col">Landmark</th><th scope="col">p<sub>b</sub>/p<sub>0</sub></th><th scope="col">Backpressure</th><th scope="col">Ideal physical interpretation</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">First critical / choking</th><td class="numeric">0.93711174</td><td class="numeric">187.422 kPa</td><td>Sonic throat, subsonic limiting downstream branch</td></tr>
+              <tr><th scope="row">Normal shock at exit</th><td class="numeric">0.51314809</td><td class="numeric">102.630 kPa</td><td>Supersonic expansion inside; normal shock on the exit plane</td></tr>
+              <tr><th scope="row">Adapted / design</th><td class="numeric">0.09373883</td><td class="numeric">18.748 kPa</td><td>Supersonic exit static pressure matches ambient</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>For decreasing backpressure, the ideal solution progresses from rest to entirely subsonic flow, then to a choked throat with a normal shock in the divergent section. The shock moves downstream and reaches the exit at the second landmark. Between the shock-at-exit and adapted pressures, the nozzle interior is supersonic and the discharged jet is overexpanded. Below the adapted pressure the jet is underexpanded.</p>
+        <div class="note note-physics"><h3>Interior-domain reference</h3><p>Once the normal shock is outside the nozzle, the ideal internal supersonic solution is independent of ambient pressure. The adapted condition does not introduce a new internal branch. External compression/expansion waves, viscous separation and jet shock cells are outside the modeled domain.</p></div>
+        <p class="small-copy">The sonic <em>throat static pressure</em> is different from these exit/backpressure landmarks. The familiar sonic pressure ratio near 0.528 is not the first choking backpressure of this converging-diverging nozzle.</p>
+      </section>
+
+      <section id="operating-map" class="section" aria-labelledby="map-title">
+        <div class="section-heading"><p class="section-kicker">3</p><h2 id="map-title">Backpressure-continuation results</h2></div>
+        <p>The primary curves follow descending numerical continuation. Reference curves describe the ideal nozzle interior at the same sampling coordinates. Pressure decreases from left to right.</p>
+        <div class="figure-toolbar">
+          <div class="control-group"><label class="check-label"><input id="show-cold" type="checkbox" checked> Show independent simple starts</label><label class="check-label"><input id="show-restarts" type="checkbox"> Show supersonic-restart branch probes</label></div>
+          <button id="reset-charts" class="button button-quiet" type="button">Reset chart zoom</button>
+        </div>
+        <div class="chart-legend" aria-label="Figure legend"><span><i class="legend-line legend-primary" aria-hidden="true"></i>Descending numerical path</span><span><i class="legend-line legend-reference" aria-hidden="true"></i>Analytical reference</span><span><i class="legend-circle" aria-hidden="true"></i>Simple cold start</span><span><i class="legend-triangle" aria-hidden="true"></i>Supersonic restart</span></div>
+        <p class="interaction-hint">Drag to zoom; double-click to restore the axes. Hover for values. Plotly legends let you hide or isolate individual traces.</p>
+        <div class="chart-grid chart-grid-two">
+          <figure class="chart-panel"><h3>Mass flow</h3><div id="mass-chart" class="plot" role="img" aria-label="Interactive mass flow versus imposed backpressure"></div><figcaption>The numerical choked plateau is 0.06995144 kg/s, 0.1124% below the exact value of 0.07003015 kg/s.</figcaption></figure>
+          <figure class="chart-panel"><h3>Interior entropy-flux rise</h3><div id="entropy-chart" class="plot" role="img" aria-label="Interactive interior entropy-flux-rise estimate versus backpressure"></div><figcaption>The numerical estimate is ṁ[s(last interior) − s(first interior)]. The dashed reference uses the same interior interval; the dotted blue curve includes the exit-plane shock. Both exclude the external jet.</figcaption></figure>
+          <figure class="chart-panel"><h3>Last-interior temperature</h3><div id="temperature-chart" class="plot" role="img" aria-label="Interactive last-interior temperature versus backpressure"></div><figcaption>After numerical shock departure, T = 152.944 K versus an analytical 153.003 K at x = 0.199 m.</figcaption></figure>
+          <figure class="chart-panel"><h3>Last-interior pressure</h3><div id="pressure-chart" class="plot" role="img" aria-label="Interactive last-interior pressure versus imposed backpressure"></div><figcaption>Imposed ambient pressure, the last physical sample and the ghost pressure are distinct quantities near the outlet.</figcaption></figure>
+          <figure class="chart-panel"><h3>Throat Mach number</h3><div id="throat-chart" class="plot" role="img" aria-label="Interactive throat Mach number versus backpressure"></div><figcaption>The existing sonic-limit accuracy discrepancy appears as a delayed approach to the choked branch.</figcaption></figure>
+          <figure class="chart-panel"><h3>Last-interior Mach number</h3><div id="exit-chart" class="plot" role="img" aria-label="Interactive last-interior Mach number versus backpressure"></div><figcaption>The abrupt branch change is a numerical operating-path result; its location differs substantially from the analytical shock-at-exit landmark.</figcaption></figure>
+        </div>
+        <div class="note"><h3>Entropy-flux diagnostic</h3><div class="equation">ΔṠ<sub>int</sub> = ṁ<sub>mean face</sub> [s(x<sub>last interior</sub>) − s(x<sub>first interior</sub>)]</div><p>For a converged, nearly mass-conservative field, this quantity estimates entropy production in the sampled interval. A shock between the last interior point and the exit is excluded. The analytical shock loss including the exit plane uses a different integration-domain convention. The small shock-free numerical value, approximately −0.00228 W/K, is a discretization error; the inviscid isentropic reference is zero.</p></div>
+      </section>
+
+      <section id="transitions" class="section" aria-labelledby="transitions-title">
+        <div class="section-heading"><p class="section-kicker">4</p><h2 id="transitions-title">Choking and shock-departure transitions</h2></div>
+        <div class="text-columns">
+          <div><h3>Weak driving and delayed choking</h3><p>At p<sub>b</sub>/p<sub>0</sub> = 0.9999, the computed mass flow is 0.0013560 kg/s versus 0.0028914 kg/s analytically, a <strong>53.1% relative deficit</strong> at small absolute flow. At 0.97 the deficit is 3.52%.</p><p>At the analytical first critical ratio 0.93711174, numerical throat Mach is <strong>0.8464</strong> and mass flow is 2.23% low. The descending numerical solution reaches its choked plateau between <strong>0.9342 and 0.9340</strong>.</p></div>
+          <div><h3>Outlet shock retention</h3><p>At the analytical shock-at-exit ratio 0.51314809, last-interior Mach remains 0.5421. A captured shock persists near the outlet even as imposed pressure is reduced much further.</p><p>At a pressure ratio of 0.425, last-interior pressure has risen to <strong>0.65746 p<sub>0</sub></strong>. The descending path becomes supersonic only between <strong>0.425 and 0.420</strong>. This delay exceeds a one-point exit-sampling offset.</p></div>
+        </div>
+        <div class="chart-grid chart-grid-two">
+          <figure class="chart-panel"><h3>Choking neighborhood</h3><div id="choking-chart" class="plot" role="img" aria-label="Interactive detailed view of the numerical choking transition"></div><figcaption>The bracket refers to the sampled descending trajectory on this 201-point mesh.</figcaption></figure>
+          <figure class="chart-panel"><h3>Shock departure neighborhood</h3><div id="release-chart" class="plot" role="img" aria-label="Interactive detailed view of outlet shock release and branch dependence"></div><figcaption>Cold-start checks expose a different converged state at the same backpressure.</figcaption></figure>
+        </div>
+      </section>
+
+      <section id="profiles" class="section" aria-labelledby="profiles-title">
+        <div class="section-heading"><p class="section-kicker">5</p><h2 id="profiles-title">Axial field distributions</h2></div>
+        <p>Select any saved state to compare its pressure, Mach, temperature and entropy profiles with the perfect-gas reference. The outlet zoom separates a well-contained shock from the interaction with the final interior points and algebraic ghost.</p>
+        <div class="profile-controls control-panel">
+          <div class="field"><label for="profile-mode">Numerical starting path</label><select id="profile-mode"><option value="descending">Descending continuation</option><option value="cold">Independent simple start</option><option value="supersonic_restart">Supersonic restart</option></select></div>
+          <div class="field"><label for="profile-select">Saved operating point</label><select id="profile-select"><option value="0">Loading operating points…</option></select></div>
+          <div class="slider-field"><label for="profile-index">Move through the selected path</label><input id="profile-index" type="range" min="0" max="86" step="1" value="0"><div class="slider-endpoints"><span>First point</span><span>Last point</span></div></div>
+          <div class="profile-actions"><button id="profile-play" class="button" type="button">Play sequence</button><button id="profile-stop" class="button button-quiet" type="button">Pause</button></div>
+          <div class="profile-checks"><label class="check-label"><input id="profile-outlet" type="checkbox"> Zoom to outlet</label><label class="check-label"><input id="profile-ghosts" type="checkbox"> Include algebraic ghosts</label><label class="check-label"><input id="profile-alt" type="checkbox" checked> Overlay alternative start at the same pressure</label></div>
+          <output id="profile-readout" class="profile-readout" for="profile-mode profile-select profile-index">Choose a saved operating point to inspect its numerical and analytical states.</output>
+        </div>
+        <div class="chart-grid chart-grid-two">
+          <figure class="chart-panel"><h3>Pressure</h3><div id="profile-p" class="plot" role="img" aria-label="Interactive axial pressure distribution at the selected backpressure"></div><figcaption>Near the retained shock, pressure can overshoot at the last interior point while the ghost still tracks ambient.</figcaption></figure>
+          <figure class="chart-panel"><h3>Mach number</h3><div id="profile-M" class="plot" role="img" aria-label="Interactive axial Mach distribution at the selected backpressure"></div><figcaption>A locally subsonic final point keeps pressure forcing active even when the flow just upstream is supersonic.</figcaption></figure>
+          <figure class="chart-panel"><h3>Temperature</h3><div id="profile-T" class="plot" role="img" aria-label="Interactive axial temperature distribution at the selected backpressure"></div><figcaption>The boundary-retained branch gives a much warmer final interior state than the shock-free reference.</figcaption></figure>
+          <figure class="chart-panel"><h3>Entropy relative to the reservoir</h3><div id="profile-ds" class="plot" role="img" aria-label="Interactive axial entropy difference from the reservoir at the selected backpressure"></div><figcaption>A large rise followed by a decrease across the last interior points is an artifact of the discrete outlet/shock interaction, not the ideal post-shock isentropic diffuser.</figcaption></figure>
+        </div>
+        <p class="small-copy">Ghosts are algebraic boundary states, not physical measurement points. No exterior oblique shock or expansion fan is resolved in these profiles.</p>
+      </section>
+
+      <section id="branches" class="section" aria-labelledby="branches-title">
+        <div class="section-heading"><p class="section-kicker">6</p><h2 id="branches-title">Multiplicity of discrete steady states</h2></div>
+        <p>At p<sub>b</sub>/p<sub>0</sub> = 0.42, descending continuation reaches the shock-free supersonic branch. A simple cold start retains a shock near the outlet. Both final fields satisfy the original discrete spatial-residual target.</p>
+        <div class="table-wrap">
+          <table class="branch-table">
+            <thead><tr><th scope="col">Starting path</th><th scope="col">Last-interior Mach</th><th scope="col">Last-interior p/p<sub>0</sub></th><th scope="col">Temperature</th><th scope="col">Spatial-residual target</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">Descending continuation</th><td class="numeric">2.1871</td><td class="numeric">0.09529</td><td class="numeric">152.94 K</td><td>Met</td></tr>
+              <tr><th scope="row">Independent simple start</th><td class="numeric">0.5008</td><td class="numeric">0.67656</td><td class="numeric">271.07 K</td><td>Met</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <figure class="chart-panel chart-panel-wide"><div id="branch-chart" class="plot plot-wide" role="img" aria-label="Interactive comparison of the two converged branches at identical backpressure"></div><figcaption>Identical ambient-pressure input, different converged outlet states. The narrow disturbed region can contribute only a modest domain-averaged pressure error while exit temperature and Mach are substantially wrong.</figcaption></figure>
+        <details class="explanation" open><summary>Mach-dependent outlet closure and branch selection</summary><div class="details-body"><p>The source outlet computes a pressure-imposition weight from the last-interior Mach:</p><div class="equation" aria-label="Pressure-imposition weight equals one half times one plus hyperbolic tangent of one minus absolute Mach divided by 0.004">w = ½ [1 + tanh((1 − |M<sub>last</sub>|) / 0.004)]</div><div class="equation">p<sub>ghost</sub> = w p<sub>b</sub> + (1 − w)(2p<sub>last</sub> − p<sub>previous</sub>)</div><p>For subsonic outflow, w ≈ 1 and ambient pressure enters the ghost state. For supersonic outflow, w is zero to floating-point precision and the outlet extrapolates its own pressure.</p><p>Three probes restart the already-supersonic field at pressure ratios 0.48, 0.70 and 0.95. Each remains a steady root without an update. The local boundary has removed ambient pressure from the equations; it cannot initiate an incoming shock from an exterior domain that is absent.</p><p>This agrees with small-disturbance supersonic outflow causality, but does not establish the correct operating branch after a large ambient-pressure increase. It is not evidence of physical hysteresis. Adding the same boundary equations to a larger Newton vector would retain these roots; algebraic coupling alone would not supply exterior interaction.</p></div></details>
+      </section>
+
+      <section id="convergence" class="section" aria-labelledby="convergence-title">
+        <div class="section-heading"><p class="section-kicker">7</p><h2 id="convergence-title">Spatial-residual convergence</h2></div>
+        <p>Let R<sub>i,k</sub> denote the integrated steady finite-volume residual in interior cell i and conservation equation k. The independent residual audit uses fixed reservoir scales:</p>
+        <div class="equation">ε<sub>R</sub> = { [1/(3N<sub>int</sub>)] Σ<sub>i,k</sub> (R<sub>i,k</sub>/D<sub>i,k</sub>)² }<sup>1/2</sup>, &nbsp; D<sub>i</sub> = A<sub>i</sub>ρ<sub>0</sub>a<sub>0</sub>(1, a<sub>0</sub>, h<sub>0</sub>)</div>
+        <p>The convergence requirement is ε<sub>R</sub> ≤ 10<sup>−8</sup> together with the source native SSR criterion for non-stagnant states. Native SSR uses a state-dependent conservative-variable normalization; ε<sub>R</sub> remains defined at zero momentum. Neither metric measures discretization error against the analytical solution.</p>
+        <p>The largest independently recomputed fixed-scale spatial RMS is <strong>9.78 × 10<sup>−9</sup></strong>. The histories below show actual accepted updates at selected operating pressures, with rejected trials retained in the embedded raw results.</p>
+        <div class="figure-toolbar"><div class="field field-inline"><label for="history-region">Show operating region</label><select id="history-region"><option value="all">All operating regions</option><option value="near_rest">Near rest / subsonic</option><option value="choking">Choking neighborhood</option><option value="internal_shock">Internal shocks</option><option value="shock_exit">Shock-at-exit neighborhood</option><option value="external">Supersonic / exterior adjustment</option></select></div></div>
+        <figure class="chart-panel chart-panel-wide"><div id="history-chart" class="plot plot-history" role="img" aria-label="Interactive fixed-scale spatial residual histories versus accepted implicit updates"></div><figcaption>The fixed reservoir scaling remains meaningful at rest. Native SSR is poorly conditioned at zero momentum, so the stagnant equilibrium is checked with the fixed-scale residual and takes zero updates.</figcaption></figure>
+        <div class="text-columns"><p><strong>Zero updates has a precise meaning.</strong> Twenty-one descending points are already steady at their initial field: the initial stagnant equilibrium and subsequent pressure changes on the supersonic-outlet branch. The three deliberate supersonic restarts also require no update.</p><p><strong>The controller rejects unsuitable trials.</strong> There are 724 rejected trial updates across the study. No point exhausts the final safety policy. These are steady parameter-continuation experiments, not a repeated timing benchmark or a physical transient clock.</p></div>
+      </section>
+
+      <section id="quality" class="section" aria-labelledby="quality-title">
+        <div class="section-heading"><p class="section-kicker">8</p><h2 id="quality-title">Conservation and reference errors</h2></div>
+        <div class="chart-grid chart-grid-two">
+          <figure class="chart-panel"><h3>Mass conservation</h3><div id="mass-balance-chart" class="plot" role="img" aria-label="Interactive relative range of actual source numerical face mass flux"></div><figcaption>The maximum non-stagnant descending face-flux range is 3.37 × 10<sup>−6</sup> relative to mean mass flow. The audit uses the source numerical flux rather than cell-centered ρuA.</figcaption></figure>
+          <figure class="chart-panel"><h3>Total-enthalpy accuracy</h3><div id="enthalpy-chart" class="plot" role="img" aria-label="Interactive maximum interior total-enthalpy error versus backpressure"></div><figcaption>The descending path reaches 4.03% error at pressure ratio 0.425. Across the additional checks, the cold start at 0.42 reaches 5.09%; the 4.03% value is not an all-case maximum.</figcaption></figure>
+        </div>
+        <div class="note note-caution"><h3>Attribution limits</h3><p>Pressure overshoots, large local entropy decreases and total-enthalpy errors demonstrate a discrete outlet/shock interaction. This experiment does not isolate the contribution of ghost extrapolation, MUSCL near the boundary, FVS dissipation or mesh resolution. No source modification or numerical repair is part of this report.</p></div>
+      </section>
+
+      <section id="data" class="section" aria-labelledby="data-title">
+        <div class="section-heading"><p class="section-kicker">9</p><h2 id="data-title">Recorded operating-point data</h2></div>
+        <p>“Reference regime” describes the analytical operating map, not necessarily the branch selected by the numerical solve. The three startup categories should be kept distinct.</p>
+        <div class="data-toolbar"><div class="field"><label for="table-mode">Starting path</label><select id="table-mode"><option value="all">All saved states</option><option value="descending">Descending continuation</option><option value="cold">Independent simple starts</option><option value="supersonic_restart">Supersonic restarts</option></select></div><div class="field search-field"><label for="table-search">Filter operating points</label><input id="table-search" type="search" placeholder="Pressure ratio or reference regime" autocomplete="off"></div><output id="table-count" class="table-count" for="table-mode table-search">104 saved states</output></div>
+        <div class="table-wrap run-table-wrap" tabindex="0" aria-label="Scrollable operating-point data table"><table id="run-table" class="run-table"><thead><tr><th scope="col">Starting path</th><th scope="col">p<sub>b</sub>/p<sub>0</sub></th><th scope="col">Reference regime</th><th scope="col">Final RMS</th><th scope="col">Updates</th><th scope="col">Last-interior M</th><th scope="col">Mass flow<br>[kg/s]</th><th scope="col">Entropy-flux rise<br>[W/K]</th></tr></thead><tbody id="run-table-body"><tr><td colspan="8">The interactive table is populated from the embedded results.</td></tr></tbody></table></div>
+        <div class="download-actions"><button id="download-csv" class="button" type="button">Download operating-point CSV</button><button id="download-json" class="button button-quiet" type="button">Download complete results JSON</button></div>
+      </section>
+
+      <section id="reproducibility" class="section" aria-labelledby="reproducibility-title">
+        <div class="section-heading"><p class="section-kicker">10</p><h2 id="reproducibility-title">Limitations and reproducibility</h2></div>
+        <div class="text-columns"><div><h3>Numerical scope</h3><p>The experiment reuses the source implicit kernel, reconstruction, flux and boundary maps. Backpressure is passed dynamically through a JIT wrapper; its normalized one-step difference from an ordinary static-pressure source factory is 4.09 × 10<sup>−17</sup>.</p><p>The experimental outer controller requires both native SSR and the independent spatial RMS to meet 10<sup>−8</sup>, except at exact rest. It stops if all nine trial updates are rejected and does not use the production driver's plateau exit. Source hashes are unchanged.</p></div><div><h3>Physical scope</h3><p>The model contains neither an exterior jet nor viscous boundary layers. It cannot resolve oblique shocks, expansion fans, separation or exterior shock cells. The descending and restart results do not establish physical hysteresis.</p><p>A useful next investigation would vary mesh and reconstruction around the outlet while keeping this physical setup and the branch/entropy audits fixed. Alternative boundary laws and exterior interaction are separate modeling questions.</p></div></div>
+        <details class="explanation"><summary>Reference checks and dataset provenance</summary><div class="details-body"><p>The extended perfect-gas reference agrees with the shared subsonic reference to approximately 2.05 × 10<sup>−14</sup> in Mach, and with the existing general-EOS shocked reference to 3.84 × 10<sup>−9</sup> in Mach. The saved p, T and M fields were independently reconstructed to re-evaluate the original spatial residual and numerical face mass flux for all 104 states.</p><div id="provenance-content" class="provenance-content"></div><dl class="provenance-list"><div><dt>Embedded dataset fingerprint</dt><dd><span id="dataset-hash">Available in generated metadata</span></dd></div><div><dt>Interactive plotting runtime</dt><dd><span id="runtime-version">Plotly embedded in this document</span></dd></div></dl></div></details>
+        <div class="reading-list"><h3>Physical context</h3><p><a href="https://www.grc.nasa.gov/www/wind/valid/cdv/cdv.html" target="_blank" rel="noopener noreferrer">NASA: Converging-Diverging Verification Nozzle</a><span aria-hidden="true"> · </span><a href="https://www.engapplets.vt.edu/fluids/CDnozzle/cdinfo.html" target="_blank" rel="noopener noreferrer">Virginia Tech: nozzle operating regimes</a></p></div>
+      </section>
+
+      <footer class="report-footer"><div><strong>Nozzle-hyperbolic</strong><span>Backpressure analysis · Perfect-gas Euler</span></div><p>This standalone report embeds its figures and recorded numerical results. Zooming, selection and downloads run locally; no simulation is executed by the document.</p><a href="#summary">Back to overview ↑</a></footer>
+    </main>
+  </div>
+  <script type="application/json" id="report-data">__REPORT_DATA__</script>
+  <script>__PLOTLY_RUNTIME__</script>
+  <script>__REPORT_APP__</script>
+</body>
+</html>

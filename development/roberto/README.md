@@ -32,3 +32,7 @@ The [boundary-condition study](boundary_conditions/README.md) compares internal
 ghost treatment with coupled algebraic boundary equations using matched implicit
 Newton and banded solvers. Its reports retain repeated timing samples and the
 same five-case residual and physical audits.
+
+The [backpressure analysis](backpressure_analysis/README.md) follows a descending
+operating-pressure sweep from rest through choking, internal shocks and
+supersonic discharge, including overexpanded and underexpanded operation.
