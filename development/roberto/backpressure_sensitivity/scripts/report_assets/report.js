@@ -7,7 +7,10 @@
   const cold = runs.filter(r => r.mode === 'cold');
   const restarts = runs.filter(r => r.mode === 'supersonic_restart');
   const $ = id => document.getElementById(id);
-  const ink = '#24394b', muted = '#5c7183', grid = '#e5edf3', axis = '#91a7b9';
+  let ink, muted, grid, axis;
+  const cssColor = key => getComputedStyle(document.documentElement).getPropertyValue(key).trim();
+  function readTheme() {ink=cssColor('--ink');muted=cssColor('--muted');grid=cssColor('--grid');axis=cssColor('--line');}
+  readTheme();
   const numericalColor = bundle.colors[80], coldColor = bundle.colors[120], restartColor = bundle.colors[35];
   const fmt = (v, digits = 4) => Number.isFinite(v) ? Number(v).toFixed(digits) : '—';
   const exp = v => Number.isFinite(v) ? v.toExponential(2) : 'undefined at rest';
@@ -29,11 +32,11 @@
     const ax = title => ({title:{text:title, font:{size:13}, standoff:12}, tickfont:{size:11}, color:ink,
       ticks:'inside', ticklen:6, tickwidth:1, showline:true, mirror:true, linewidth:1.15,
       linecolor:axis, showgrid:true, gridcolor:grid, zeroline:false, automargin:true});
-    return {paper_bgcolor:'#ffffff', plot_bgcolor:'#ffffff', font:{family:'Segoe UI, Arial, sans-serif', size:12, color:ink},
+    return {paper_bgcolor:cssColor('--panel'), plot_bgcolor:cssColor('--panel'), font:{family:'Segoe UI, Arial, sans-serif', size:12, color:ink},
       margin:{l:62,r:22,t:30,b:58}, height:340, hovermode:'closest', dragmode:'zoom',
-      hoverlabel:{bgcolor:'#ffffff', bordercolor:axis, font:{color:ink, family:'Segoe UI, Arial, sans-serif',size:12}},
+      hoverlabel:{bgcolor:cssColor('--panel'), bordercolor:axis, font:{color:ink, family:'Segoe UI, Arial, sans-serif',size:12}},
       xaxis:ax(xTitle), yaxis:ax(yTitle), showlegend:false,
-      legend:{orientation:'h', x:0, y:-.22, font:{size:10}, bgcolor:'rgba(255,255,255,.94)', borderwidth:0},
+      legend:{orientation:'h', x:0, y:-.22, font:{size:10}, bgcolor:cssColor('--panel'), borderwidth:0},
       ...options};
   }
   function landmarkShapes() {
@@ -62,7 +65,7 @@
   function operatingTraces(key, exactKey, refField) {
     const exact = exactKey ? descending.map(r=>r[exactKey]) : descending.map(r=>reference(r)[refField][throatIndex]);
     const traces = [trace(px,descending.map(r=>r[key]),'Numerical continuation'),
-      trace(px,exact,'Analytical interior','#465461',{mode:'lines',line:{color:'#465461',width:1.6,dash:'dash'}})];
+      trace(px,exact,'Analytical interior',cssColor('--reference'),{mode:'lines',line:{color:cssColor('--reference'),width:1.6,dash:'dash'}})];
     if ($('show-cold').checked) traces.push(trace(cold.map(r=>r.p_back_ratio),cold.map(r=>r[key]),labels.cold,coldColor,
       {mode:'markers',marker:{symbol:'circle-open',size:8,color:coldColor,line:{width:1.6}}}));
     if ($('show-restarts').checked) traces.push(trace(restarts.map(r=>r.p_back_ratio),restarts.map(r=>r[key]),labels.supersonic_restart,restartColor,
@@ -127,7 +130,7 @@
     await Promise.all([['p','Pressure p/p<sub>0</sub>',report.p0_Pa],['M','Mach number',1],['T','Temperature [K]',1],['ds','Entropy change s − s<sub>0</sub> [J/(kg K)]',1]].map(async ([key,title,scale])=>{
       const values=r=>cut(r.flow_state[key]).map(v=>v/scale);
       const data=[trace(stations,values(row),labels[row.mode],palette(row.p_back_ratio),{mode:'lines+markers',marker:{size:4,color:palette(row.p_back_ratio)}}),
-        trace(stations,cut(ref[key]).map(v=>v/scale),'Analytical interior','#465461',{mode:'lines',line:{color:'#465461',width:1.6,dash:'dash'}})];
+        trace(stations,cut(ref[key]).map(v=>v/scale),'Analytical interior',cssColor('--reference'),{mode:'lines',line:{color:cssColor('--reference'),width:1.6,dash:'dash'}})];
       for(const other of alt) data.push(trace(stations,values(other),labels[other.mode],other.mode==='cold'?coldColor:restartColor,
         {mode:'lines+markers',line:{color:other.mode==='cold'?coldColor:restartColor,width:1.7,dash:'dot'},marker:{size:4,symbol:'circle-open'}}));
       if(showGhosts) data.push(trace([x[0],x.at(-1)],[row.flow_state[key][0]/scale,row.flow_state[key].at(-1)/scale],
@@ -161,8 +164,8 @@
     const chosen=runs.filter(r=>Math.abs(r.p_back_ratio-.42)<1e-10&&r.mode!=='supersonic_restart');
     const data=chosen.map(r=>trace(x.slice(1,-1),r.flow_state.p.slice(1,-1).map(v=>v/report.p0_Pa),labels[r.mode],
       r.mode==='cold'?coldColor:numericalColor,{line:{color:r.mode==='cold'?coldColor:numericalColor,width:2},marker:{size:4}}));
-    data.push(trace(x.slice(1,-1),reference(chosen[0]).p.slice(1,-1).map(v=>v/report.p0_Pa),'Analytical interior','#465461',
-      {mode:'lines',line:{color:'#465461',width:1.4,dash:'dash'}}));
+    data.push(trace(x.slice(1,-1),reference(chosen[0]).p.slice(1,-1).map(v=>v/report.p0_Pa),'Analytical interior',cssColor('--reference'),
+      {mode:'lines',line:{color:cssColor('--reference'),width:1.4,dash:'dash'}}));
     const layout=set_plot_options('Axial position [m]','Pressure p/p<sub>0</sub>',{height:390,showlegend:true,margin:{l:62,r:22,t:25,b:90}});
     layout.xaxis.range=[.190,.2];layout.legend={orientation:'h',x:0,y:-.22,font:{size:11}};
     await draw('branch-chart',data,layout);
@@ -232,7 +235,6 @@
     $('table-mode').addEventListener('change',table);$('table-search').addEventListener('input',table);
     $('download-csv').addEventListener('click',()=>download('backpressure_operating_map.csv',bundle.csv,'text/csv;charset=utf-8'));
     $('download-json').addEventListener('click',()=>download('backpressure_results.json',JSON.stringify({report,audit:bundle.audit},null,2),'application/json'));
-    $('print-report').addEventListener('click',()=>window.print());
     $('reset-charts').addEventListener('click',()=>{
       for(const [id,figure] of figures){
         const update={'xaxis.autorange':!figure.layout.xaxis.range,'yaxis.autorange':!figure.layout.yaxis.range};
@@ -256,12 +258,14 @@
     window.addEventListener('scroll',()=>{if(!navQueued){navQueued=true;requestAnimationFrame(markSection);}},{passive:true});
     markSection();
     await geometry();await operatingMaps();await populateProfiles();await branchComparison();await histories();await diagnostics();
-    document.documentElement.dataset.reportReady='true';
+    document.body.dataset.resultsReady='true';
     $('report-status').textContent=`Ready · ${runs.length} embedded states · interactive figures available offline`;
     window.addEventListener('beforeprint',()=>{stopPlaying();for(const id of figures.keys())Plotly.Plots.resize($(id));});
     document.querySelectorAll('details').forEach(el=>el.addEventListener('toggle',()=>{if(el.open)for(const id of figures.keys())Plotly.Plots.resize($(id));}));
     // Available for read-only QA and useful for advanced readers in the console.
-    window.backpressureReport={bundle,figures,profile:()=>profileRows[currentIndex]};
+    window.backpressureReport={bundle,figures,profile:()=>profileRows[currentIndex],stopAnimation:stopPlaying,
+      refreshTheme:async()=>{readTheme();await geometry();await operatingMaps();await profile();await branchComparison();await histories();await diagnostics();}};
+    window.dispatchEvent(new Event('report-results-ready'));
   }
   boot().catch(error=>{
     console.error(error);$('report-status').textContent='Interactive figures could not load: '+error.message;

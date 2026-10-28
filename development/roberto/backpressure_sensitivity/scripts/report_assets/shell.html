@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1280">
+<meta name="color-scheme" content="light dark">
+<meta name="description" content="Implicit Euler nozzle verification with current and pressure-wave outlet boundary conditions.">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; worker-src blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
+<title>@@TITLE@@ &middot; Euler nozzle</title>
+<script>
+try {const t=new URLSearchParams(location.search).get('theme');document.documentElement.dataset.theme=(t==='light'||t==='dark')?t:(localStorage.getItem('nozzle-backpressure-sensitivity.report.theme')||(matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light'));localStorage.setItem('nozzle-backpressure-sensitivity.report.theme',document.documentElement.dataset.theme);}catch{document.documentElement.dataset.theme=matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light';}
+window.REPORT_BUILD=@@BUILD@@;
+</script>
+<style>@@CSS@@</style>
+@@HEAD_EXTRA@@
+</head>
+<body data-page="results">
+<header class="header">
+  <a class="brand" href="#results"><svg viewBox="0 0 40 40" fill="none" aria-hidden="true"><path d="M3 6C13 6 13 15 20 15s7-9 17-9M3 34c10 0 10-9 17-9s7 9 17 9" stroke="currentColor" stroke-width="2"/><path d="M4 20h31m-5-4 5 4-5 4" stroke="currentColor" stroke-width="1.5"/></svg>Euler nozzle <small>Backpressure sensitivity</small></a>
+  <nav class="page-switch" aria-label="Report pages"><a href="#results" data-report-tab="results" aria-current="page">01 &middot; Results</a><a href="#theory" data-report-tab="theory">02 &middot; Theory &amp; background</a></nav>
+  <div class="header-actions"><button id="print-report" type="button">Print / PDF</button><div class="theme-switch" role="group" aria-label="Color theme"><button data-theme-choice="light" aria-pressed="true">Light</button><button data-theme-choice="dark" aria-pressed="false">Dark</button></div></div>
+</header>
+<aside class="sidebar"><div class="eyebrow"><span id="sidebar-label">Results</span></div><nav aria-label="On this page">@@NAV@@</nav><div class="sidebar-foot">Offline document<br>Fixed numerical evidence.<br>Interactive presentation.<br><a href="#theory">Theory &amp; equations</a></div></aside>
+<main class="results-main">
+<noscript><p class="noscript">Enable JavaScript for interactive figures and locally rendered equations. No network connection is required.</p></noscript>
+@@BODY@@
+<footer><span>Euler nozzle &middot; Perfect-gas boundary verification</span><span>Self-contained report &middot; <button id="license-button" type="button" style="padding:0;border:0;background:none;font-size:11px;color:var(--accent);text-decoration:underline">Embedded library licenses</button></span></footer>
+<details id="license-details" hidden><summary>Third-party licenses</summary><div class="details-body"><pre>@@LICENSES@@</pre></div></details>
+</main>
+@@SCRIPTS@@
+</body></html>

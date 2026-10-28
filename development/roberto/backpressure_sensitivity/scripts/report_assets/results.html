@@ -1,49 +1,10 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="light">
-  <meta name="description" content="An interactive numerical investigation of perfect-gas nozzle flow from stagnant conditions through choking, internal shocks and supersonic discharge.">
-  <title>Backpressure continuation in a quasi-one-dimensional Euler nozzle</title>
-  <style>__STYLE__</style>
-</head>
-<body>
-  <a class="skip-link" href="#main-content">Skip to report</a>
-  <div class="report-shell">
-    <aside class="report-rail" aria-label="Report navigation">
-      <a class="report-mark" href="#summary" aria-label="Nozzle backpressure report, overview">
-        <span class="mark-line" aria-hidden="true"></span>
-        <span>NOZZLE<br>HYPERBOLIC</span>
-      </a>
-      <p class="rail-label">Technical report</p>
-      <nav aria-label="Contents">
-        <ol class="contents">
-          <li><a href="#summary">Abstract</a></li>
-          <li><a href="#setup">Model &amp; numerical method</a></li>
-          <li><a href="#physics">Analytical regimes</a></li>
-          <li><a href="#operating-map">Continuation results</a></li>
-          <li><a href="#transitions">Critical transitions</a></li>
-          <li><a href="#profiles">Field distributions</a></li>
-          <li><a href="#branches">Steady-state multiplicity</a></li>
-          <li><a href="#convergence">Convergence</a></li>
-          <li><a href="#quality">Accuracy &amp; conservation</a></li>
-          <li><a href="#data">Operating-point data</a></li>
-          <li><a href="#reproducibility">Limitations &amp; reproducibility</a></li>
-        </ol>
-      </nav>
-      <div class="rail-footer">
-        <p>Perfect-gas Euler<br>Implicit steady marching</p>
-      </div>
-    </aside>
 
-    <main id="main-content" class="report-main">
       <header id="summary" class="report-header">
         <div class="eyebrow">NUMERICAL VERIFICATION REPORT <span class="eyebrow-divider">/</span> 28 OCTOBER 2026</div>
         <h1>Backpressure continuation in a quasi-one-dimensional Euler nozzle</h1>
         <p class="report-deck">Steady-state operating regimes, shock departure and boundary-condition sensitivity with implicit FVS time marching.</p>
         <div class="report-meta"><span>104 residual-verified states</span><span>201-point mesh</span><span>Source unchanged</span></div>
-        <div class="header-actions"><button id="print-report" class="button button-quiet" type="button">Print report</button></div>
+
         <p id="report-status" class="report-status" role="status" aria-live="polite">Loading interactive figures from the results embedded in this report.</p>
         <noscript><p class="notice">The scientific narrative and setup remain readable without JavaScript. Enable JavaScript to explore the Plotly figures, select operating points and download the embedded data.</p></noscript>
       </header>
@@ -228,10 +189,3 @@
       </section>
 
       <footer class="report-footer"><div><strong>Nozzle-hyperbolic</strong><span>Backpressure analysis · Perfect-gas Euler</span></div><p>This standalone report embeds its figures and recorded numerical results. Zooming, selection and downloads run locally; no simulation is executed by the document.</p><a href="#summary">Back to overview ↑</a></footer>
-    </main>
-  </div>
-  <script type="application/json" id="report-data">__REPORT_DATA__</script>
-  <script>__PLOTLY_RUNTIME__</script>
-  <script>__REPORT_APP__</script>
-</body>
-</html>
