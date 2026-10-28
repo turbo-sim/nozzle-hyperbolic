@@ -119,8 +119,6 @@
     const record=DATA.channels.cases[channelId],g=record.geometry,p=palette();
     const dark=document.documentElement.dataset.theme==="dark";
     const wall=dark ? "#a0b2ca" : "#647892",blue=dark ? "#88b7ff" : "#2462d1";
-    const guide=dark ? "rgba(128,183,255,.58)" : "rgba(68,118,188,.48)";
-    const orange=dark ? "#ffad5c" : "#ff7f0e";
     const traces=[],annotations=[];
     let layout=frame({height:430,margin:{l:70,r:25,t:45,b:55},
       uirevision:`channel:${channelId}:${view}`});
@@ -139,11 +137,11 @@
           line:{color:wall,width:2},hoverinfo:"skip",showlegend:false});
       }
       record.paths_3d.forEach((path,i)=>{
-        const color=i===0 ? orange : blue;
+        const color=blue;
         const arrowLength=.025*Math.max(g.length,2*Math.max(...g.r));
         traces.push({type:"scatter3d",mode:"lines",x:path.x,y:path.y,z:path.z,
-          line:{color,width:i===0 ? 3 : 2},opacity:i===0 ? 1 : .78,
-          name:i===0 ? "Representative flow path" : "Illustrative flow paths",legendgroup:i===0 ? "selected-path" : "paths",showlegend:i<2,
+          line:{color,width:2},opacity:1,
+          name:"Illustrative flow paths",legendgroup:"paths",showlegend:i===0,
           hovertemplate:"x = %{x:.5f} m<br>y = %{y:.5f} m<br>z = %{z:.5f} m<extra>Approximate quasi-1D flow direction</extra>"});
         traces.push({type:"cone",x:path.arrows.map(a=>a.head[0]),y:path.arrows.map(a=>a.head[1]),z:path.arrows.map(a=>a.head[2]),
           u:path.arrows.map(a=>arrowLength*a.direction[0]),v:path.arrows.map(a=>arrowLength*a.direction[1]),w:path.arrows.map(a=>arrowLength*a.direction[2]),
@@ -156,6 +154,36 @@
           yaxis:axis("Transverse y [m]",{backgroundcolor:p.bg}),
           zaxis:axis("Transverse z [m]",{backgroundcolor:p.bg})},
         legend:{orientation:"h",x:.02,y:1.02,xanchor:"left",font:{size:10}}};
+    } else if(view==="frontal") {
+      // Look along the axial x direction: project the same 3D paths onto (y,z).
+      const theta=Array.from({length:97},(_,i)=>2*Math.PI*i/96);
+      const radii=[...record.walls.minus.r,...record.walls.plus.r];
+      const inner=Math.min(...radii),outer=Math.max(...radii);
+      const circle=radius=>({x:theta.map(t=>radius*Math.cos(t)),y:theta.map(t=>radius*Math.sin(t))});
+      const a=circle(outer),b=circle(inner);
+      traces.push({type:"scatter",mode:"lines",
+        x:[...a.x,...b.x.slice().reverse(),a.x[0]],y:[...a.y,...b.y.slice().reverse(),a.y[0]],
+        fill:"toself",fillcolor:dark ? "rgba(136,183,255,.08)" : "rgba(36,98,209,.05)",
+        line:{width:0},hoverinfo:"skip",showlegend:false});
+      [inner,outer].forEach((radius,i)=>{
+        const c=circle(radius);
+        traces.push({type:"scatter",mode:"lines",x:c.x,y:c.y,line:{color:wall,width:1.5},
+          name:"Projected passage envelope",legendgroup:"walls",showlegend:i===0,hoverinfo:"skip"});
+      });
+      record.paths_3d.forEach((path,i)=>{
+        traces.push({type:"scatter",mode:"lines",x:path.y,y:path.z,line:{color:blue,width:2},
+          name:"Illustrative flow paths",legendgroup:"paths",showlegend:i===0,
+          hovertemplate:"y = %{x:.5f} m<br>z = %{y:.5f} m<extra>Axial projection of the 3D flow path</extra>"});
+        path.arrows.forEach(a=>{
+          // A purely axial chord has no directional arrow in this projection.
+          if(Math.hypot(a.head[1]-a.tail[1],a.head[2]-a.tail[2])<=1e-12*outer)return;
+          annotations.push({x:a.head[1],y:a.head[2],ax:a.tail[1],ay:a.tail[2],
+            xref:"x",yref:"y",axref:"x",ayref:"y",showarrow:true,text:"",arrowcolor:blue,
+            arrowwidth:1.6,arrowhead:2,arrowsize:1.3});
+        });
+      });
+      layout={...layout,xaxis:axis("Transverse y [m]"),
+        yaxis:axis("Transverse z [m]",{scaleanchor:"x",scaleratio:1}),annotations};
     } else if(view==="meridional") {
       const a=record.walls.minus,b=record.walls.plus;
       traces.push({type:"scatter",mode:"lines",x:[...a.x,...b.x.slice().reverse(),a.x[0]],y:[...a.r,...b.r.slice().reverse(),a.r[0]],
@@ -164,7 +192,7 @@
       for(const side of ["minus","plus"]) traces.push({type:"scatter",mode:"lines",x:record.walls[side].x,y:record.walls[side].r,
         name:side==="minus" ? "Channel walls" : "Channel wall",legendgroup:"walls",showlegend:side==="minus",line:{color:wall,width:2},hoverinfo:"skip"});
       record.cross_gap_paths.forEach((path,i)=>{
-        traces.push({type:"scatter",mode:"lines",x:path.x,y:path.r,line:{color:guide,width:1.5},name:"Illustrative direction paths",legendgroup:"paths",showlegend:i===0,hoverinfo:"skip"});
+        traces.push({type:"scatter",mode:"lines",x:path.x,y:path.r,line:{color:blue,width:2},name:"Illustrative direction paths",legendgroup:"paths",showlegend:i===0,hoverinfo:"skip"});
         path.arrows.forEach(a=>annotations.push({x:a.head[0],y:a.head[1],ax:a.tail[0],ay:a.tail[1],
           xref:"x",yref:"y",axref:"x",ayref:"y",showarrow:true,text:"",arrowcolor:blue,arrowwidth:1.6,arrowhead:2,arrowsize:1.3}));
       });
@@ -178,8 +206,8 @@
     }
   }
   async function renderChannel() {
-    await Promise.all([channelView("meridional"),channelView("annular")]);
-    $("channel-caption").textContent="Left: equal-scale meridional section of the actual NURBS walls. Right: the revolved annular channel. Arrows follow increasing meridional distance, including radial inflow. Swirl paths use the saved finest-grid MUSCL velocities and illustrate approximate quasi-1D flow direction, without resolving the cross-gap velocity field.";
+    await Promise.all([channelView("meridional"),channelView("frontal"),channelView("annular")]);
+    $("channel-caption").textContent="Left: equal-scale meridional section of the actual NURBS walls. Center: frontal projection along the axial x direction, using the same (y,z) paths as the 3D view and the projected passage envelope. Right: the revolved annular channel. All paths and direction arrows share one color. Arrows follow increasing meridional distance, including radial inflow; purely axial motion has no frontal direction arrow. Swirl paths use saved finest-grid MUSCL velocities and illustrate quasi-1D flow direction without resolving a cross-gap velocity profile.";
   }
   function methodRows(mesh) { return methods.map(m=>mesh.methods[m]); }
   function historyRows(history, accepted=true) {

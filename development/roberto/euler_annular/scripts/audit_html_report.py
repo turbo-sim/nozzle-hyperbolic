@@ -640,7 +640,7 @@ def audit_channels(audit, payload, build):
     audit.check("channel_payload_and_control_records_exact", not audit.differences,
                 dict(comparisons=audit.comparisons, differences=audit.differences))
     audit.check("channel_views_and_control_default_match_build", build.get("channel_visualizations") == dict(
-        cases=len(channels["cases"]), views=["meridional", "annular"], layout="side_by_side", control_points_default=False))
+        cases=len(channels["cases"]), views=["meridional", "frontal", "annular"], layout="side_by_side", control_points_default=False))
 
 
 def audit_report(study):

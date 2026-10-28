@@ -123,7 +123,7 @@ def build_report(study, output):
         assets={path.name:digest(path.read_bytes()) for path in ASSETS.iterdir() if path.is_file()},
         internal_pages=list(page_names), numerical_sources_and_saved_data_read_only=True, network_required=False,
         default_marker_stride=11, marker_skip_control=dict(min=0,step=1,default=10,rule="stride = skipped points + 1"),
-        channel_visualizations=dict(cases=len(data["channels"]["cases"]),views=["meridional","annular"],layout="side_by_side",control_points_default=False),
+        channel_visualizations=dict(cases=len(data["channels"]["cases"]),views=["meridional","frontal","annular"],layout="side_by_side",control_points_default=False),
         embedded_downloads={key:{k:v for k,v in value.items() if k!="base64"} for key,value in downloads.items()},
         library_versions=dict(plotly_js="2.35.2",mathjax="3.2.2"))
     switches = ''.join(f'<a href="#{roots[name]}" data-page-choice="{name}"'+(' aria-current="page"' if name=="results" else '')+f'>{i:02d} &middot; {label}</a>' for i,(name,label) in enumerate(page_names.items(),1))

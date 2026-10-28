@@ -148,15 +148,29 @@ async function auditFigureDefinitions({vm, source, html, assert, setTimeout, cle
   for(const id of Object.keys(payload.channels.cases)) {
     app.state.channelCase=id;await app.renderChannel();
     const record=payload.channels.cases[id];
-    for(const view of ["meridional","annular"]){
+    for(const view of ["meridional","frontal","annular"]){
       const traces=element("channel-"+view).data;
       assert(traces.length>0,"Missing simultaneous channel view");
       assert(traces.every(t=>!(t.name??"").includes("control")),"Control polygon/points shown");
+      const pathsInView=traces.filter(t=>t.legendgroup==="paths");
+      assert(pathsInView.every(t=>t.line.color==="#2462d1"&&(t.opacity??1)===1),"Streamlines must share one color and opacity");
+      assert((element("channel-"+view).layout.annotations??[]).every(a=>a.arrowcolor==="#2462d1"),"2D arrow color differs");
       if(view==="annular") {
         const paths=traces.filter(t=>t.type==="scatter3d"&&t.legendgroup?.includes("path"));
         assert(paths.length===record.paths_3d.length,"3D paths missing");
         paths.forEach((t,i)=>{exact(t.x,record.paths_3d[i].x,"3D x");exact(t.y,record.paths_3d[i].y,"3D y");exact(t.z,record.paths_3d[i].z,"3D z");});
-        assert(traces.filter(t=>t.type==="cone").length===record.paths_3d.length,"Flow arrows missing");
+        const cones=traces.filter(t=>t.type==="cone");
+        assert(cones.length===record.paths_3d.length,"Flow arrows missing");
+        assert(cones.every(t=>t.colorscale.every(c=>c[1]==="#2462d1")),"3D arrow color differs");
+      } else if(view==="frontal") {
+        const paths=traces.filter(t=>t.legendgroup==="paths");
+        assert(paths.length===record.paths_3d.length,"Frontal paths missing");
+        paths.forEach((t,i)=>{exact(t.x,record.paths_3d[i].y,"Frontal y projection");exact(t.y,record.paths_3d[i].z,"Frontal z projection");});
+        const outer=Math.max(...record.walls.minus.r,...record.walls.plus.r);
+        const arrows=record.paths_3d.flatMap(p=>p.arrows).filter(a=>Math.hypot(a.head[1]-a.tail[1],a.head[2]-a.tail[2])>1e-12*outer);
+        const layout=element("channel-frontal").layout;
+        assert(layout.yaxis.scaleanchor==="x"&&layout.yaxis.scaleratio===1,"Frontal axes distort the flow paths");
+        exact(layout.annotations.map(a=>[a.x,a.y,a.ax,a.ay]),arrows.map(a=>[a.head[1],a.head[2],a.tail[1],a.tail[2]]),"Frontal arrow projection");
       } else {
         assert(element("channel-meridional").layout.yaxis.scaleanchor==="x","Section is not equal scale");
         assert(element("channel-meridional").layout.annotations.length===record.cross_gap_paths.reduce((n,p)=>n+p.arrows.length,0),"2D arrows missing");
@@ -188,6 +202,12 @@ async function auditFigureDefinitions({vm, source, html, assert, setTimeout, cle
   ["constant","muscl_van_leer"].forEach(method=>{actualMesh.methods[method].history=actualOriginals[method];mesh.methods[method].history=originals[method];});
   await app.setTheme("dark");
   assert(element("field-plot").data[2].line.color==="#b277ef","Dark reference contrast");
+  for(const view of ["meridional","frontal","annular"]){
+    const traces=element("channel-"+view).data;
+    assert(traces.filter(t=>t.legendgroup==="paths").every(t=>t.line.color==="#88b7ff"),"Dark-theme streamline colors differ");
+    assert((element("channel-"+view).layout.annotations??[]).every(a=>a.arrowcolor==="#88b7ff"),"Dark-theme arrows differ");
+    assert(traces.filter(t=>t.type==="cone").every(t=>t.colorscale.every(c=>c[1]==="#88b7ff")),"Dark 3D arrows differ");
+  }
   assert(!elements.has("transient-plot"),"Removed contact graph was rendered");
   assert(!elements.has("channel-plot"),"Old single geometry graph was rendered");
   return {passed:true,field_figures:figures,full_line_points_checked:points,channel_views:channels,synthetic_future_balance_traces:8,internal_pages_checked:4,embedded_evidence_download_checked:true,visual_browser_QA:false};

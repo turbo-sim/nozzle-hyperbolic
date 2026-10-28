@@ -4,7 +4,8 @@ Open **[REPORT.html](REPORT.html)**. Copying that single file is enough to read
 it offline. Its internal pages contain:
 
 - **Results:** nine cases, four meshes, analytical/constant/MUSCL comparisons,
-  channel views, accuracy limits, convergence and four conservation histories.
+  meridional/frontal/3D channel views in one row with uniform streamline color,
+  accuracy limits, convergence and four conservation histories.
 - **Theory:** general-EOS equations, eigenanalysis, flux/reconstruction,
   complete implicit residual, Newton machinery and simultaneous boundary blocks.
 - **Implementation:** public API, fluid and NURBS contracts, shared code and

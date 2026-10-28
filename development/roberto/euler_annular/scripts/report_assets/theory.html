@@ -42,7 +42,7 @@ $$</div>
 <p>Arrows follow increasing <span class="math-inline">$m$</span>, so radial inflow points toward smaller radius.
 These paths illustrate the quasi-1D direction and swirl; no cross-gap velocity
 distribution is solved. Nonpositive meridional velocity is flagged rather
-than hidden by a denominator floor. The report displays the meridional channel on the left and its revolved 3D view on the right. It omits width-spline plots, control points and control polygons; the geometry itself still uses the same NURBS definitions.</p>
+than hidden by a denominator floor. The report displays three views in one row: the meridional channel on the left, a frontal projection along the axial direction in the center, and the revolved 3D view on the right. The frontal paths and arrows project the same Cartesian transverse coordinates as the 3D paths; all streamlines share one color. It omits width-spline plots, control points and control polygons; the geometry itself still uses the same NURBS definitions.</p>
 <h2 id="2-general-thermodynamics">2. General thermodynamics</h2>
 <h3 id="21-required-eos-response">2.1 Required EOS response</h3>
 <p>Numerical trial states are evaluated directly through <code>fluid.get_state(jxp.HmassP_INPUTS, h, p)</code>. The interior flux requires density <span class="math-inline">$\rho$</span>, sound speed <span class="math-inline">$a$</span> and dimensionless Gruneisen coefficient <span class="math-inline">$G$</span>. Temperature <span class="math-inline">$T$</span> and entropy <span class="math-inline">$s$</span> support boundary equations, reference scales and admissibility. Returned <span class="math-inline">$p,h$</span> also permit input-coordinate consistency checks.</p>
