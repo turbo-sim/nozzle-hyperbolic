@@ -13,7 +13,7 @@ rather than inferring them from outer iteration counts.
 
 ## Evidence and reproduction
 
-This investigation uses the [five-case comparison](outputs/REPORT.md), whose
+This investigation uses the [five-case comparison](../../../outputs/REPORT.md), whose
 measured operator hashes are retained with its data, plus:
 
 - Counter-enabled replays of all five implicit runs, including rejected timestep
@@ -41,7 +41,7 @@ poetry run python -m development.roberto.newton_solve.scripts.analyze_ptc_cost -
 poetry run python -m development.roberto.newton_solve.scripts.analyze_ptc_cost --plot-only
 ```
 
-Raw results: [analysis.json](outputs/performance_analysis/analysis.json).
+Raw results: [analysis.json](../../../outputs/performance_analysis/analysis.json).
 The measurements use 201 points, 597 unknowns, one BLAS thread, corrected FVS,
 safe ordinary Van Leer, and PySolverView 0.7.4. They are single-run diagnostics,
 not repeated performance estimates. No production solver or controller was
@@ -96,9 +96,9 @@ correction overwhelms that possible saving.
 
 ## 3. Measured per-correction cost: QR dominates, rather than AD
 
-![Accepted CFL histories and the measured PTC prefix cost breakdown](outputs/performance_analysis/cost_and_cfl.png)
+![Accepted CFL histories and the measured PTC prefix cost breakdown](../../../outputs/performance_analysis/cost_and_cfl.png)
 
-[Vector PDF](outputs/performance_analysis/cost_and_cfl.pdf).
+[Vector PDF](../../../outputs/performance_analysis/cost_and_cfl.pdf).
 The left panels compare actual accepted CFLs, not configured caps. The right
 panel partitions a 200-accepted-update shock35 PTC prefix (207 trial corrections,
 7.172 s). Nested timing was flattened to avoid counting the QR time twice.

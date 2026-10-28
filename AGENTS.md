@@ -185,6 +185,13 @@ development/roberto/<study>/
 
 ## Performance measurements
 
+To rebuild the retained Newton/PTC/custom-adapted report without numerical
+solves, use `poetry run python -B -m development.roberto.newton_solve.scripts.report`.
+The standalone root HTML includes the useful mechanism/performance notes stored
+under `scripts/report_assets/notes/`. Discarded optimizer experiments are not
+part of this study; preserve the common problem and implicit-helper imports
+used by neighboring studies when reorganizing it.
+
 To rebuild the implicit-integration report from the retained 105-run dataset,
 without importing numerical solvers or rerunning cases, use
 `poetry run python -B -m development.roberto.implicit_integration.scripts.report`.

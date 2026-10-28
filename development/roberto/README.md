@@ -15,8 +15,10 @@ poetry run python -m development.roberto.euler_nozzle.verify_euler_nozzle_sod --
 The original research drivers are grouped under
 [`development/alberto/`](../alberto/README.md). The focused
 [Newton/PTC/implicit comparison](newton_solve/README.md) lives in
-`newton_solve/`, alongside an overview of the earlier attempts and a
-[physical and mathematical convergence explanation](newton_solve/CONVERGENCE_MECHANISM.md).
+`newton_solve/`. Its standalone [HTML report](newton_solve/REPORT.html) combines
+the cold-start comparison, PTC performance evidence, retained custom adapted
+starts, mathematical explanations and useful earlier notes. The discarded
+optimizer experiments and their results have been removed.
 
 The [numerical-fix comparison](numerical_fixes/RUNNING.md) runs the shared steady
 example with legacy/corrected fluxes and optional smooth reconstruction.

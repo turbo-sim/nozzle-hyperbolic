@@ -7,7 +7,7 @@ change stored mass, momentum and energy. They change the correction direction,
 not merely its length. This interpretation fits the measured nozzle cases;
 it is not an unconditional convergence theorem.
 
-The [experiment overview](README.md) records the tested methods, outcomes and
+The [experiment overview](../../../README.md) records the tested methods, outcomes and
 retained comparison commands.
 
 ## An imbalance is also a rate of change

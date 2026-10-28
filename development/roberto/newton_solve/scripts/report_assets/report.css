@@ -1,0 +1,15 @@
+/* Base theme/layout and numerical plot controls are reused from the other studies. */
+.two-case-plot {height:540px}
+.single-plot {height:460px}
+.theory-content img,.notes-content img {max-width:100%;height:auto;background:white;border-radius:5px}
+.theory-content h2,.notes-content h2 {margin-top:36px;margin-bottom:14px;scroll-margin-top:88px}
+.theory-content h3,.notes-content h3 {margin-top:24px}
+.notes-content {max-width:1120px}
+.notes-content pre {white-space:pre-wrap;overflow-wrap:anywhere}
+.notes-content p,.notes-content li {font-size:13px;line-height:1.85}
+.notes-content table {display:block;max-width:100%;overflow-x:auto;margin:18px 0;font-size:11px;white-space:normal}
+.notes-content td,.notes-content th {text-align:left;vertical-align:top}
+.notes-content td:first-child {min-width:140px}
+.data-warning {color:var(--warning)}
+.provenance {font-size:11px;line-height:1.8;color:var(--muted)}
+@media print {.two-case-plot{height:540px!important}.single-plot{height:460px!important}.notes-content{max-width:none}}

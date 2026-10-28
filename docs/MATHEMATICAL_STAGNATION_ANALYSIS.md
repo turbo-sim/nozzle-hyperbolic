@@ -4,7 +4,7 @@
 > below were removed during experiment cleanup. Their commands and output paths
 > are historical, not currently supported reproduction instructions. See the
 > [consolidated overview](../development/roberto/newton_solve/README.md) and
-> [convergence explanation](../development/roberto/newton_solve/CONVERGENCE_MECHANISM.md)
+> [convergence explanation](../development/roberto/newton_solve/REPORT.html#theory)
 > for the retained comparison. Flux/limiter verification is now in
 > [numerical_fixes](../development/roberto/numerical_fixes/README.md).
 
