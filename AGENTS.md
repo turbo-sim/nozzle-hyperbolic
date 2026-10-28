@@ -107,6 +107,7 @@ Keep the single `development/` parent; do not recreate `development_new/` or
 | [BC_residual](development/roberto/BC_residual/README.md) | Internal versus coupled BC equations with matched implicit solver machinery and repeated timings |
 | [backpressure_sensitivity](development/roberto/backpressure_sensitivity/README.md) | Perfect-gas implicit operating map, choking/shock-exit behavior and outlet branch selection |
 | [euler_annular](development/roberto/euler_annular/README.md) | General-EOS annular solver, NURBSpy geometry, answered design decisions, analytical/constant/MUSCL verification and independent saved-state audits |
+| [multigrid](development/roberto/multigrid/README.md) | EulerNozzle implicit single-grid versus coarse-to-fine initialization benchmark; annular multigrid design note; no FAS implementation |
 
 The steady baseline has five regimes: supersonic exit, shocks at 35% and 70%
 of the divergent section, sonic-throat/subsonic-exit limiting flow, and fully
@@ -130,12 +131,27 @@ development/roberto/<study>/
   README.md                  question, physical setup, controlled settings, commands
   <topic>_NOTES.md            equations, interpretation, design discussion as needed
   <topic>_REPORT.md           findings with embedded relative figure links
+  REPORT.html                one standalone HTML with internal results/theory pages
   scripts/                   readable drivers, supporting experimental code, audits
   outputs/<run_or_variant>/  JSON/CSV, logs, figures and generated run data
 ```
 
 - Human-facing files belong at the study root; implementation belongs in
   `scripts/`, generated data in `outputs/`. Python package markers are fine.
+- Keep human-facing HTML reports directly at the study root, outside `outputs/`.
+  Their Python generators and reusable assets belong in `scripts/`; generated
+  numerical data, logs and figures belong in `outputs/`. Keep reports reproducible
+  from the Python scripts. Do not commit generated HTML unless requested.
+- Generate one shareable, standalone HTML file per report. Put results, theory
+  and other chapters on internally navigable pages within that file, rather
+  than separate HTML documents. Embed styles, JavaScript libraries, plot data,
+  images and offered downloads; do not depend on CDNs, neighboring files or a
+  local server. A colleague must be able to copy just the HTML file and open it
+  in a browser offline. Check page navigation, plots, equations, theme controls
+  and embedded downloads after consolidation.
+- Regenerate presentation changes from saved numerical results without rerunning
+  simulations. Preserve numerical data and timing samples, and update report
+  generators, links and structural audits together.
 - Put ignore rules in the repository `.gitignore`, not a study-local
   `.gitignore`. `outputs/` is generated and ignored by default. Some older
   result snapshots were explicitly committed; check tracking before cleanup.
@@ -204,6 +220,25 @@ without importing numerical solvers or rerunning cases, use
 It writes root `REPORT.html` with three sensitivity pages and one theory page;
 saved timing samples and numerical JSON/CSV files remain unchanged. See that
 study's README for the optional isolated offline browser audit.
+
+To regenerate the EulerNozzle grid-sequencing benchmark and its HTML
+reports, run from the repository root:
+
+```powershell
+poetry run python -u -m development.roberto.multigrid.scripts.run_demo
+poetry run python -m development.roberto.multigrid.scripts.audit_results
+poetry run python -m development.roberto.multigrid.scripts.report_results
+```
+
+See the study README for effective settings and smaller smoke commands. The
+default benchmark compares single-grid and coarse-to-fine initialization on
+three cases and two reconstructions, with ten measured samples plus an excluded
+complete solve per method. It changes no source and implements no FAS. Place
+HTML reports directly in `development/roberto/multigrid/`; keep numerical data,
+logs and figures in its `outputs/` subfolder. The generator writes one
+`REPORT.html` containing internal results and theory pages, with all rendering
+resources and offered downloads embedded. To update only the report from saved
+results, run the `report_results` command above; do not rerun `run_demo`.
 
 For a repeated solver benchmark, default to one excluded **complete solve**
 per case/method followed by ten measured solves, unless the user specifies
