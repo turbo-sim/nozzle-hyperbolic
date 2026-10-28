@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="description" content="Standalone annular Euler theory, numerical implementation and interactive verification results.">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; worker-src blob:; object-src 'none'; base-uri 'none'; form-action 'none'">
+<title>@@TITLE@@ · EulerAnnular</title>
+<script>
+try {document.documentElement.dataset.theme=localStorage.getItem('euler-annular.report.theme')||(matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');} catch {document.documentElement.dataset.theme=matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light';}
+window.REPORT_BUILD=@@BUILD@@;
+</script>
+<style>@@CSS@@</style>
+@@HEAD_EXTRA@@
+</head>
+<body data-page="@@PAGE@@">
+<header class="header">
+  <a class="brand" href="REPORT.html" aria-label="EulerAnnular results"><svg viewBox="0 0 36 36" fill="none" aria-hidden="true"><circle cx="18" cy="18" r="14" stroke="currentColor" stroke-width="1.7"/><circle cx="18" cy="18" r="8" stroke="currentColor" stroke-width="1.7"/><path d="m8 28 5-5m10-10 5-5M5 18h6m14 0h6" stroke="currentColor" stroke-width="1.7"/></svg>eulerannular <small>Verification report</small></a>
+  <nav class="page-switch" aria-label="Report pages"><a href="REPORT.html" @@RESULTS_CURRENT@@>01 · Results</a><a href="THEORY.html" @@THEORY_CURRENT@@>02 · Theory &amp; implementation</a></nav>
+  <div class="header-actions"><button id="print-report" class="header-icon" aria-label="Print or save as PDF"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M6 9V3h12v6M6 17H3V9h18v8h-3M6 14h12v7H6v-7Z"/></svg><span>Print / PDF</span></button><div class="theme-switch" role="group" aria-label="Color theme"><button data-theme-choice="light" aria-pressed="true">Light</button><button data-theme-choice="dark" aria-pressed="false">Dark</button></div></div>
+</header>
+<aside class="sidebar"><div class="eyebrow">@@SIDEBAR_LABEL@@</div><nav aria-label="On this page">@@NAV@@</nav><div class="sidebar-foot"><span class="status-dot"></span>Offline document<br><span style="opacity:.8">Fixed numerical evidence.<br>Interactive presentation.</span></div></aside>
+<main class="@@MAIN_CLASS@@">
+<noscript><p class="noscript-message">This standalone document uses JavaScript for interactive figures and equation rendering. The theory text remains readable; enable JavaScript to view its rendered mathematics and the results explorer.</p></noscript>
+@@BODY@@
+<footer><span>EulerAnnular · General-EOS finite-volume prototype</span><span>Visual language inspired by TurboDash · <button id="license-button" style="padding:0;border:0;background:none;color:var(--accent);font-size:11px;text-decoration:underline">Third-party licenses</button></span></footer>
+<details id="license-details" hidden><summary>Embedded library licenses</summary><pre>@@LICENSES@@</pre></details>
+</main>
+@@SCRIPTS@@
+<script>
+document.getElementById('license-button').addEventListener('click',()=>{const d=document.getElementById('license-details');d.hidden=false;d.open=!d.open;d.scrollIntoView();});
+</script>
+</body>
+</html>
