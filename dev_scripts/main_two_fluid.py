@@ -552,6 +552,11 @@ def _sources_fn(u_h, eos_g, eos_l, cq, dlnA, sat_g, sat_l):
             regime_blend = cfg.REGIME_BLEND,
             area_law = cfg.INTERFACIAL_AREA,
             area_params = cfg.INTERFACIAL_AREA_PARAMS,
+            htc_liquid_bubbly = cfg.HTC_LIQUID_BUBBLY,
+            htc_liquid_droplet = cfg.HTC_LIQUID_DROPLET,
+            nu_g_int = cfg.NU_G_INT,
+            smooth_slip = cfg.SMOOTH_SLIP,
+            smooth_slip_u0 = cfg.SMOOTH_SLIP_U0,
         )
         if cfg.MASS_TRANSFER:
             D = D + SRC_SCALE * D_VE_algebric(u_h, cq, closure, eos_g, eos_l, cfg.K_VM)
@@ -975,6 +980,11 @@ if cfg.MASS_TRANSFER and SRC_SCALE != 0.0:
             regime_blend = cfg.REGIME_BLEND,
             area_law = cfg.INTERFACIAL_AREA,
             area_params = cfg.INTERFACIAL_AREA_PARAMS,
+            htc_liquid_bubbly = cfg.HTC_LIQUID_BUBBLY,
+            htc_liquid_droplet = cfg.HTC_LIQUID_DROPLET,
+            nu_g_int = cfg.NU_G_INT,
+            smooth_slip = cfg.SMOOTH_SLIP,
+            smooth_slip_u0 = cfg.SMOOTH_SLIP_U0,
         )
         return (cl.sigma_Mg, cl.sigma_Qg, cl.sigma_Ql,
                 sat_g_c["temperature"], eos_l_c.T)

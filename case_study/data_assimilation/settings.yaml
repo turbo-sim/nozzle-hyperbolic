@@ -66,7 +66,7 @@ eos:
 
 # ── Grid ──────────────────────────────────────────────────────────────────────
 grid:
-  Nx: 400                           # cold start: the p_out ramp is sized for N ~ 100
+  Nx: 300                           # cold start: the p_out ramp is sized for N ~ 100
   x1: 0.0
   x2: 1.0                           # m - the exported geometry spans [0, 1] m
 
@@ -85,20 +85,32 @@ sources:
   interfacial_area_params:
     d_min: 1.0e-5
     # ai_pts: [100.0, 6500.0, 22000.0, 12000.0, 5000.0, 100.0]
-  regime_htc: true
   regime_blend: smoothstep
+  regime_htc: true                    # needed for the per-regime choice below
+  htc_liquid_bubbly: ranz_marshall    # ranz_marshall | jakob | max | liao
+  htc_liquid_droplet: internal        # internal | jakob | max
+  smooth_slip: false                  # true: Ranz-Marshall uses sqrt(du² + u0²) instead of |du|
+  smooth_slip_u0: 2.0                 # m/s, only used if smooth_slip is true
+  nu_g_int: null                      # vapour-side internal Nusselt (null = 120 with mass transfer)
+
 
 # ── Numerics: cold-start defaults, plus the ghost momentum pin every recent
 #    flashing case uses ─────────────────────────────────────────────────────────
 numerics:
   pin_ghost_momentum: true
-  lowmach_diss_bc: 0.0
-  CFL: 0.5
+  lowmach_diss_bc: 1.0
+  CFL: 4.0
   eps_void: 0.25
   eps_ghost: 0.25
   alpha_eps: 1.0e-8
   eps_ghost_alo: 1.0e-8
   pin_mom_alpha: 1.0e-4
+  recon:         muscl_van_leer # muscl_van_leer | muscl_van_albada | muscl_minmod | mc | constant
+  #   muscl_van_leer    2nd order, default; slope switches cell-by-cell
+  #   muscl_van_albada  2nd order, smooth C1 limiter (no slope flicker on ghost-scale noise)
+  #   muscl_minmod      2nd order, most diffusive TVD limiter
+  #   mc                2nd order, monotonised-central (sharpest; any unrecognised string lands here)
+  #   constant          1st order piecewise-constant
 
 # ── Boundary conditions ───────────────────────────────────────────────────────
 # Inherited: stagnation inlet, characteristic outlet, ramp p0 -> p_out over 1000
@@ -131,5 +143,5 @@ ic:
   # type: nozzlex_csv
   # run: design_case4/hem_seed_s10_a3e-3.csv
   type: restart
-  run: results/test_cold_start_manual_N200_muscl_van_albada_20261026_163306   # relative to this folder (main.py runs from here)
+  run: results/test_cold_start_manual_N400_muscl_van_albada_20261028_110022   
   alpha_floor: 1.0e-8

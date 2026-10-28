@@ -47,7 +47,9 @@ LEGACY_DEFAULTS = SETTINGS_DIR / "defaults_legacy.yaml"
 SCHEMA = {
     "sources": ["bubble_number", "droplet_number", "mass_transfer", "scale",
                 "area_source", "p_phase_change_max", "regime_htc", "regime_blend",
-                "interfacial_area", "interfacial_area_params"],
+                "interfacial_area", "interfacial_area_params",
+                "htc_liquid_bubbly", "htc_liquid_droplet", "nu_g_int",
+                "smooth_slip", "smooth_slip_u0"],
     "grid": ["Nx", "x1", "x2", "radius"],
     "numerics": [
         "CFL", "newton_iter", "delta_factor", "recon", "k_vm",
@@ -381,6 +383,14 @@ def load_config(yaml_path, overrides=None, override_label="override") -> types.S
     # law the code used before this key existed (polynomial, its own defaults).
     cfg.INTERFACIAL_AREA = str(src.get("interfacial_area", "polynomial"))
     cfg.INTERFACIAL_AREA_PARAMS = dict(src.get("interfacial_area_params") or {})
+    # Liquid-side HTC per regime (names validated by two_fluid_closure), vapour-side
+    # internal Nusselt (null = solver constants) and the smooth effective slip of
+    # Ranz-Marshall.  .get: older resolved settings load with the solver defaults.
+    cfg.HTC_LIQUID_BUBBLY = str(src.get("htc_liquid_bubbly", "ranz_marshall"))
+    cfg.HTC_LIQUID_DROPLET = str(src.get("htc_liquid_droplet", "internal"))
+    cfg.NU_G_INT = _none_or(src.get("nu_g_int"), float)
+    cfg.SMOOTH_SLIP = bool(src.get("smooth_slip", False))
+    cfg.SMOOTH_SLIP_U0 = float(src.get("smooth_slip_u0", 2.0))
 
     # ── Grid ─────────────────────────────────────────────────────────────────
     g = sec("grid")

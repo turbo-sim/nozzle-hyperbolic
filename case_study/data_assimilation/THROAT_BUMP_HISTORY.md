@@ -453,3 +453,18 @@ deformed-bubble drag (Tomiyama, Ishii-Zuber distorted), which was excluded.
 - Truth for the data assimilation (decided 2026-10-23: parabola with the smooth slip, jump
   kept): grid of the truth (N700-N1000, or the N400 of the model; ṁ differs by 0.03 %) and the
   sensor layout around x ≈ 0.59-0.61.
+
+
+# Reconstruction investigation
+
+Muscl Van Albada, the bump is present
+repo res: test_cold_start_manual_N400_muscl_van_albada_20261028_100747
+
+Constant, the bump is present
+repo res: test_cold_start_manual_N400_constant_20261028_100945
+
+Muscl minmod, no bump
+repo res: test_cold_start_manual_N400_muscl_minmod_20261028_101506
+
+Muscl Van Leer, no bump
+repo res: test_cold_start_manual_N400_muscl_van_leer_20261028_101453
