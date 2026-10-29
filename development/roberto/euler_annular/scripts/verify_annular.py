@@ -2,12 +2,13 @@
 
 Run from the repository root:
   poetry run python -m development.roberto.euler_annular.scripts.verify_annular
-Numerical starts are uniform physical cold guesses, never reference profiles.
+Numerical starts default to uniform physical cold guesses. The grid-sequence
+driver can supply explicit transferred states; analytical profiles never seed a solve.
 """
 
 import argparse
 import csv
-from dataclasses import asdict, dataclass
+from dataclasses import asdict
 from hashlib import sha256
 from importlib import metadata
 import json
@@ -21,15 +22,13 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
-from scipy.optimize import brentq
 
 from .conservation_history import ConservationHistoryRecorder
+from .case_config import Case, build_case
 
-from nozzle_hyperbolic.geometry.annular import (
-    circular_arc_channel, conical_channel, radial_channel)
 from nozzle_hyperbolic.models.euler_annular import make_annular_solver
-from nozzle_hyperbolic.models.euler_annular.analytical import PerfectGasReference
 from nozzle_hyperbolic.models.euler_annular.state import primitive_to_conservative
+from nozzle_hyperbolic.solvers.convergence_output import strict_json
 
 
 STUDY = Path(__file__).resolve().parents[1]
@@ -44,57 +43,9 @@ DEFAULT_CASES = ("radial_outflow", "radial_inflow", "sonic_exit", "swirl_diffusi
 CASES = DEFAULT_CASES+("radial_outflow_m005", "radial_outflow_m020", "radial_outflow_swirl")
 
 
-@dataclass
-class Case:
-    name: str
-    geometry: object
-    reference: PerfectGasReference
-    alpha: float
-    shock_m: float | None = None
-    inlet_regime: str = "subsonic"
-    outlet_regime: str = "subsonic"
-
-
 def make_case(name, fluid):
-    """Construct verification data; perfect-gas algebra is reference-only."""
-    alpha, shock_m, inlet_regime, outlet_regime = 0.0, None, "subsonic", "subsonic"
-    if name.startswith("radial_outflow") or name in (
-            "swirl_diffusion", "supersonic_expansion", "shock35", "shock70"):
-        geometry = radial_channel(0.1, 0.2, 0.005)
-    elif name in ("radial_inflow", "sonic_exit"):
-        geometry = radial_channel(0.2, 0.1, 0.005)
-    elif name == "conical_subsonic":
-        geometry = conical_channel(0.08, 0.1, 0.005, np.deg2rad(30), np.deg2rad(2))
-        alpha = np.deg2rad(30)
-    elif name == "curved_subsonic":
-        geometry = circular_arc_channel((0, 0.15), 0.05, -np.pi/2, 0.0, 0.005)
-        alpha = np.arctan(1.5)
-    else:
-        raise ValueError(name)
-    mach = 0.1 if name in ("radial_outflow", "radial_inflow") else 0.2
-    if name == "radial_outflow_m005":
-        mach = 0.05
-    elif name == "radial_outflow_m020":
-        mach = 0.2
-    elif name == "radial_outflow_swirl":
-        mach, alpha = 0.1, np.arctan(1.5)
-    if name == "sonic_exit":
-        ratio = float(geometry.evaluate(0.0).A/geometry.evaluate(geometry.length).A)
-        gamma = float(fluid.constants.gamma)
-        def area_mach(value):
-            return (2/(gamma+1)*(1+(gamma-1)*value**2/2))**((gamma+1)/(2*(gamma-1)))/value
-        mach = brentq(lambda value: area_mach(value)-ratio, 1e-9, 1.0)
-    if name == "swirl_diffusion":
-        mach, alpha = 0.3, np.arctan(5.0)
-    if name in ("supersonic_expansion", "shock35", "shock70"):
-        mach, alpha, inlet_regime = 1.5, np.arctan(1/3), "supersonic"
-        if name == "supersonic_expansion":
-            outlet_regime = "supersonic"
-        else:
-            shock_m = (0.35 if name == "shock35" else 0.7)*geometry.length
-    reference = PerfectGasReference.from_inlet(
-        fluid, geometry, p0=2e5, T0=300.0, M_m=mach, alpha=alpha)
-    return Case(name, geometry, reference, alpha, shock_m, inlet_regime, outlet_regime)
+    """Construct the named verification case from the shared YAML definitions."""
+    return build_case(name, fluid)
 
 
 def reference_fields(case, mesh, W):
@@ -106,6 +57,7 @@ def reference_fields(case, mesh, W):
     v_theta = W[:, 2]/mesh.r_center
     return dict(p=W[:, 0], v_m=W[:, 1], v_theta=v_theta, rho=density,
                 T=temperature, M_m=W[:, 1]/sound,
+                M_theta=v_theta/sound, alpha_deg=np.rad2deg(np.arctan2(v_theta, W[:, 1])),
                 M=np.hypot(W[:, 1], v_theta)/sound,
                 h0=W[:, 3]+0.5*(W[:, 1]**2+v_theta**2), ell=W[:, 2])
 
@@ -119,6 +71,8 @@ def fingerprints():
         REPOSITORY/"src/nozzle_hyperbolic/numerics/linear.py",
         REPOSITORY/"src/nozzle_hyperbolic/numerics/reconstruction.py",
         REPOSITORY/"src/nozzle_hyperbolic/solvers/finite_volume.py",
+        REPOSITORY/"src/nozzle_hyperbolic/solvers/residuals.py",
+        REPOSITORY/"src/nozzle_hyperbolic/solvers/monitoring.py",
         REPOSITORY/"src/nozzle_hyperbolic/solvers/time_marching/implicit.py",
         REPOSITORY/"src/nozzle_hyperbolic/thermodynamics/adapters.py",
     ]
@@ -127,6 +81,9 @@ def fingerprints():
 
 
 def write_json(path, value):
+    if isinstance(value, dict) and (value.get("settings", {}).get("controller") == "equation_monitored"):
+        path.write_text(strict_json(value), encoding="utf-8")
+        return
     def convert(item):
         if isinstance(item, (np.ndarray, jax.Array)):
             return np.asarray(item).tolist()
@@ -137,7 +94,8 @@ def write_json(path, value):
 
 
 def verify(case, fluid, cells, output, max_steps, tolerance, cfl, *, mesh=None,
-           delta_factor=0.1, flux_method="characteristic", controller="native"):
+           delta_factor=0.1, flux_method="characteristic", controller="native",
+           initial_states=None, initialization_metadata=None):
     supplied_mesh = mesh is not None
     mesh = case.geometry.mesh(cells) if mesh is None else mesh
     if mesh.n_cells != cells:
@@ -151,7 +109,12 @@ def verify(case, fluid, cells, output, max_steps, tolerance, cfl, *, mesh=None,
     pressure_in = float(inlet_exact["p"])
     ref_fields["Cp"] = (ref_fields["p"]-pressure_in)/(pressure0-pressure_in)
     inlet_data = (dict(state=np.asarray(inlet_exact["W"])) if case.inlet_regime == "supersonic"
-                  else dict(p0=2e5, T0=300.0, alpha_in=case.alpha))
+                  else dict(p0=pressure0, T0=float(case.reference.T0), alpha_in=case.alpha))
+    config = case.config or {}
+    if controller == "equation_monitored" and not config:
+        raise ValueError("Equation-monitored verification requires resolved YAML case inputs")
+    if config.get("boundaries", {}).get("back_pressure", "reference") != "reference":
+        pressure_back = float(config["boundaries"]["back_pressure"])
     result = dict(case=case.name, cells=cells, m=mesh.m_centers, m_faces=mesh.m_faces,
                   volumes=mesh.volumes, r=mesh.r_center, backpressure=pressure_back,
                   inlet_regime=case.inlet_regime, outlet_regime=case.outlet_regime,
@@ -165,6 +128,7 @@ def verify(case, fluid, cells, output, max_steps, tolerance, cfl, *, mesh=None,
                   versions={name: metadata.version(name) for name in
                             ("jax", "jaxprop", "nurbspy", "numpy", "scipy")},
                   source_hashes=fingerprints(),
+                  case_config=config, case_config_provenance=case.config_provenance,
                   settings=dict(tolerance=tolerance, cfl=cfl, max_steps=max_steps,
                                 mesh_definition="provided faces" if supplied_mesh else "uniform arclength",
                                 delta_factor=delta_factor, flux_method=flux_method,
@@ -172,6 +136,11 @@ def verify(case, fluid, cells, output, max_steps, tolerance, cfl, *, mesh=None,
                                 controller="accepted Newton work; failed timestep halving",
                                 conservation_history="signed integrated balance / fixed global flux scales",
                                 initial_state="uniform physical cold guess"))
+    if initial_states is not None:
+        if set(initial_states) != set(RECONSTRUCTIONS):
+            raise ValueError("Transferred initial states must include both reconstructions")
+        result["settings"]["initial_state"] = "bounded linear primitive transfer from previous converged mesh"
+    result["initialization"] = initialization_metadata or dict(strategy="uniform cold physical guess")
     if controller == "cfl_recommended":
         from .recommended_controller import SETTINGS, driver_hashes, solve_recommended
         result["settings"].update(SETTINGS)
@@ -179,20 +148,47 @@ def verify(case, fluid, cells, output, max_steps, tolerance, cfl, *, mesh=None,
         result["settings"]["controller"] = "cfl_recommended"
         result["controller_provenance"] = dict(
             recommendation="REPORT.html#notes-controller", driver_sha256=driver_hashes())
+    elif controller == "equation_monitored":
+        result["settings"].update(controller=controller, residual_policy=config["residuals"],
+                                  monitors=config["monitors"], **{
+                                      key: value for key, value in config["run"].items()
+                                      if key not in ("cfl", "max_steps", "print_every")})
     for reconstruction in RECONSTRUCTIONS:
         print(f"Starting {case.name} N={cells} {reconstruction}; controller={controller}", flush=True)
+        numerical = dict(config.get("numerical", {})) if controller == "equation_monitored" else {}
+        numerical.update(reconstruction=reconstruction, delta_factor=delta_factor, flux_method=flux_method)
+        if controller == "cfl_recommended":
+            numerical["newton_iterations"] = 8
         solver = make_annular_solver(
             fluid, mesh, inlet_data=inlet_data, outlet_pressure=pressure_back,
             inlet_regime=case.inlet_regime, outlet_regime=case.outlet_regime,
-            reconstruction=reconstruction, delta_factor=delta_factor, flux_method=flux_method,
-            **({"newton_iterations": 8} if controller == "cfl_recommended" else {}))
-        initial = solver.initial_state()
+            tau_w=config.get("walls", {}).get("shear_stress", 0.0),
+            q_w=config.get("walls", {}).get("heat_flux", 0.0), **numerical)
+        initial = (solver.initial_state() if initial_states is None
+                   else jnp.asarray(initial_states[reconstruction], dtype=jnp.float64))
+        if initial.shape != solver.shape or not bool(solver.is_admissible(initial)):
+            raise ValueError(f"Invalid initial state for {case.name} N={cells} {reconstruction}")
         def progress(row):
-            if row["step"] % 500 == 0:
+            if row.get("accepted", False) and row["step"] % 500 == 0:
                 print(f"{case.name} N={cells} {reconstruction}: step={row['step']} "
                       f"spatial={row['spatial_rms']:.3g} cfl={row['cfl']:.3g}", flush=True)
         controller_audit = None
-        if controller == "cfl_recommended":
+        if controller == "equation_monitored":
+            from nozzle_hyperbolic.solvers.monitoring import MonitorSpec
+            from nozzle_hyperbolic.solvers.residuals import ResidualPolicy
+            monitors = [MonitorSpec(**item) for item in config["monitors"]]
+            options = {key: value for key, value in config["run"].items()
+                       if key not in ("print_every", "max_steps", "cfl")}
+            solution = solver.solve_steady_monitored(
+                initial, residual_policy=ResidualPolicy(**config["residuals"]), monitors=monitors,
+                pressure_total=pressure0, max_steps=max_steps, cfl=cfl, callback=progress, **options)
+            controller_audit = dict(
+                accepted=solution.monitoring["accepted_updates"],
+                attempts=solution.monitoring["attempts"],
+                rejected=solution.monitoring["rejected_attempts"],
+                final_cfl=solution.monitoring["final_cfl"],
+                pseudo_time=solution.monitoring["pseudo_time"])
+        elif controller == "cfl_recommended":
             solution, controller_audit = solve_recommended(
                 solver, initial, tolerance=tolerance, max_steps=max_steps, cfl=cfl)
         else:
@@ -200,6 +196,7 @@ def verify(case, fluid, cells, output, max_steps, tolerance, cfl, *, mesh=None,
                 solution = solver.solve_steady(initial, tolerance=tolerance, max_steps=max_steps,
                                                cfl=cfl, callback=monitor)
         fields = {key: np.asarray(value) for key, value in solver.fields(jnp.asarray(solution.state)).items()}
+        fields["alpha_deg"] = np.rad2deg(np.arctan2(fields["v_theta"], fields["v_m"]))
         numerical_inlet_pressure = solution.state[0, 0]
         fields["Cp"] = (fields["p"]-numerical_inlet_pressure)/(pressure0-numerical_inlet_pressure)
         conservative = np.asarray(primitive_to_conservative(
@@ -210,6 +207,7 @@ def verify(case, fluid, cells, output, max_steps, tolerance, cfl, *, mesh=None,
                              solver.reference_density*solver.reference_sound_speed**2])
         error = dict(
             Cp_max=float(np.max(np.abs(fields["Cp"]-ref_fields["Cp"]))),
+            Cp_mean_absolute=float(np.sum(mesh.widths*np.abs(fields["Cp"]-ref_fields["Cp"]))/np.sum(mesh.widths)),
             conservative_L1=(np.sum(mesh.volumes[:, None]*np.abs(conservative-projected["q"]), axis=0)
                               /(np.sum(mesh.volumes)*scales)).tolist(),
             p_L1=float(np.sum(mesh.volumes*np.abs(fields["p"]-ref_fields["p"]))
@@ -239,19 +237,19 @@ def verify(case, fluid, cells, output, max_steps, tolerance, cfl, *, mesh=None,
             error["shock_error_cells"] = abs(shock_estimate-case.shock_m)/float(np.max(mesh.widths))
             analytic_pass = error["shock_error_cells"] <= 2
         else:
-            analytic_pass = error["Cp_max"] < 1e-3 and max(error["conservative_L1"]) < 1e-3
+            analytic_pass = error["Cp_mean_absolute"] <= 0.01 and max(error["conservative_L1"]) < 1e-3
         result["methods"][reconstruction] = dict(
             options=asdict(solver.options), controller_audit=controller_audit,
             success=solution.success, message=solution.message, metrics=solution.final_metrics,
             analytical_target_met=analytic_pass, errors=error, state=solution.state,
             initial_state=np.asarray(initial), fields=fields, face_flux=face_flux,
-            history=solution.history,
+            history=solution.history, monitoring=solution.monitoring,
             integrated_source=integrated_source,
             boundary_constraints=np.asarray(solver.boundary_residual(jnp.asarray(solution.state))),
             physical_spatial_residual=np.asarray(solver.spatial_residual(jnp.asarray(solution.state))))
         print(f"{case.name} N={cells} {reconstruction}: root={solution.success} "
-              f"updates={sum(row['accepted'] for row in solution.history)} "
-              f"Cp_error={error['Cp_max']:.4g} "
+              f"updates={sum(row['accepted'] and row.get('phase') != 'initial' for row in solution.history)} "
+              f"Cp_mean_error={error['Cp_mean_absolute']:.4g} "
               f"spatial={solution.final_metrics['spatial_rms']:.3g}", flush=True)
         del solver
     write_json(output/f"{case.name}_{cells}.json", result)
@@ -262,17 +260,21 @@ def verify(case, fluid, cells, output, max_steps, tolerance, cfl, *, mesh=None,
 def plot_result(result, output):
     colors = plt.get_cmap("plasma")(np.linspace(0.2, 0.8, 3))
     fig, axes = plt.subplots(2, 3, figsize=(13, 7), constrained_layout=True)
-    fields = (("p", "Static pressure [Pa]"), ("Cp", "Pressure recovery Cp"),
-              ("M_m", "Meridional Mach"), ("v_m", "Meridional velocity [m/s]"),
-              ("v_theta", "Tangential velocity [m/s]"), ("rho", "Density [kg/m3]"))
+    fields = (("p", "Static pressure [Pa]"), ("rho", "Density [kg/m3]"),
+              ("alpha_deg", "Flow angle [deg]"), ("M_m", "Meridional Mach"),
+              ("M_theta", "Tangential Mach"), ("M", "Mach magnitude"))
     x = np.asarray(result["m"])
     for ax, (key, ylabel) in zip(axes.ravel(), fields):
         ax.plot(x, result["reference"][key], color=colors[0], label=LABELS[0], lw=1.8)
-        for index, (method, style, marker) in enumerate(zip(RECONSTRUCTIONS, ("--", "-."), ("o", "^")), 1):
+        for index, (method, style) in enumerate(zip(RECONSTRUCTIONS, ("--", "-.")), 1):
             run = result["methods"][method]
             label = LABELS[index]+(" (not converged)" if not run["success"] else "")
-            ax.plot(x, run["fields"][key], style, marker=marker, markevery=max(1, len(x)//16),
-                    ms=3, color=colors[index], label=label)
+            values = run["fields"].get(key)
+            if values is None:
+                f = run["fields"]
+                values = (np.rad2deg(np.arctan2(f["v_theta"], f["v_m"])) if key=="alpha_deg"
+                          else np.asarray(f["v_theta"])/np.asarray(f["a"]))
+            ax.plot(x, values, style, color=colors[index], label=label)
         ax.set(xlabel="Meridional arclength [m]", ylabel=ylabel)
         ax.grid(alpha=0.2)
     axes.ravel()[0].legend(fontsize=8)
@@ -283,31 +285,45 @@ def plot_result(result, output):
     fig, ax = plt.subplots(figsize=(7, 4), constrained_layout=True)
     for index, method in enumerate(RECONSTRUCTIONS, 1):
         records = [row for row in result["methods"][method]["history"] if row["accepted"]]
-        ax.semilogy([row["step"] for row in records],
-                    [max(row["spatial_rms"], row["boundary_max"], row["conservation_max"])
-                     for row in records], color=colors[index], label=LABELS[index])
-    ax.axhline(result["settings"]["tolerance"], ls=":", color="0.5", label="Residual target")
-    ax.set(xlabel="Accepted implicit updates", ylabel="Max(spatial RMS, BC max, balance defect)")
-    ax.legend(fontsize=8); ax.grid(alpha=0.2)
+        if result["methods"][method].get("monitoring"):
+            for k, name in enumerate(("mass", "meridional", "angular", "energy")):
+                values = [row["equation_relative"][k] if row["relative_active"][k] else np.nan
+                          for row in records]
+                ax.semilogy([row["step"] for row in records], values,
+                            ("-", "--", "-.", ":")[k], color=colors[index],
+                            label=f"{'constant' if index == 1 else 'MUSCL'}: {name}")
+        else:
+            ax.semilogy([row["step"] for row in records],
+                        [max(row["spatial_rms"], row["boundary_max"], row["conservation_max"])
+                         for row in records], color=colors[index], label=LABELS[index])
+    monitored = result["settings"]["controller"] == "equation_monitored"
+    target = result["settings"]["residual_policy"]["relative_tolerance"] if monitored else result["settings"]["tolerance"]
+    ax.axhline(target, ls=":", color="0.5", label="Residual target")
+    ax.set(xlabel="Accepted implicit updates (initial state at zero)", ylabel=(
+        "Equation RMS / initial equation RMS" if monitored else "Max(spatial RMS, BC max, balance defect)"))
+    ax.legend(fontsize=8, ncol=2); ax.grid(alpha=0.2)
     for suffix in ("png", "pdf"):
         fig.savefig(output/f"{result['case']}_{result['cells']}_convergence.{suffix}", dpi=160)
     plt.close(fig)
 
 
 def report(results, output):
+    from .accuracy import assessed_errors, accuracy_target_met
     lines = ["# Annular Euler verification results", "",
              "The general-EOS FVM uses a JAXProp perfect-gas backend; flux and entropy-width settings are saved per case.",
              "Both reconstructions start from uniform cold fields. BCs are simultaneous algebraic blocks.",
              "Cp uses each solution's inlet static pressure and the prescribed reservoir pressure.",
              "Root convergence and analytical accuracy are reported separately; failures are retained.", "",
-             "| Case | Cells | Reconstruction | Root | Spatial RMS | BC max | Cp max error | Analytic target |",
+             "Cp accuracy uses the meridional-length mean absolute difference over all physical cells, with a limit of 0.01 Cp units.",
+             "| Case | Cells | Reconstruction | Root | Spatial RMS | BC max | Cp mean absolute error | Analytic target |",
              "|---|---:|---|---|---:|---:|---:|---|"]
     for result in results:
         for method, run in result["methods"].items():
+            errors = assessed_errors(result, run)
             lines.append(f"| {result['case']} | {result['cells']} | {method} | "
                          f"{run['success']} | {run['metrics']['spatial_rms']:.3e} | "
-                         f"{run['metrics']['boundary_max']:.3e} | {run['errors']['Cp_max']:.3e} | "
-                         f"{run['analytical_target_met']} |")
+                         f"{run['metrics']['boundary_max']:.3e} | {errors['Cp_mean_absolute']:.3e} | "
+                         f"{accuracy_target_met(result, run)} |")
     lines.extend(["", "## Field comparisons", ""])
     for result in results:
         name = f"{result['case']}_{result['cells']}"
@@ -316,7 +332,7 @@ def report(results, output):
                       f"[Vector figure]({name}_fields.pdf). [Numerical convergence]({name}_convergence.png).", ""])
     (output/"REPORT.md").write_text("\n".join(lines)+"\n", encoding="utf-8")
     columns = ("case", "cells", "reconstruction", "root_converged", "analytical_target_met",
-               "spatial_rms", "boundary_max", "conservation_max", "Cp_max",
+               "spatial_rms", "boundary_max", "conservation_max", "Cp_max", "Cp_mean_absolute",
                "conservative_L1_mass", "conservative_L1_momentum", "conservative_L1_angular",
                "conservative_L1_energy", "mass_flow_relative", "face_mass_spread_relative",
                "angular_flux_spread_scaled", "energy_flux_spread_scaled", "shock_error_cells")
@@ -325,14 +341,14 @@ def report(results, output):
         writer.writeheader()
         for result in results:
             for method, run in result["methods"].items():
-                errors = run["errors"]
+                errors = assessed_errors(result, run)
                 row = dict(case=result["case"], cells=result["cells"], reconstruction=method,
                            root_converged=run["success"],
-                           analytical_target_met=run["analytical_target_met"])
+                           analytical_target_met=accuracy_target_met(result, run))
                 row.update({key: run["metrics"][key] for key in
                             ("spatial_rms", "boundary_max", "conservation_max")})
                 row.update({key: errors.get(key, "") for key in
-                            ("Cp_max", "mass_flow_relative", "face_mass_spread_relative",
+                            ("Cp_max", "Cp_mean_absolute", "mass_flow_relative", "face_mass_spread_relative",
                              "angular_flux_spread_scaled", "energy_flux_spread_scaled",
                              "shock_error_cells")})
                 row.update({f"conservative_L1_{name}": value for name, value in

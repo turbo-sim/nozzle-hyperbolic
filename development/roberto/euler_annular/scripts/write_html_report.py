@@ -14,7 +14,7 @@ import json
 from pathlib import Path
 import re
 
-from .html_report_data import build_report_data
+from .html_report_data import FIELD_METADATA, build_report_data
 from .channel_visualization_data import build_channel_data
 
 STUDY = Path(__file__).resolve().parents[1]
@@ -53,6 +53,32 @@ def table(columns, rows):
             +'</tbody></table></div>')
 
 
+def collapsible_results(body):
+    """Keep section anchors stable while putting their contents in native boxes."""
+    first = body.index('<section id=')
+    overview, sections = body[:first], body[first:]
+    def wrap(match):
+        opening, section_id, contents, closing = match.groups()
+        heading, content = contents.strip().split('\n', 1)
+        heading = heading.rstrip('\r')
+        if not heading.startswith('<div class="section-head">') or not heading.endswith('</div>'):
+            raise ValueError(f"Missing first-line results section heading: {section_id}")
+        summary = heading.replace('<div class="section-head">', '<summary class="section-head">', 1)
+        summary = summary[:-6]+'</summary>'
+        return (opening+f'<details class="result-section" id="box-{section_id}" open>'+
+                summary+'<div class="result-section-body">'+content+
+                '</div></details>'+closing)
+    sections, count = re.subn(r'(<section id="([^"]+)"[^>]*>)(.*?)(</section>)', wrap, sections, flags=re.DOTALL)
+    if count != 7:
+        raise ValueError(f"Expected seven results sections, found {count}")
+    return ('<div class="section-controls"><span>Results sections</span>'
+            '<button id="results-expand" type="button">Expand all</button>'
+            '<button id="results-collapse" type="button">Collapse all</button></div>'
+            '<details class="result-section overview-box" id="box-overview" open>'
+            '<summary><h2>Campaign overview</h2></summary><div class="result-section-body">'+overview+
+            '</div></details>'+sections)
+
+
 def notes_tables(body, data):
     sweep = (data.get("controller_sweep") or {}).get("runs", [])
     sweep_rows = []
@@ -77,23 +103,41 @@ def notes_tables(body, data):
     body = body.replace("@@CAMPAIGN_TABLE@@", table(["Case, N=400", "Method", "Old / new accepted", "Old / new rejected", "Newton", "Backtracks", "Original defect", "Scaled profile difference", "Matched"], rows))
     summary = data["summary"]
     matched = sum(r["matched_archived_discrete_state"] for d in audit.get("records", []) for r in d["methods"].values())
-    body = body.replace("@@CAMPAIGN_SUMMARY@@", f'<p><strong>{summary["root_passes"]}/{summary["method_entries"]} original steady roots converge; {summary["finest_accuracy_passes"]}/{summary["finest_method_entries"]} finest-grid accuracy assessments pass.</strong> The seven current misses remain listed with their measured deviations. {matched} new profiles match the archived discrete states at the declared threshold. Production source fingerprints were unchanged during the campaign.</p>')
+    misses=summary["finest_method_entries"]-summary["finest_accuracy_passes"]
+    body = body.replace("@@CAMPAIGN_SUMMARY@@", f'<p><strong>{summary["root_passes"]}/{summary["method_entries"]} solves meet every configured convergence target; {summary["finest_accuracy_passes"]}/{summary["finest_method_entries"]} finest-grid accuracy assessments pass.</strong> All {misses} accuracy misses and every convergence failure remain visible. The selected data directory is {html.escape(data["provenance"]["primary_directory"])}. The relative transport-equation target is 10<sup>−9</sup>, with separate absolute/BC/global safeguards and monitor stationarity. Histories belong to the selected mesh solve; preceding initialization stages are saved separately. Archived controller/profile comparisons below are historical evidence.</p>')
     return body
 
 
-def build_report(study, output):
-    data = build_report_data(study)
-    data["channels"] = build_channel_data(study)
+def build_report(study, output, *, verification_folder=None):
+    data = build_report_data(study, verification_folder=verification_folder)
+    data["channels"] = build_channel_data(study, verification_folder=verification_folder)
     payload = json_safe(data)
     sources = {name: (ASSETS/name).read_bytes() for name in ("results.html", "theory.html", "implementation.html", "notes.html")}
     chapters = {name[:-5]: raw.decode("utf-8") for name, raw in sources.items()}
     summary = data["summary"]
     settings = data["cases"][0]["meshes"][0]["settings"]
-    values = dict(CONTROLLER_LABEL=f'CFL {settings["cfl"]} / grow {settings.get("growth", "work-based")} / shrink {settings.get("shrink", .5)} / Newton cap {settings.get("newton_iterations", 12)}',
+    options=data["cases"][0]["meshes"][0]["methods"]["constant"]["effective_options"]
+    values = dict(CONTROLLER_LABEL=f'CFL {settings["cfl"]} / grow {settings.get("cfl_growth", settings.get("growth", "work-based"))} / shrink {settings.get("cfl_shrink", settings.get("shrink", .5))} / Newton cap {options["newton_iterations"]}',
         ROOT_PASS=summary["root_passes"], RUN_COUNT=summary["method_entries"], ACCURACY_PASS=summary["finest_accuracy_passes"],
-        ACCURACY_COUNT=summary["finest_method_entries"], ACCURACY_FAILURES=summary["finest_method_entries"]-summary["finest_accuracy_passes"], REPRODUCED=summary["audited_array_reproduction_passes"])
+        ACCURACY_COUNT=summary["finest_method_entries"], ACCURACY_FAILURES=summary["finest_method_entries"]-summary["finest_accuracy_passes"], REPRODUCED=summary["audited_array_reproduction_passes"],
+        ROOT_FAILURES=summary["method_entries"]-summary["root_passes"],
+        ROOT_STATUS_CLASS="success" if summary["root_passes"]==summary["method_entries"] else "warning")
     for key, value in values.items():
         chapters["results"] = chapters["results"].replace(f"@@{key}@@", html.escape(str(value)))
+    monitoring_rows=[]
+    for run in data.get("monitoring_validation",{}).get("runs",[]):
+        if run["root_pass"]:
+            continue
+        monitors=run["monitors"]
+        monitoring_rows.append([run["case"],run["cells"],run["method"],run["root_pass"],
+            run["accepted_updates"],f'{run["max_absolute"]:.4e}',
+            f'{run["max_relative"]:.4e}' if run["max_relative"] is not None else "absolute only",
+            "; ".join(f'{name}: {"stable" if value["stable"] else "not stable"}' for name,value in monitors.items()),
+            run["reason"]])
+    chapters["results"]=chapters["results"].replace("@@MONITORING_TABLE@@",table(
+        ["Case","Cells","Method","All targets","Accepted updates","Max equation norm",
+         "Worst active R/R(initial)","Engineering monitors","Final reason"],monitoring_rows)
+        if monitoring_rows else "<p>Every selected run met all configured convergence targets.</p>")
     benchmark_rows=[]
     for case in data["cases"]:
         record=case["meshes"][-1];meta=record["metadata"];g=data["channels"]["cases"][case["id"]]["geometry"]
@@ -113,7 +157,8 @@ def build_report(study, output):
     page_names = dict(results="Results", theory="Theory", implementation="Implementation", notes="Notes & findings")
     roots = dict(results="overview", theory="theory-overview", implementation="use-overview", notes="notes-overview")
     nav_items = {name: headings(body) for name, body in chapters.items()}
-    nav_items["results"] = [(key, label) for key, label in [("overview","Overview"),("fields","Flow fields"),("refinement","Accuracy"),("shocks","Shock capture"),("conservation","Conservation"),("audit","Numerical audit"),("provenance","Provenance")]]
+    nav_items["results"] = [(key, label) for key, label in [("overview","Overview"),("fields","Flow fields"),("conservation","Convergence & conservation"),("refinement","Grid refinement"),("shocks","Shock capture"),("audit","Numerical audit"),("provenance","Provenance"),("assessment","Case evaluation")]]
+    chapters["results"] = collapsible_results(chapters["results"])
     evidence_path = study/"outputs/controller_sweep/evidence.zip"
     evidence = evidence_path.read_bytes()
     downloads = dict(controller_evidence=dict(filename="EulerAnnular_Controller_Evidence.zip", mime="application/zip", sha256=digest(evidence), base64=base64.b64encode(evidence).decode("ascii")))
@@ -122,7 +167,7 @@ def build_report(study, output):
         chapter_sources={name:digest(raw) for name,raw in sources.items()},
         assets={path.name:digest(path.read_bytes()) for path in ASSETS.iterdir() if path.is_file()},
         internal_pages=list(page_names), numerical_sources_and_saved_data_read_only=True, network_required=False,
-        default_marker_stride=11, marker_skip_control=dict(min=0,step=1,default=10,rule="stride = skipped points + 1"),
+        solution_field_markers=False, solution_fields=[entry[0] for entry in FIELD_METADATA],
         channel_visualizations=dict(cases=len(data["channels"]["cases"]),views=["meridional","frontal","annular"],layout="side_by_side",control_points_default=False),
         embedded_downloads={key:{k:v for k,v in value.items() if k!="base64"} for key,value in downloads.items()},
         library_versions=dict(plotly_js="2.35.2",mathjax="3.2.2"))
@@ -152,6 +197,7 @@ def build_report(study, output):
     manifest = dict(**build, equations=equations, theory_sections=len(nav_items["theory"]), summary=summary,
         input_files=data["provenance"]["input_files"], artifacts={"REPORT.html":dict(bytes=len(raw),sha256=digest(raw))})
     log = output/"outputs/html_report";log.mkdir(parents=True,exist_ok=True)
+    (log/"channel_geometry.json").write_text(json_safe(data["channels"])+"\n",encoding="utf-8")
     (log/"build.json").write_text(json.dumps(manifest,indent=2)+'\n',encoding="utf-8")
     print(json.dumps(dict(report=str(output/"REPORT.html"),internal_pages=list(page_names),equations=equations,summary=summary,bytes=len(raw)),indent=2))
     return manifest
@@ -161,8 +207,9 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--study",type=Path,default=STUDY)
     parser.add_argument("--output",type=Path,default=STUDY)
+    parser.add_argument("--verification-folder",type=Path,default=None)
     args=parser.parse_args()
-    build_report(args.study.resolve(),args.output.resolve())
+    build_report(args.study.resolve(),args.output.resolve(),verification_folder=args.verification_folder)
 
 
 if __name__=="__main__":

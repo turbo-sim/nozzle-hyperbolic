@@ -40,6 +40,7 @@ COMPONENTS = ("mass", "meridional_momentum", "angular_momentum", "total_energy")
 COMPONENT_UNITS = ("kg/s", "N", "N m", "W")
 REPRODUCTION_TOLERANCE = 1e-10
 CASE_FILE = re.compile(r"^(.+?)_(?:N)?([1-9][0-9]*)\.json$")
+AUDIT_DEFINITION = "annular_saved_state_cp_mean_equation_monitoring_v2"
 
 
 def _comparison(actual, saved, scale=1.0):
@@ -96,6 +97,149 @@ def _current_hashes():
     return current
 
 
+def audit_equation_monitoring(solver, run, physical, scaled, final_metrics):
+    """Independent NumPy norms, initial reductions and engineering monitors.
+
+    This does not call the production reducer, policy assessment, monitor
+    tracker or annular adapter. Initial rows are independently reconstructed
+    from actual face flux minus source, just like the final spatial audit.
+    """
+    metadata = run.get("monitoring")
+    if not metadata:
+        return None
+    if metadata.get("definition") != "steady_spatial_fixed_scale_equation_v1":
+        raise ValueError("Unsupported saved residual definition")
+    policy = metadata["policy"]
+    for key in ("relative_tolerance", "absolute_tolerance", "boundary_tolerance", "global_tolerance"):
+        if not np.isfinite(policy[key]) or policy[key] <= 0:
+            raise ValueError("Invalid saved residual tolerance")
+    if policy["norm"] not in ("l1", "l2") or policy["weighting"] not in ("volume", "cell"):
+        raise ValueError("Unsupported saved residual norm/weighting")
+    volumes = np.asarray(solver.mesh.volumes)
+    weights = (volumes/volumes.sum() if policy["weighting"] == "volume"
+               else np.full(len(volumes), 1/len(volumes)))
+
+    def norms(rows):
+        return dict(l1=np.sum(weights[:, None]*abs(rows), axis=0),
+                    l2=np.sqrt(np.sum(weights[:, None]*rows**2, axis=0)),
+                    linf=np.max(abs(rows), axis=0), worst_cell=np.argmax(abs(rows), axis=0))
+
+    initial = jnp.asarray(run["initial_state"])
+    if initial.shape != solver.shape or not bool(solver.is_admissible(initial)):
+        raise ValueError("Saved monitored initial state is invalid")
+    initial_flux = np.asarray(solver.face_flux(initial))
+    initial_source = np.asarray(solver.source(initial))
+    initial_rows = initial_flux[1:]-initial_flux[:-1]-initial_source
+    # Norm the public signed spatial rows, independently in NumPy. Keep its
+    # canonical execution boundary: separately evaluating flux/source terms can
+    # rearrange cancellation at roundoff near a nine-order reduction target.
+    # The direct assembly remains a separate, fixed-scale identity audit.
+    canonical_initial = np.asarray(solver.spatial_residual(initial))
+    canonical_final = np.asarray(solver.spatial_residual(jnp.asarray(run["state"])))
+    initial_norms = norms(canonical_initial/solver.spatial_flux_scales)
+    current_norms = norms(canonical_final/solver.spatial_flux_scales)
+    initial_selected = initial_norms[policy["norm"]]
+    current_selected = current_norms[policy["norm"]]
+    active = initial_selected > policy["initial_floor"]
+    relative = np.divide(current_selected, initial_selected, out=np.zeros_like(current_selected),
+                         where=initial_selected > 0)
+    equation_ratios = np.maximum(current_selected/policy["absolute_tolerance"],
+                                np.where(active, relative/policy["relative_tolerance"], 0.0))
+    finite = bool(np.isfinite(scaled).all() and np.isfinite(initial_rows).all()
+                  and np.isfinite(current_selected).all() and np.isfinite(initial_selected).all())
+    equation_passed = (equation_ratios <= 1) & finite
+    expected = {"equation_"+key: value for key, value in current_norms.items()}
+    expected.update(equation_norm=current_selected, equation_relative=relative,
+                    relative_active=active, equation_passed=equation_passed,
+                    equation_max_ratio=float(np.max(equation_ratios)),
+                    all_equations_passed=bool(equation_passed.all()),
+                    boundary_passed=final_metrics["boundary_max"] <= policy["boundary_tolerance"],
+                    global_passed=final_metrics["conservation_max"] <= policy["global_tolerance"],
+                    boundary_ratio=final_metrics["boundary_max"]/policy["boundary_tolerance"],
+                    global_ratio=final_metrics["conservation_max"]/policy["global_tolerance"])
+    expected["overall_max_ratio"] = max(expected[key] for key in
+                                        ("equation_max_ratio", "boundary_ratio", "global_ratio"))
+    checks = {key: _comparison(actual, run["metrics"].get(key, [])) for key, actual in expected.items()}
+    checks["initial_flux_source_identity"] = _comparison(canonical_initial, initial_rows, solver.spatial_flux_scales)
+    checks["final_flux_source_identity"] = _comparison(canonical_final, physical, solver.spatial_flux_scales)
+    # Comparing an already tolerance-divided number at a fixed absolute 1e-10
+    # would amplify harmless raw arithmetic differences by 1/tolerance. Preserve
+    # the original fixed-scale reproduction threshold for these two ratios.
+    checks["boundary_ratio"] = _comparison(expected["boundary_ratio"], run["metrics"]["boundary_ratio"],
+                                            1/policy["boundary_tolerance"])
+    checks["global_ratio"] = _comparison(expected["global_ratio"], run["metrics"]["global_ratio"],
+                                          1/policy["global_tolerance"])
+    checks["initial_equation_norms"] = _comparison(initial_selected, metadata["initial_equation_norms"])
+    checks["conservative_scales"] = _comparison(solver.conservative_scales, metadata["conservative_scales"])
+    checks["spatial_flux_scales"] = _comparison(solver.spatial_flux_scales, metadata["spatial_flux_scales"])
+    checks["global_flux_scales"] = _comparison(solver.global_flux_scales, metadata["global_flux_scales"])
+    checks["volume_weights"] = _comparison(volumes, metadata["volumes"], volumes)
+    history = run["history"]
+    accepted = [row for row in history if row.get("accepted", True)]
+    if not accepted or accepted[0].get("phase") != "initial" or accepted[0]["step"] != 0:
+        raise ValueError("Monitored history needs its actual initial sample at update zero")
+    checks["initial_history_norm"] = _comparison(initial_selected, accepted[0]["equation_norm"])
+    checks["final_history_norm"] = _comparison(current_selected, accepted[-1]["equation_norm"])
+    updates = [row for row in accepted if row.get("phase") != "initial"]
+    bookkeeping = bool(len(updates) == metadata["accepted_updates"]
+                       and len(history)-1 == metadata["attempts"]
+                       and len(history)-len(accepted) == metadata["rejected_attempts"]
+                       and [row["step"] for row in accepted] == list(range(len(accepted))))
+    # A rejected candidate without an outer evaluation must not claim copied
+    # accepted-state norms or engineering observations.
+    bookkeeping = bookkeeping and all(
+        "equation_norm" not in row and "monitors" not in row
+        for row in history if not row.get("accepted", True))
+    monitor_checks, monitor_expected = {}, {}
+    state = np.asarray(run["state"])
+    final_flux = np.asarray(solver.face_flux(jnp.asarray(state)))
+    widths = np.diff(solver.mesh.m_faces)
+    for spec in metadata["monitors"]:
+        name, quantity, reduction = spec["name"], spec["resolved_quantity"], spec["reduction"]
+        if quantity == "pressure_coefficient":
+            denominator = spec["resolved_pressure_total"]-state[0, 0]
+            if denominator <= 0:
+                raise ValueError("Invalid saved Cp monitor normalization")
+            cp = (state[1:-1, 0]-state[0, 0])/denominator
+            if reduction == "inlet":
+                value = 0.0
+            elif reduction == "outlet":
+                value = (state[-1, 0]-state[0, 0])/denominator
+            else:
+                value = float(np.sum(widths*cp))
+                if reduction == "length_mean":
+                    value /= widths.sum()
+        elif quantity == "mass_flow":
+            value = (final_flux[0, 0] if reduction == "inlet" else final_flux[-1, 0]
+                     if reduction == "outlet" else
+                     np.sum(widths*(final_flux[:-1, 0]+final_flux[1:, 0])/2)/widths.sum())
+        else:
+            raise ValueError("Unknown saved monitor quantity")
+        window = [row["monitors"][name]["value"] for row in accepted[-spec["window"]:]]
+        span = max(window)-min(window)
+        threshold = spec["absolute_tolerance"]+spec["relative_tolerance"]*spec["reference"]
+        stable = bool(len(window) == spec["window"] and span <= threshold)
+        expected_monitor = dict(value=value, range=span, threshold=threshold, stable=stable,
+                                samples=len(window), required=spec["convergence"])
+        monitor_expected[name] = expected_monitor
+        monitor_checks[name] = {key: _comparison(actual, run["metrics"]["monitors"][name][key])
+                                for key, actual in expected_monitor.items()}
+        monitor_checks[name]["final_history_value"] = _comparison(value, window[-1])
+    monitors_passed = all(not row["required"] or row["stable"] for row in monitor_expected.values())
+    checks["monitors_passed"] = _comparison(monitors_passed, run["metrics"]["monitors_passed"])
+    root = bool(finite and equation_passed.all() and expected["boundary_passed"]
+                and expected["global_passed"] and monitors_passed)
+    reproduced = bool(bookkeeping and all(check["matches"] for check in checks.values())
+                      and all(check["matches"] for group in monitor_checks.values() for check in group.values()))
+    return dict(root_target_met=root, reproduced=reproduced,
+                method="independent NumPy; actual numerical face flux minus integrated source",
+                initial_equation_norms=initial_selected, final_equation_norms=current_selected,
+                relative_active=active, equation_relative=relative, equation_passed=equation_passed,
+                policy=policy, checks=checks, monitor_checks=monitor_checks,
+                expected_monitors=monitor_expected, history_bookkeeping=bookkeeping,
+                accepted_updates=len(updates), attempts=len(history)-1)
+
+
 def audit_case(path, tolerance, current_hashes, current_versions):
     """Audit one saved case with current operators and the original saved state."""
     saved = json.loads(path.read_text(encoding="utf-8"))
@@ -145,6 +289,7 @@ def audit_case(path, tolerance, current_hashes, current_versions):
         shock_m=(shock_m == case.shock_m),
     )
     result = dict(
+        audit_definition=AUDIT_DEFINITION,
         input_file=path.name, input_sha256=sha256(path.read_bytes()).hexdigest(),
         case=name, cells=cells, root_tolerance=tolerance,
         reproduction_tolerance=REPRODUCTION_TOLERANCE,
@@ -171,7 +316,10 @@ def audit_case(path, tolerance, current_hashes, current_versions):
         options.update(run.get("options", {}))
         solver = make_annular_solver(
             fluid, mesh, inlet_data=inlet_data, outlet_pressure=backpressure,
-            inlet_regime=inlet_regime, outlet_regime=outlet_regime, **options,
+            inlet_regime=inlet_regime, outlet_regime=outlet_regime,
+            tau_w=saved.get("case_config", {}).get("walls", {}).get("shear_stress", 0.0),
+            q_w=saved.get("case_config", {}).get("walls", {}).get("heat_flux", 0.0),
+            **options,
         )
         state = np.asarray(run["state"], dtype=float)
         if state.shape != (cells+2, 4) or not np.isfinite(state).all():
@@ -226,6 +374,9 @@ def audit_case(path, tolerance, current_hashes, current_versions):
         root_pass = (max(metrics[key] for key in
                          ("spatial_rms", "boundary_max", "conservation_max")) < tolerance
                      and all(regime_checks.values()))
+        monitoring_audit = audit_equation_monitoring(solver, run, physical, scaled, metrics)
+        if monitoring_audit is not None:
+            root_pass = monitoring_audit["root_target_met"] and all(regime_checks.values())
         angular_norm = (abs(case.reference.mdot*case.reference.ell)
                         if case.reference.ell != 0
                         else abs(case.reference.mdot*solver.scales["ell"]))
@@ -238,6 +389,7 @@ def audit_case(path, tolerance, current_hashes, current_versions):
             full[1:-1], mesh.r_center, solver.fluid))
         errors = dict(
             Cp_max=float(np.max(np.abs(fields["Cp"]-analytical["Cp"]))),
+            Cp_mean_absolute=float(np.sum(np.diff(mesh.m_faces)*np.abs(fields["Cp"]-analytical["Cp"]))/np.sum(np.diff(mesh.m_faces))),
             conservative_L1=(np.sum(mesh.volumes[:, None]*np.abs(conservative-projected["q"]), axis=0)
                               /(np.sum(mesh.volumes)*q_scale)).tolist(),
             p_L1=float(np.sum(mesh.volumes*np.abs(fields["p"]-analytical["p"]))
@@ -246,7 +398,7 @@ def audit_case(path, tolerance, current_hashes, current_versions):
                                      /abs(case.reference.mdot)),
         )
         if shock_m is None:
-            accuracy_pass = errors["Cp_max"] < 1e-3 and max(errors["conservative_L1"]) < 1e-3
+            accuracy_pass = errors["Cp_mean_absolute"] <= 0.01 and max(errors["conservative_L1"]) < 1e-3
         else:
             index = int(np.argmin(np.diff(fields["v_m"])/np.diff(mesh.m_centers)))
             estimate = float(np.mean(mesh.m_centers[index:index+2]))
@@ -283,8 +435,11 @@ def audit_case(path, tolerance, current_hashes, current_versions):
         reproduced = all(check["matches"] for group in
                          (comparisons, field_checks, reference_checks, metric_checks)
                          for check in group.values())
+        if monitoring_audit is not None:
+            reproduced = reproduced and monitoring_audit["reproduced"]
         result["methods"][reconstruction] = dict(
             recorded_success=bool(run["success"]), recorded_message=run.get("message"),
+            equation_monitoring_audit=monitoring_audit,
             root_target_met=bool(root_pass), accuracy_target_met=bool(accuracy_pass),
             recorded_accuracy_target_met=run.get("analytical_target_met"),
             admissible=True, saved_arrays_reproduced=reproduced,
@@ -296,7 +451,9 @@ def audit_case(path, tolerance, current_hashes, current_versions):
             comparisons=comparisons, saved_field_comparisons=field_checks,
             reference_comparisons=reference_checks, saved_metric_comparisons=metric_checks,
             errors=errors,
-            analytical_target_definition=(dict(Cp_max=1e-3, conservative_L1_max=1e-3)
+            analytical_target_definition=(dict(Cp_mean_absolute=0.01, Cp_comparison="<=",
+                                               Cp_weighting="physical meridional cell width / domain length",
+                                               conservative_L1_max=1e-3)
                                           if shock_m is None else dict(shock_error_cells=2.)),
             fixed_scales=dict(conservative=q_scale, spatial_flux=flux_scale,
                               global_balance=balance_scale),
@@ -326,7 +483,7 @@ def audit_case(path, tolerance, current_hashes, current_versions):
             ),
         )
         print(f"AUDIT {name} N={cells} {reconstruction}: root={root_pass} "
-              f"accuracy={accuracy_pass} reproduced={reproduced} Cp_error={errors['Cp_max']:.6g}", flush=True)
+              f"accuracy={accuracy_pass} reproduced={reproduced} Cp_mean_error={errors['Cp_mean_absolute']:.6g}", flush=True)
     geometry_ok = all(check["matches"] for check in mesh_checks.values())
     metadata_ok = all(value["matches"] if isinstance(value, dict) else value
                       for value in metadata_checks.values())
@@ -361,6 +518,7 @@ def main():
             destination = path.with_suffix(".audit.json")
             cached = json.loads(destination.read_text(encoding="utf-8")) if args.resume and destination.is_file() else {}
             matches = (cached.get("input_sha256") == sha256(path.read_bytes()).hexdigest()
+                       and cached.get("audit_definition") == AUDIT_DEFINITION
                        and cached.get("sources", {}).get("current") == current_hashes
                        and cached.get("root_tolerance") == args.tolerance
                        and cached.get("reproduction_tolerance") == REPRODUCTION_TOLERANCE

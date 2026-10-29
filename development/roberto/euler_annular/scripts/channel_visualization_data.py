@@ -25,6 +25,7 @@ from scipy.integrate import cumulative_trapezoid
 from nozzle_hyperbolic.geometry.annular import conical_channel
 
 from .verify_annular import DEFAULT_CASES, REPOSITORY, STUDY, make_case
+from .html_report_data import resolve_verification_folder
 
 
 METHOD = "muscl_van_leer"
@@ -241,18 +242,19 @@ def _record(identifier, kind, saved, source, geometry, points):
     return record
 
 
-def build_channel_data(study: Path, *, points=161) -> dict:
+def build_channel_data(study: Path, *, points=161, verification_folder: Path | None = None) -> dict:
     """Return canonical channels plus available graded-mesh/transient channels."""
     if not isinstance(points, int) or isinstance(points, bool) or points < 9:
         raise ValueError("Use at least nine rendering positions")
     study = Path(study).resolve()
+    primary = resolve_verification_folder(study, verification_folder)
     watched = [Path(__file__), CASE_SOURCE, GEOMETRY_SOURCE]
     source_hashes = {path.relative_to(REPOSITORY).as_posix(): sha256(path.read_bytes()).hexdigest()
                      for path in watched}
     fluid = jxp.FluidPerfectGas(name="Air")  # Only the existing case/reference factory needs this backend.
     cases, geometries, inputs = {}, {}, {}
     for name in DEFAULT_CASES:
-        path = _finest_path(study/"outputs"/"verification", name)
+        path = _finest_path(primary, name)
         saved, source = _read_saved(path, study)
         if saved["case"] != name:
             raise ValueError(f"Saved case identifier differs from filename: {path}")

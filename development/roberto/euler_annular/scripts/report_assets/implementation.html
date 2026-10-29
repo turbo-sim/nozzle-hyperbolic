@@ -1,7 +1,7 @@
 <div class="hero" id="use-overview"><div class="hero-copy"><div class="eyebrow">Implemented contracts / reproducibility</div><h1>Implementation &amp; use</h1><p>The public solver, geometry and fluid interfaces, shared infrastructure and commands needed to reproduce the study. This chapter describes the implemented prototype; completed planning documents are historical records.</p></div></div>
 <article class="theory-content">
 <h2 id="use-api">Public solver interface</h2>
-<p>The installable package is <code>nozzle_hyperbolic</code>. Use 64-bit JAX. The physical model is quasi-one-dimensional axisymmetric, inviscid and adiabatic, with meridional and tangential velocity. The full primitive state has shape <code>(N+2, 4)</code>: inlet face trace, physical cells, outlet face trace. The variables are <code>(p, v_m, ell, h)</code>, with <code>v_theta=ell/r</code>. Storage contains mass, meridional momentum, angular momentum and total energy. The two face traces have zero storage.</p>
+<p>The installable package is <code>nozzle_hyperbolic</code>. Use 64-bit JAX. The physical model is quasi-one-dimensional and axisymmetric, with meridional flow, swirl and optional distributed wall shear/heat sources. Its zero-wall limit is inviscid and adiabatic. The full primitive state has shape <code>(N+2, 4)</code>: inlet face trace, physical cells, outlet face trace. Variables are <code>(p, v_m, ell, h)</code>, with <code>v_theta=ell/r</code>. Storage contains mass, meridional momentum, angular momentum and total energy; the two face traces have zero storage.</p>
 <pre><code>import jax
 jax.config.update("jax_enable_x64", True)
 import jaxprop as jxp
@@ -14,14 +14,43 @@ solver = make_annular_solver(
     fluid, mesh,
     inlet_data={"p0": 200000.0, "T0": 300.0, "alpha_in": 0.0},
     outlet_pressure=199000.0, reconstruction="muscl_van_leer",
+    tau_w=0.0, q_w=0.0,
 )
 solution = solver.solve_steady(tolerance=1e-8, max_steps=3000)
 fields = solver.fields(solution.state)</code></pre>
+<h3 id="use-wall-sources">Named wall-source placeholders</h3>
+<p>The public <code>shear_stress_wall(W, r, fluid, prescribed=...)</code> and <code>heat_flux_wall(W, r, fluid, prescribed=...)</code> functions are exported from <code>nozzle_hyperbolic.models.euler_annular</code> and implemented in <code>closures/wall.py</code>. They currently broadcast the prescribed values, defaulting to zero. Current-state, radius and fluid arguments reserve the location for future constitutive laws; there is no configurable runtime callback interface.</p>
+<p>Factory <code>tau_w</code> is a finite nonnegative shear magnitude in Pa. <code>q_w</code> is a finite signed heat flux in W/m², positive into the fluid. Each accepts a scalar or one value per physical cell. Inputs are fixed at factory construction; rebuild to change the profile. No viscosity/Reynolds-number/roughness correlation, heat-transfer coefficient or wall-temperature model is implied. The source acts on meridional momentum and angular momentum through drag and torque; only heat flux changes total energy. The <a href="#wall-source-details">theory discussion</a> gives the equations and the defined zero-speed direction.</p>
 <p>This example uses the production driver's defaults. The measured verification campaign explicitly uses the separate fixed-growth controller described in <a href="#notes-controller">Controller findings</a>: CFL 0.2, growth 1.2, shrink 0.5 and a cap of eight strict Newton corrections. Passing growth 1.2 to the production work-threshold controller is a different policy.</p>
 <p>Public operators include <code>residual</code>, <code>steady_residual</code>, <code>spatial_residual</code>, <code>boundary_residual</code>, <code>storage</code>, <code>face_flux</code>, <code>source</code>, <code>jacobian</code>, <code>dense_jacobian</code>, <code>compute_dt</code> and <code>metrics</code>. <code>advance(initial_state, final_time)</code> performs backward-Euler physical-time integration. Its initial traces must already satisfy the algebraic boundary equations. Steady pseudo-time settings do not determine physical-time accuracy.</p>
 
+<h2 id="use-monitored-cases">YAML cases and monitored single-case runs</h2>
+<p>The verification inputs are defined by a shared <code>cases/common.yaml</code> template and the physical overrides in <code>cases/verification.yaml</code>. They contain geometry, fluid, boundary data, mesh, reconstruction, prescribed wall sources, residual policy, controller and named engineering monitors. The Python reference builder interprets these inputs; it no longer selects physical data with case-name branches.</p>
+<pre><code>poetry run python -m development.roberto.euler_annular.scripts.run_case --list-cases
+poetry run python -u -m development.roberto.euler_annular.scripts.run_case --config development/roberto/euler_annular/cases/verification.yaml --case radial_outflow --cells 100 --reconstruction constant</code></pre>
+<p>The runner prints initial and accepted states in at most 100 characters per line: iteration, CFL, timestep, Newton corrections, overall residual R, equation residuals R1–R4, and separate boundary/global checks. R is the maximum active initial-relative equation residual. Engineering quantities remain in the saved history and stopping checks, outside the printed table. It writes resolved configuration, source hashes, initial/final states and complete accepted/rejected histories. Every active equation must reduce by nine orders and pass its absolute safeguard. A cap, retry failure or unattained relative target remains a failure.</p>
+<p>For example, a monitor entry can be configured as:</p>
+<pre><code>monitors:
+  - name: Cp_mean
+    quantity: pressure_coefficient
+    reduction: length_mean
+    convergence: true
+    window: 20
+    absolute_tolerance: 1.0e-8
+    relative_tolerance: 1.0e-6
+    reference: 1.0
+  - name: mdot_out
+    quantity: mass_flow
+    reduction: outlet
+    convergence: true
+    window: 20
+    absolute_tolerance: 1.0e-10
+    relative_tolerance: 1.0e-6
+    reference: 1.0</code></pre>
+<p>Each enabled monitor requires its peak-to-peak variation over a complete window to be at most the absolute tolerance plus relative tolerance times the fixed reference. Setting <code>convergence: false</code> records the quantity without making stationarity a stopping requirement. Residual reducers, scalar-window tracking and table printing live in reusable <code>solvers/</code> modules; the annular adapter owns Cp and numerical mass-flux evaluation. EulerNozzle remains on its existing behavior.</p>
+
 <h2 id="use-benchmarks">Benchmark dimensions and operating data</h2>
-<p>The following values are loaded from the saved finest-grid records and represented NURBS geometry. Every canonical case uses the 50/100/200/400-cell mesh sequence. Reference outlet pressure is the imposed backpressure for a subsonic outlet; it is only reference data for a supersonic outlet, which does not impose pressure. Reference invariants, full geometry samples and effective numerical settings are retained in the embedded data download.</p>
+<p>The following values are loaded from saved finest-grid records and represented NURBS geometry. Every canonical case uses 50/100/200/400 physical cells and the equation-wise relative target of $10^{-9}$ with absolute safeguards. Successful coarse stages initialize finer meshes by bounded primitive interpolation; after any failed pair the next mesh restarts cold. Coarsest fields are cold. Reference outlet pressure is imposed only for a subsonic outlet; a supersonic outlet imposes no backpressure. Analytical references assess results and select physical boundary data, never numerical initial fields. Settings, reference invariants and complete sequence provenance remain downloadable.</p>
 @@BENCHMARK_TABLE@@
 @@REFERENCE_CONSTANTS@@
 
@@ -47,21 +76,25 @@ fields = solver.fields(solution.state)</code></pre>
 <tr><td><code>solvers/finite_volume.py</code></td><td>Flux divergence and coupled storage/spatial/boundary assembly</td></tr>
 <tr><td><code>solvers/time_marching/implicit.py</code></td><td>Shared Newton construction and admissible Armijo trials</td></tr>
 <tr><td><code>models/euler_annular/</code></td><td>Annular states, sources, physical boundaries and model factory</td></tr>
+<tr><td><code>models/euler_annular/closures/wall.py</code></td><td>Named zero/prescribed wall-shear and wall-heat placeholders</td></tr>
 <tr><td><code>scripts/steady_march.py</code></td><td>Study-only compiled CFL orchestration calling the production timestep</td></tr>
+<tr><td><code>scripts/verify_grid_sequence.py</code></td><td>Coarse-to-fine initialization and retained four-mesh accuracy campaign</td></tr>
 </tbody></table></div>
 <p>EulerNozzle reuses the extracted Jacobian, banded and Newton infrastructure while retaining its public contracts. Annular physical laws remain local. TwoFluid migration and NozzleX integration are separate tasks. No development script is imported into production.</p>
 
 <h2 id="use-reproduce">Rebuild the report or rerun the verification</h2>
 <p>Run from the repository root in the existing Poetry environment. Presentation rebuilds read saved numerical data and perform no solver iterations:</p>
-<pre><code>poetry run python -m development.roberto.euler_annular.scripts.write_html_report
+<pre><code>poetry run python -m development.roberto.euler_annular.scripts.write_html_report --verification-folder outputs/grid_sequence_monitored_full
 poetry run python -m development.roberto.euler_annular.scripts.audit_html_report</code></pre>
 <p>To rerun the actual verification and independent audits:</p>
-<pre><code>poetry run python -m development.roberto.euler_annular.scripts.verify_annular --controller cfl_recommended --cells 50 100 200 400 --max-steps 16000
-poetry run python -m development.roberto.euler_annular.scripts.audit_results
-poetry run python -m development.roberto.euler_annular.scripts.audit_shocks
+<pre><code>poetry run python -u -m development.roberto.euler_annular.scripts.verify_grid_sequence --cells 50 100 200 400 --max-steps 16000
+poetry run python -m development.roberto.euler_annular.scripts.audit_results --output development/roberto/euler_annular/outputs/grid_sequence_monitored_full
+poetry run python -m development.roberto.euler_annular.scripts.audit_shocks --folder development/roberto/euler_annular/outputs/grid_sequence_monitored_full
+poetry run python -m development.roberto.euler_annular.scripts.verify_wall_sources
 poetry run python -m development.roberto.euler_annular.scripts.verify_nonuniform --controller cfl_recommended
 poetry run python -m development.roberto.euler_annular.scripts.audit_results --output development/roberto/euler_annular/outputs/nonuniform
-poetry run python -m development.roberto.euler_annular.scripts.write_html_report</code></pre>
-<p><code>--resume</code> reuses completed result files with matching controller, source and case settings; it never warms a new solve from their fields. <code>--plot-only</code> redraws saved figures. Verification deliberately returns failure when analytical targets fail, even when every discrete root converges. <code>--root-only</code> is an explicitly labeled exploratory alternative. Rusanov is an explicit diagnostic flag, never a hidden fallback.</p>
+poetry run python -m development.roberto.euler_annular.scripts.write_html_report --verification-folder outputs/grid_sequence_monitored_full</code></pre>
+<p>The original <code>verify_annular</code> remains available for independent cold starts at every mesh. In the sequence driver, <code>--resume</code> validates matching saved stages and continues only their declared hierarchy; it is not an unrelated saved-field warm start. Its <code>--aggregate-only</code> rebuilds summary data without solves. The original driver's <code>--plot-only</code> redraws saved figures. Analytical accuracy failures remain failures even if every discrete root converges. Rusanov is an explicit diagnostic, never a hidden fallback.</p>
+<p>The complete current report uses <code>outputs/grid_sequence_monitored_full</code>, rerun with the new equation-wise convergence policy. The older <code>outputs/grid_sequence</code> and partial monitoring validation remain archived separately. Failed convergence targets are retained in the current failure table and plotted histories. Native collapsible boxes organize every Results section; sidebar links reopen their target, and Expand all/Collapse all controls are provided. Optional engineering-monitor plots remain available below the 2×2 residual/CFL/balance view.</p>
 <p>Production pytest tests live under <code>tests/</code>; study scripts use their own executable data/operator audits. Source fingerprints, effective settings, environment identities, accepted/rejected work and initial/final fields remain under <code>outputs/</code>. The report embeds its data and offered evidence download, so a reader needs only this HTML file. Its editable chapter sources and reusable rendering assets live in <code>scripts/report_assets/</code>. Completed questionnaires/plans in <code>old_notes/</code> are provenance, not current requirements.</p>
 </article>

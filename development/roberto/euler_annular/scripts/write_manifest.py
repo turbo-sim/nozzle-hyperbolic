@@ -41,6 +41,8 @@ def source_snapshot():
     paths = set((REPOSITORY/"src").rglob("*.py"))
     paths.update((REPOSITORY/"tests").glob("test_*.py"))
     paths.update((STUDY/"scripts").glob("*.py"))
+    paths.update((STUDY/"cases").glob("*.yaml"))
+    paths.add(STUDY/"run_case.py")
     paths.update(REPOSITORY/name for name in (
         "pyproject.toml", "poetry.lock",
         "development/roberto/euler_nozzle/verify_euler_nozzle_steady.py",
@@ -255,7 +257,11 @@ def eos_ast_audit():
             if isinstance(node, ast.Attribute) and node.attr in forbidden:
                 kind = "forbidden_property_attribute"
             elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and node.id in forbidden:
-                kind = "forbidden_property_name"
+                # This local is the dimensionless pressure-recovery coefficient
+                # (p-p_in)/(p0-p_in), not thermodynamic heat capacity. Actual
+                # .cp and ['cp'] property accesses remain forbidden everywhere.
+                if not (node.id == "cp" and path == REPOSITORY/"src/nozzle_hyperbolic/models/euler_annular/monitoring.py"):
+                    kind = "forbidden_property_name"
             elif (isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Constant)
                   and node.slice.value in forbidden):
                 kind = "forbidden_property_subscript"
@@ -283,6 +289,7 @@ def eos_ast_audit():
         production_fixture_evidence=fixtures,
         evidence_scope="Restricted HP-only interface and pressure/enthalpy-shifted stiffened-gas fixtures exercise the general-EOS implementation. Passing fixture/interface tests do not establish a real-fluid annular flow validation campaign.",
         real_fluid_annular_flow_validation_claimed=False,
+        dimensionless_monitor_identifier_exception="Local cp in annular/monitoring.py is pressure recovery; all thermodynamic cp attribute/subscript accesses remain scanned",
     )
 
 
@@ -297,12 +304,12 @@ def main():
     dependencies = project["tool"]["poetry"]["dependencies"]
     packages = {name: package_identity(name) for name in ("jax", "jaxlib", "jaxprop", "nurbspy", "numpy", "scipy")}
     geometry = package_identity("nurbspy.numpy", "nurbspy")
-    selected = {"jax", "jaxlib", "jaxprop", "nurbspy", "numpy", "scipy", "equinox", "diffrax", "optimistix", "quadax", "pysolver-view"}
+    selected = {"jax", "jaxlib", "jaxprop", "nurbspy", "numpy", "scipy", "equinox", "diffrax", "optimistix", "quadax", "pysolver-view", "pyyaml"}
     locked = {item["name"]: dict(version=item["version"], python_versions=item.get("python-versions"),
                                 source=item.get("source"))
               for item in lock["package"] if item["name"] in selected}
     campaigns = {name: campaign_evidence(STUDY/"outputs"/name, before)
-                 for name in ("verification", "nonuniform", "initial_cases", "work_controller",
+                 for name in ("grid_sequence_monitored_full", "grid_sequence", "grid_sequence_monitored", "verification", "nonuniform", "initial_cases", "work_controller",
                               "narrow_width", "regularization_width", "rusanov_diagnostic")}
     ast_audit = eos_ast_audit()
     evidence = dict(
@@ -311,6 +318,12 @@ def main():
         nozzle_public_operator_parity=parity_evidence(BASELINE/"nozzle_metadata_parity.json"),
         narrow_width_failure_diagnosis=narrow_width_diagnosis(),
         campaigns=campaigns,
+        wall_sources=read_json(STUDY/"outputs/wall_sources/audit.json")[0],
+        wall_source_tests=read_json(STUDY/"outputs/wall_sources/production_tests.json")[0],
+        residual_monitoring_tests=read_json(STUDY/"outputs/residual_monitoring/production_tests.json")[0],
+        residual_monitoring_cases=read_json(STUDY/"outputs/residual_monitoring/validation_cases.json")[0],
+        yaml_case_definitions=read_json(STUDY/"outputs/case_config/audit.json")[0],
+        cp_accuracy_reassessment=read_json(STUDY/"outputs/grid_sequence/accuracy_reassessment.json")[0],
         note="Saved artifacts are evidence at their recorded checkpoints, not newly executed by this generator. Missing acceptance/audit files remain incomplete; retained accuracy/root failures are not waived.",
     )
     after = source_snapshot()
@@ -352,12 +365,25 @@ def main():
             pressure_sweep="Fixed alpha_in; ell_in may change between operating points",
             boundaries="Coupled full residual, four algebraic rows per boundary, zero storage, no nested nonlinear BC solve",
             numerics="Shared regularized characteristic flux algebra, colored/banded Newton engine; constant and MUSCL reconstruction",
+            wall_sources=dict(placeholders=["shear_stress_wall", "heat_flux_wall"],
+                inputs="Fixed prescribed scalar or per-cell tau_w and q_w, default zero; no empirical correlations",
+                forcing="Meridional drag, angular wall torque including radius, and heat flux in total energy; stationary shear has no total-energy sink"),
+            verification_initialization="50/100/200/400 grid sequence; bounded primitive interpolation from successful stages, cold restart after a failed pair; nine-order relative target and separate 1e-8 safeguards; failures retained",
+            monitoring=dict(
+                production_interface="AnnularSolver.solve_steady_monitored (opt-in; legacy methods preserved)",
+                definition="steady_spatial_fixed_scale_equation_v1",
+                relative_target=1e-9, absolute_safeguard=1e-8,
+                norms="volume-weighted per-equation RMS; also L1, maximum and worst cell",
+                observables="YAML-configured Cp and actual numerical mass flux; optional accepted-window stationarity",
+                primary_report_history="Full 72-solve grid_sequence_monitored_full rerun with actual initial and accepted equation histories",
+                current_validation="68/72 meet all criteria; four N400 MUSCL stagnation failures retained; independent audits separate integrity from convergence",
+                nozzle_migrated=False),
             characteristic_regularization_default=dict(
                 delta_factor=0.1,
                 selection="Prototype numerical default selected after controlled shock robustness comparisons; not a user-prescribed physical input",
                 rationale="The original delta_factor=1e-6 campaign failed cold-start shock35 N200 solves for both reconstructions. Independent dense/colored/banded checks and controlled wider-width runs motivated selecting 0.1. The selected characteristic configuration must meet the same root and accuracy criteria; failures and diagnostic Rusanov runs remain separate evidence.",
                 retained_negative_campaign="development/roberto/euler_annular/outputs/narrow_width",
-                selected_campaign="development/roberto/euler_annular/outputs/verification",
+                selected_campaign="development/roberto/euler_annular/outputs/grid_sequence_monitored_full",
                 robustness_universal_guarantee=False,
             ),
             integration="Steady implicit focus with separate physical-time support",
@@ -372,8 +398,8 @@ def main():
     print(json.dumps(dict(manifest=relative(args.output),
                           source_unchanged=report["source_unchanged_during_generation"],
                           eos_ast_audit_passed=ast_audit["passed"],
-                          verification_acceptance=campaigns["verification"]["acceptance"],
-                          verification_independent_audit=campaigns["verification"]["independent_saved_field_audit"]), indent=2))
+                          verification_acceptance=campaigns["grid_sequence_monitored_full"]["acceptance"],
+                          verification_independent_audit=campaigns["grid_sequence_monitored_full"]["independent_saved_field_audit"]), indent=2))
     return 0 if before == after and ast_audit["passed"] else 1
 
 

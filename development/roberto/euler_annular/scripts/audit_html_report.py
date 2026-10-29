@@ -60,11 +60,14 @@ class PageParser(HTMLParser):
         self.ids, self.hrefs, self.resources, self.buttons, self.inputs = [], [], [], [], []
         self.scripts, self.styles, self.math = [], [], []
         self.h2_ids = []
+        self.details = []
         self.csp = []
         self.active_script, self.active_style, self.active_math = None, None, None
 
     def handle_starttag(self, tag, attributes):
         attrs = dict(attributes)
+        if tag == "details":
+            self.details.append(attrs)
         if attrs.get("id"):
             self.ids.append(attrs["id"])
         if "href" in attrs:
@@ -179,6 +182,19 @@ def embedded_build(page):
 
 
 def source_root(saved, run):
+    metadata=run.get("monitoring")
+    if metadata and metadata.get("definition") in ("steady_spatial_fixed_scale_equation_v1", "steady_spatial_fixed_scale_per_equation_v1"):
+        p, metrics = metadata["policy"], run["metrics"]
+        values, initial = metrics["equation_norm"], metadata["initial_equation_norms"]
+        targets=[min(p["absolute_tolerance"], start*p["relative_tolerance"])
+                 if start>p["initial_floor"] else p["absolute_tolerance"] for start in initial]
+        return bool(run["success"] and metrics.get("admissible") and metrics.get("finite")
+            and len(values)==len(targets)==4
+            and all(math.isfinite(value) and value<=target for value,target in zip(values,targets))
+            and metrics["boundary_max"]<=p["boundary_tolerance"]
+            and metrics["conservation_max"]<=p["global_tolerance"]
+            and all(math.isfinite(item["value"]) and (not item["required"] or item["stable"])
+                    for item in metrics.get("monitors",{}).values()))
     return (run["success"] and run["metrics"].get("admissible", False)
             and all(math.isfinite(run["metrics"][key])
                     and run["metrics"][key] <= saved["settings"]["tolerance"]
@@ -186,12 +202,21 @@ def source_root(saved, run):
 
 
 def source_accuracy(saved, run):
-    errors = run["errors"]
+    errors = source_errors(saved, run)
     if saved.get("shock_m") is not None:
         return math.isfinite(errors["shock_error_cells"]) and errors["shock_error_cells"] <= 2
-    values = (errors["Cp_max"], *errors["conservative_L1"])
-    return (all(math.isfinite(value) for value in values) and errors["Cp_max"] < 1e-3
+    values = (errors["Cp_mean_absolute"], *errors["conservative_L1"])
+    return (all(math.isfinite(value) for value in values) and errors["Cp_mean_absolute"] <= 0.01
             and max(errors["conservative_L1"]) < 1e-3)
+
+
+def source_errors(saved, run):
+    """Independent midpoint quadrature of the displayed domain Cp error."""
+    faces = saved["m_faces"]
+    terms = [(faces[i+1]-faces[i])*abs(value-saved["reference"]["Cp"][i])
+             for i, value in enumerate(run["fields"]["Cp"])]
+    length = math.fsum(faces[i+1]-faces[i] for i in range(len(faces)-1))
+    return dict(run["errors"], Cp_mean_absolute=math.fsum(terms)/length)
 
 
 def compare_history(audit, name, actual, records):
@@ -199,7 +224,9 @@ def compare_history(audit, name, actual, records):
     accepted = [[row.get(key) for key in columns] for row in records if row.get("accepted", True)]
     rejected = [[row.get(key) for key in columns] for row in records if not row.get("accepted", True)]
     expected = dict(columns=columns, accepted=accepted, rejected=rejected,
-                    counts=dict(total=len(records), accepted=len(accepted), rejected=len(rejected)),
+                    counts=dict(total=len(records), accepted=len(accepted), rejected=len(rejected),
+                        initial=sum(row.get("phase")=="initial" for row in records),
+                        accepted_updates=sum(row.get("accepted",True) and row.get("phase")!="initial" for row in records)),
                     sampled=False)
     audit.equal(name, actual, expected)
 
@@ -216,15 +243,28 @@ def compare_mesh(audit, mesh, methods, captured_inputs):
                     if mesh["audit"]["available"] else None)
     if source_audit is not None:
         audit.equal(name+" audit flag", mesh["audit"]["audit_pass"], source_audit["audit_pass"])
-    audit.equal(name+" reference", mesh["reference"], {key: saved["reference"][key] for key in fields})
+    def displayed(source):
+        values = dict(source)
+        if "alpha_deg" not in values:
+            values["alpha_deg"] = [math.degrees(math.atan2(vt,vm))
+                                   for vm,vt in zip(source["v_m"],source["v_theta"])]
+        if "M_theta" not in values:
+            values["M_theta"] = [vt/a if a is not None else vt*mm/vm if vm else math.copysign(mag,vt)
+                for vm,vt,mm,mag,a in zip(source["v_m"],source["v_theta"],source["M_m"],source["M"],
+                                          source.get("a",[None]*saved["cells"]))]
+        return {key:values[key] for key in fields}
+    audit.equal(name+" reference", mesh["reference"], displayed(saved["reference"]))
     audit.equal(name+" method IDs", set(mesh["methods"]), set(methods))
     rows = []
     for method in methods:
         actual, run = mesh["methods"][method], saved["methods"][method]
         prefix = name+" "+method
-        for key in ("success", "message", "metrics", "errors"):
+        for key in ("success", "message", "metrics"):
             audit.equal(prefix+" "+key, actual[key], run[key])
-        audit.equal(prefix+" fields", actual["fields"], {key: run["fields"][key] for key in fields})
+        audit.equal(prefix+" errors", actual["errors"], source_errors(saved, run))
+        audit.equal(prefix+" initialization metadata", actual.get("initialization"), run.get("initialization"))
+        audit.equal(prefix+" monitoring metadata",actual.get("monitoring"),run.get("monitoring"))
+        audit.equal(prefix+" fields", actual["fields"], displayed(run["fields"]))
         audit.equal(prefix+" root flag", actual["root_pass"], source_root(saved, run))
         audit.equal(prefix+" accuracy flag", actual["accuracy_pass"], source_accuracy(saved, run))
         audit.equal(prefix+" recorded accuracy", actual["recorded_analytical_target_met"], run["analytical_target_met"])
@@ -279,11 +319,12 @@ def audit_payload(audit, payload, build):
         audit.equal(case["id"]+" mesh completeness", [mesh["cells"] for mesh in case["meshes"]], list(meshes))
         expected_grid = []
         for mesh in case["meshes"]:
-            audit.equal(mesh["path"]+" canonical path", mesh["path"], f"outputs/verification/{case['id']}_{mesh['cells']}.json")
+            audit.equal(mesh["path"]+" canonical path", mesh["path"],
+                        (Path(payload["provenance"].get("primary_directory","outputs/verification"))/f"{case['id']}_{mesh['cells']}.json").as_posix())
             rows = compare_mesh(audit, mesh, methods, inputs)
             primary.extend(rows)
             expected_grid.append(dict(cells=mesh["cells"], **{
-                row["method"]: dict(**row["run"]["errors"], root_pass=row["root"], accuracy_pass=row["accuracy"])
+                row["method"]: dict(**source_errors(row["saved"],row["run"]), root_pass=row["root"], accuracy_pass=row["accuracy"])
                 for row in rows}))
         audit.equal(case["id"]+" grid-error data", case["grid_errors"], expected_grid)
     finest = [row for row in primary if row["cells"] == max(meshes)]
@@ -300,9 +341,21 @@ def audit_payload(audit, payload, build):
     for key, value in derived.items():
         audit.equal("derived summary "+key, summary[key], value)
     audit.equal("build summary", build["summary"], summary)
+    for row in payload.get("monitoring_validation",{}).get("runs",[]):
+        saved=audit.json(study/row["path"])
+        run=saved["methods"][row["method"]]
+        metrics,meta=run["metrics"],run["monitoring"]
+        prefix=row["path"]+" "+row["method"]+" monitored validation "
+        audit.equal(prefix+"status",row["root_pass"],source_root(saved,run))
+        audit.equal(prefix+"absolute",row["max_absolute"],max(metrics["equation_norm"]))
+        active=[value for value,enabled in zip(metrics["equation_relative"],metrics["relative_active"]) if enabled]
+        audit.equal(prefix+"relative",row["max_relative"],max(active) if active else None)
+        for key in ("accepted_updates","reason","policy"):
+            audit.equal(prefix+key,row[key],meta[key])
+        audit.equal(prefix+"monitors",row["monitors"],metrics.get("monitors",{}))
     if payload.get("audits") is not None:
         audit.equal("canonical aggregate independent audit", payload["audits"],
-                    audit.json(study/"outputs"/"verification"/"audits.json"))
+                    audit.json(study/payload["provenance"].get("primary_directory","outputs/verification")/"audits.json"))
     audit.check("primary_matrix_complete", len(primary) == len(cases)*len(meshes)*len(methods),
                 dict(**derived, numerical_comparisons_have_zero_tolerance=True))
     for mesh in payload.get("nonuniform", []):
@@ -397,7 +450,7 @@ def audit_pages(audit, pages, raw, build):
                     digest(bundle.read(row["file"]))==row["sha256"] for row in summary["runs"]))
 
 
-def audit_markers(audit, page, scripts, build):
+def audit_plot_controls(audit, page, scripts, build):
     controls = [item for item in page.inputs if item.get("id") == "marker-skip"]
     app_path = audit.study/"scripts"/"report_assets"/"report.js"
     app_raw = audit.read(app_path)
@@ -407,22 +460,25 @@ def audit_markers(audit, page, scripts, build):
     semantics = dict(
         embedded_app_matches_source=any(text_newlines(script["text"]) == text_newlines(escaped) for script in scripts),
         app_matches_build_asset_hash=digest(app_raw) == build["assets"]["report.js"],
-        default_skip_ten='stride:11,markerSkip:10' in compact,
         full_lines='type:"scatter",x,y,' in compact,
-        white_circle='marker:{color:"white",symbol:"circle",size:9' in compact,
-        marker_layer='mode:"markers",zorder:3' in compact,
-        stagger='Math.floor(state.stride/2)' in compact,
+        no_solution_marker_layer='mode:"markers",zorder:3' not in compact,
+        no_marker_spacing_state='state.stride' not in compact,
         reference_on_top='[1,2,0].forEach' in compact,
-        valid_integer='Number.isSafeInteger(skipped)&&skipped>=0' in compact,
+        cfl_from_recorded_history='rows.map(row=>row.cfl)' in compact,
+        conservation_two_columns='entrywidthmode:"fraction",entrywidth:.5' in compact,
         safe_heading_lookup='getElementById(decodeURIComponent(a.hash.slice(1)))' in compact,
     )
-    metadata = build.get("marker_skip_control", {})
-    audit.check("default_skip_ten_and_arbitrary_nonnegative_skip_input",
-                build["default_marker_stride"] == 11 and len(controls) == 1
-                and all(controls[0].get(key) == value for key, value in
-                        {"type":"number", "min":"0", "step":"1", "value":"10"}.items())
-                and all(metadata.get(key) == value for key, value in {"min":0, "step":1, "default":10}.items()),
-                dict(inputs=controls, build_control=metadata))
+    audit.check("solution_fields_have_no_marker_control", build.get("solution_field_markers") is False and not controls)
+    audit.check("six_requested_physical_fields", build.get("solution_fields")==["p","rho","alpha_deg","M_m","M_theta","M"])
+    audit.check("case_diagnostics_pane_removed", "case-diagnostics" not in page.ids)
+    audit.check("recorded_CFL_plot_present", "cfl-plot" in page.ids)
+    audit.check("two_by_two_convergence_plot_ids", all(key in page.ids for key in
+                ("convergence-plot", "cfl-plot", "equation-residual-plot", "conservation-plot", "convergence-checks")))
+    boxes=[item for item in page.details if "result-section" in item.get("class", "").split()]
+    audit.check("all_eight_results_sections_are_native_collapsible_boxes", len(boxes)==8
+                and all("open" in item for item in boxes)
+                and {"results-expand", "results-collapse"}.issubset(page.ids))
+    audit.check("evaluation_table_after_other_results", page.ids.index("assessment")>page.ids.index("provenance"))
     audit.check("static_plot_and_navigation_semantics", all(semantics.values()), semantics)
 
 
@@ -674,7 +730,7 @@ def audit_report(study):
         audit_payload(audit, payload, build)
         audit_channels(audit, payload, build)
         audit_pages(audit, pages, raw, build)
-        audit_markers(audit, pages["REPORT.html"], pages["REPORT.html"].scripts, build)
+        audit_plot_controls(audit, pages["REPORT.html"], pages["REPORT.html"].scripts, build)
         for name, expected in build["artifacts"].items():
             artifact = audit.read(audit.study/name)
             audit.check(name+" matches_build_hash_and_bytes", digest(artifact) == expected["sha256"]

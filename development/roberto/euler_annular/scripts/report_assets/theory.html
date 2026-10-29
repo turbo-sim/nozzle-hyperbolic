@@ -1,413 +1,582 @@
-<p>This chapter describes the implemented quasi-one-dimensional annular Euler model, its general equation of state, characteristic flux, finite-volume discretization and simultaneous boundary equations. It is self-contained: the source links identify the implementation of each mathematical operation. The model supports steady pseudo-time marching and backward-Euler physical-time integration on fixed curvilinear geometry.</p>
-<p>The prototype represents axisymmetric, inviscid, adiabatic flow with a meridional velocity and a circumferential velocity. It resolves variation along one meridional midline. It does not resolve the velocity profile across the channel height, circumferential waves, viscous separation, heat transfer or detonation chemistry. General-EOS numerical capability and perfect-gas verification are separate: the numerical method uses the supplied fluid's properties, while the final appendix explains the independent perfect-gas reference.</p>
-<h2 id="1-geometry-and-transported-quantities">1. Geometry and transported quantities</h2>
-<h3 id="11-midline-normal-height-and-arclength">1.1 Midline, normal height and arclength</h3>
-<p>The fixed NURBSpy midline is <span class="math-inline">$C(\xi)=(x(\xi),r(\xi))$</span>, with positive radius <span class="math-inline">$r$</span>. Its arclength and total length are</p>
-<div class="math-block">$$
-m(\xi)=\int_0^\xi \lVert C_\xi(\zeta)\rVert\,d\zeta,\qquad L=m(1),\qquad \sigma=m/L. \tag{1}
-$$</div>
+<p>This chapter develops a quasi-one-dimensional model of compressible flow through a fixed annular passage. The flow is axisymmetric and varies along one meridional midline, with meridional and circumferential velocity components. The geometry is prescribed and thermodynamic properties come from the supplied EOS. Retaining time dependence permits physical transients or pseudo-time marching toward a steady solution.</p>
+<p>One state represents each cross section. Boundary-layer profiles, circumferential waves, separation and chemistry are not resolved. Stationary-wall shear and heat flux enter as distributed sources. The named <code>shear_stress_wall</code> and <code>heat_flux_wall</code> placeholders return zero or prescribed profiles; they are not empirical correlations. The analytical diffuser cases use zero wall inputs.</p>
 
-<p>An independent positive scalar NURBS curve defines normal channel height <span class="math-inline">$b(\sigma)$</span>. Derivatives use the chain rule: <span class="math-inline">$d/dm=\lVert C_\xi\rVert^{-1}d/d\xi$</span> for the midline and <span class="math-inline">$b&#x27;=b_\sigma/L$</span> for height. Primes throughout this chapter mean <span class="math-inline">$d/dm$</span>. The area and its derivative are</p>
+<h2 id="1-geometry-and-transported-quantities">1. Conservation laws and angular momentum</h2>
+<p>Meridional arclength $m$ increases from inlet to outlet. The mean radius is $r(m)&gt;0$, the normal height is $b(m)&gt;0$, and $A=2\pi rb$. Fixed geometry gives $r'=\sin\phi$, where primes mean $d/dm$ and $\phi$ is the local cant angle. Define</p>
 <div class="math-block">$$
-A=2\pi rb,\qquad A&#x27;=2\pi(r&#x27;b+rb&#x27;),\qquad (x&#x27;)^2+(r&#x27;)^2=1. \tag{2}
+v^2=v_m^2+v_\theta^2,\qquad
+\cos\alpha=v_m/v,\qquad \sin\alpha=v_\theta/v. \tag{1}
 $$</div>
-
-<p>The coordinate <span class="math-inline">$m$</span> always increases from inlet to outlet; <span class="math-inline">$r&#x27;$</span> can have either sign. A radial inflow therefore has <span class="math-inline">$r&#x27;&lt;0$</span> while forward meridional velocity remains positive. Radial lines, straight conical midlines and circular arcs use the same curve/metric builder. Geometry is preprocessed on the host and then held fixed during state differentiation. Geometry-shape AD is outside this implementation.</p>
-<h3 id="12-state-definitions">1.2 State definitions</h3>
-<p>The nonlinear and reconstruction variables are <span class="math-inline">$W=(p,v_m,\ell,h)^T$</span>. Here <span class="math-inline">$p$</span> is static pressure, <span class="math-inline">$h$</span> is specific static enthalpy, <span class="math-inline">$v_m$</span> is velocity along increasing <span class="math-inline">$m$</span>, and <span class="math-inline">$\ell=rv_\theta$</span> is specific angular momentum. Define</p>
 <div class="math-block">$$
-v_\theta=\ell/r,\qquad h_0=h+\tfrac12(v_m^2+v_\theta^2),\qquad E=h-p/\rho+\tfrac12(v_m^2+v_\theta^2). \tag{3}
+E=e+\tfrac12v^2,\qquad H=h+\tfrac12v^2=E+p/\rho,\qquad h=e+p/\rho. \tag{2}
 $$</div>
-
-<p>The unweighted conservative density and physical meridional flux are</p>
+<h3 id="tangential-conservation-block">1.1 Tangential-momentum form</h3>
+<p>The area-weighted mass, meridional momentum, tangential momentum and total-energy balances are</p>
 <div class="math-block">$$
-q=\begin{bmatrix}\rho\\\rho v_m\\\rho\ell\\\rho E\end{bmatrix},\qquad
-f=\begin{bmatrix}\rho v_m\\\rho v_m^2+p\\\rho v_m\ell\\\rho v_m h_0\end{bmatrix}. \tag{4}
+\frac{\partial(A\rho)}{\partial t}
++\frac{\partial(A\rho v_m)}{\partial m}=0. \tag{3}
 $$</div>
-
-<p>Thus the third conserved quantity is angular momentum. The radius used in converting a cell state is its cell radius; both states at a numerical face use that face's common radius. These choices also define storage and reference projection consistently.</p>
-<h3 id="13-channel-views-and-direction-paths">1.3 Channel views and direction paths</h3>
-<p>The report visualizes the actual NURBS midline and its normal-offset walls.
-With <span class="math-inline">$n=(-r&#x27;,x&#x27;)$</span>, a cross-gap guide at fixed fraction <span class="math-inline">$\eta$</span> uses
-<span class="math-inline">$C_\eta=C+\eta b n$</span>, where the walls have <span class="math-inline">$\eta=\pm1/2$</span>. The meridional plot
-preserves equal axial/radial scales. Revolving the walls about the axial
-coordinate produces the annular 3D surfaces.</p>
-<p>For the representative midgap paths, the saved finest-grid MUSCL velocities
-give the kinematic angular phase</p>
 <div class="math-block">$$
-\theta(m)=\theta_0+\int_0^m\frac{v_\theta(\mu)}{r(\mu)v_m(\mu)}\,d\mu,
-\qquad (X,Y,Z)=(x,r\cos\theta,r\sin\theta).
+\frac{\partial(A\rho v_m)}{\partial t}
++\frac{\partial[A(\rho v_m^2+p)]}{\partial m}
+=pA'+A\rho\frac{v_\theta^2}{r}r'
+-\frac{2A}{b}\tau_w\cos\alpha . \tag{4}
 $$</div>
+<div class="math-block">$$
+\frac{\partial(A\rho v_\theta)}{\partial t}
++\frac{\partial(A\rho v_m v_\theta)}{\partial m}
+=-A\rho\frac{v_m v_\theta}{r}r'
+-\frac{2A}{b}\tau_w\sin\alpha . \tag{5}
+$$</div>
+<div class="math-block">$$
+\frac{\partial(A\rho E)}{\partial t}
++\frac{\partial(A\rho v_m H)}{\partial m}
+=\frac{2A}{b}q_w . \tag{6}
+$$</div>
+<h3 id="angular-product-rule">1.2 Product rule and angular-momentum form</h3>
+<p>Set $\ell=rv_\theta$. Multiplying the tangential equation by stationary $r(m)$ and using the product rule cancels the geometric turning term:</p>
+<div class="math-block">$$
+\partial_m(rA\rho v_m v_\theta)
+=r\,\partial_m(A\rho v_m v_\theta)+r'A\rho v_m v_\theta. \tag{7}
+$$</div>
+<p>The four equations then take the angular-momentum form implemented in production:</p>
+<div class="math-block">$$
+\frac{\partial(A\rho)}{\partial t}
++\frac{\partial(A\rho v_m)}{\partial m}=0. \tag{8}
+$$</div>
+<div class="math-block">$$
+\frac{\partial(A\rho v_m)}{\partial t}
++\frac{\partial[A(\rho v_m^2+p)]}{\partial m}
+=pA'+A\rho\frac{\ell^2}{r^3}r'
+-\frac{2A}{b}\tau_w\cos\alpha . \tag{9}
+$$</div>
+<div class="math-block">$$
+\frac{\partial(A\rho\ell)}{\partial t}
++\frac{\partial(A\rho v_m\ell)}{\partial m}
+=-\frac{2Ar}{b}\tau_w\sin\alpha . \tag{10}
+$$</div>
+<div class="math-block">$$
+\frac{\partial(A\rho E)}{\partial t}
++\frac{\partial(A\rho v_m H)}{\partial m}
+=\frac{2A}{b}q_w . \tag{11}
+$$</div>
+<p>Angular momentum has no geometric source. Radius times the tangential wall force supplies wall torque. With zero shear, angular momentum is transported conservatively although $v_\theta=\ell/r$ changes.</p>
+<h3 id="vector-balance-form">1.3 Vector notation</h3>
+<p>The area-weighted state, flux and source vectors are written in bold:</p>
+<div class="math-block">$$
+\frac{\partial\mathbf U}{\partial t}
++\frac{\partial\mathbf F(\mathbf U)}{\partial m}
+=\mathbf S(\mathbf U;m). \tag{12}
+$$</div>
+<div class="math-block">$$
+\mathbf U=A\begin{pmatrix}\rho\\\rho v_m\\\rho\ell\\\rho E\end{pmatrix}. \tag{13}
+$$</div>
+<div class="math-block">$$
+\mathbf F(\mathbf U)=A\begin{pmatrix}\rho v_m\\\rho v_m^2+p\\
+\rho v_m\ell\\\rho v_mH\end{pmatrix}. \tag{14}
+$$</div>
+<div class="math-block">$$
+\mathbf S(\mathbf U;m)=
+\begin{pmatrix}
+0\\
+pA'+A\rho\ell^2r'/r^3-2A\tau_w\cos\alpha/b\\
+-2Ar\tau_w\sin\alpha/b\\
+2Aq_w/b
+\end{pmatrix}. \tag{15}
+$$</div>
+<p>In $\mathbf F(\mathbf U)$, local prescribed geometry is implicit; the source displays its explicit $m$ dependence. For densities per physical volume and fluxes per area, write $\mathbf U_v=\mathbf U/A$ and $\mathbf F_v=\mathbf F/A$. These per-volume vectors are used in storage/flux evaluation; area variation remains in the flux divergence and sources. Dividing the continuous balance by area retains $A^{-1}\partial_m(A\mathbf F_v)$, not simply $\partial_m\mathbf F_v$.</p>
+<h3 id="source-interpretation">1.4 Geometry, shear and heat terms</h3>
+<p>$pA'$ is the meridional wall-pressure force. The centrifugal projection $A\rho v_\theta^2r'/r$ has the sign of $r'$. These depend on the <a href="#geometry-details">geometric metrics detailed below</a>; changing cylindrical basis is not an empirical loss mechanism.</p>
+<p>The shear magnitude $\tau_w\geq0$ gives drag opposite the velocity and a wall torque. Signed $q_w$ is positive into the fluid. Stationary walls exert no total-energy work: shear reduces kinetic energy through momentum while converting it into internal energy; only wall heat supplies net total energy. The <a href="#wall-source-details">wall-source section</a> explains the prescribed-input placeholders, units and future constitutive laws.</p>
 
-<p>Arrows follow increasing <span class="math-inline">$m$</span>, so radial inflow points toward smaller radius.
-These paths illustrate the quasi-1D direction and swirl; no cross-gap velocity
-distribution is solved. Nonpositive meridional velocity is flagged rather
-than hidden by a denominator floor. The report displays three views in one row: the meridional channel on the left, a frontal projection along the axial direction in the center, and the revolved 3D view on the right. The frontal paths and arrows project the same Cartesian transverse coordinates as the 3D paths; all streamlines share one color. In both 2D views, fixed-size arrowhead markers are drawn above the paths and oriented using the forward projected chord, so short sample segments do not suppress the direction indicator. A purely axial path is labeled explicitly in the frontal projection instead of receiving a false transverse arrow. It omits width-spline plots, control points and control polygons; the geometry itself still uses the same NURBS definitions.</p>
-<h2 id="2-general-thermodynamics">2. General thermodynamics</h2>
-<h3 id="21-required-eos-response">2.1 Required EOS response</h3>
-<p>Numerical trial states are evaluated directly through <code>fluid.get_state(jxp.HmassP_INPUTS, h, p)</code>. The interior flux requires density <span class="math-inline">$\rho$</span>, sound speed <span class="math-inline">$a$</span> and dimensionless Gruneisen coefficient <span class="math-inline">$G$</span>. Temperature <span class="math-inline">$T$</span> and entropy <span class="math-inline">$s$</span> support boundary equations, reference scales and admissibility. Returned <span class="math-inline">$p,h$</span> also permit input-coordinate consistency checks.</p>
+<h2 id="quasilinear-continuous-form">2. Continuous quasilinear form and thermodynamics</h2>
+<h3 id="thermodynamic-relations">2.1 EOS response, sound speed and Gruneisen coefficient</h3>
+<p>Write the EOS locally as $p=p(\rho,e)$ or $p=p(\rho,s)$, where $s$ is specific entropy. Define</p>
 <div class="math-block">$$
 a^2=\left(\frac{\partial p}{\partial\rho}\right)_s,\qquad
-G=\frac1\rho\left(\frac{\partial p}{\partial e}\right)_\rho,\qquad h=e+p/\rho. \tag{5}
+\Gamma=\frac1\rho\left(\frac{\partial p}{\partial e}\right)_\rho. \tag{16}
 $$</div>
-
-<p>For a thermodynamically consistent single-phase EOS, the derivatives used by the eigensystem are</p>
+<p>The Gibbs relation gives the entropy-pressure coupling:</p>
 <div class="math-block">$$
-\left(\frac{\partial\rho}{\partial p}\right)_h=\frac{1+G}{a^2},\qquad
-\left(\frac{\partial\rho}{\partial h}\right)_p=-\frac{\rho G}{a^2},\qquad
-dh=T\,ds+\frac{dp}{\rho}. \tag{6}
+T\,ds=de-\frac{p}{\rho^2}\,d\rho,\qquad
+dh=T\,ds+\frac{dp}{\rho}. \tag{17}
 $$</div>
-
-<p>The method uses these properties directly. It does not calculate a heat-capacity ratio from the fluid. Hyperbolicity requires <span class="math-inline">$\rho&gt;0$</span> and <span class="math-inline">$a^2&gt;0$</span>; no positive-<span class="math-inline">$G$</span> assumption is imposed. Energy and enthalpy reference levels can be shifted, so positivity of <span class="math-inline">$e$</span> or <span class="math-inline">$h$</span> is not an admissibility condition.</p>
-<p>Native JAXProp and compatible custom JAX fluid objects retain their own implementation. Raw host <code>Fluid</code> and <code>FluidMix</code> objects are wrapped through JAXProp's callback/custom-JVP bridge, preserving the configured object and its metadata. That bridge supplies finite-difference derivatives with its own accuracy limits. Backend derivative consistency must be checked at an appropriate tolerance; wrapping an EOS does not validate a real-fluid application.</p>
-<h3 id="22-setup-and-admissibility">2.2 Setup and admissibility</h3>
-<p>For a subsonic inlet, reservoir <span class="math-inline">$(p_0,T_0)$</span> can be converted once into <span class="math-inline">$(h_0,s_0)$</span> through the same EOS. An HP-only backend can instead receive <span class="math-inline">$h_0,s_0$</span> and reference pressure <span class="math-inline">$p_0$</span> directly. This preparation is outside the nonlinear boundary residual.</p>
-<p>The numerical driver requires finite states, positive pressure and forward <span class="math-inline">$v_m\geq0$</span> in all cell/boundary states and reconstructed face states. Declared pressure/enthalpy bounds are checked before EOS evaluation. EOS checks require positive finite <span class="math-inline">$\rho,a,T$</span>, finite <span class="math-inline">$G,s$</span>, consistent returned HP coordinates and, when available, the reference-invariant Gibbs response <span class="math-inline">$T(\partial s/\partial h)_p\simeq1$</span>. This last audit detects a backend silently flooring temperature while passing the trial enthalpy through. Backend-declared consistency tolerances govern these audits; they do not alter the equations or clip states.</p>
-<p>The public conservative-to-primitive recovery helper is for setup/postprocessing. It accepts a working direct density/internal-energy pair; otherwise it uses strictly bracketed HP recovery along <span class="math-inline">$h=e+p/\rho$</span>. Invalid direct results, including callback NaNs, trigger that fallback. Physical pressure bounds or a supplied pressure guess are required when the backend does not declare a bracket. Native direct recovery retains JIT/AD; host bracketing is outside the numerical residual.</p>
-<h2 id="3-continuous-equations">3. Continuous equations</h2>
-<h3 id="31-conservative-balance-form">3.1 Conservative balance form</h3>
-<p>For fixed geometry the equations are</p>
 <div class="math-block">$$
-\frac{\partial(Aq)}{\partial t}+\frac{\partial(Af)}{\partial m}
-=\begin{bmatrix}0\\pA&#x27;+A\rho v_\theta^2r&#x27;/r\\0\\0\end{bmatrix}. \tag{7}
+\left(\frac{\partial p}{\partial s}\right)_\rho=\rho T\Gamma,
+\qquad dp=a^2\,d\rho+\rho T\Gamma\,ds. \tag{18}
 $$</div>
-
-<p>The pressure-area term accounts for meridional wall pressure forces. The centrifugal projection has the sign of <span class="math-inline">$r&#x27;$</span>. Angular momentum and total energy have no geometric source: area expansion and changing circumferential velocity are already represented by their conservative fluxes and state definitions.</p>
-<h3 id="32-frozen-radius-conservative-quasilinear-form">3.2 Frozen-radius conservative quasilinear form</h3>
-<p>Let <span class="math-inline">$J_f=(\partial f/\partial q)_r$</span>, <span class="math-inline">$\kappa_A=A&#x27;/A$</span> and <span class="math-inline">$\kappa_r=r&#x27;/r$</span>. The flux also depends explicitly on radius when angular momentum is a conserved variable. At fixed <span class="math-inline">$q$</span>, changing <span class="math-inline">$r$</span> changes the circumferential kinetic energy and therefore pressure:</p>
+<p>Trial numerical states use the supplied EOS at $(h,p)$. The associated derivatives are</p>
 <div class="math-block">$$
-\left(\frac{\partial p}{\partial r}\right)_q=\frac{\rho Gv_\theta^2}{r},\qquad
-\left(\frac{\partial f}{\partial r}\right)_q
-=\frac{\rho Gv_\theta^2}{r}\begin{bmatrix}0\\1\\0\\v_m\end{bmatrix}. \tag{8}
+\rho_p=\left(\frac{\partial\rho}{\partial p}\right)_h
+=\frac{1+\Gamma}{a^2},\qquad
+\rho_h=\left(\frac{\partial\rho}{\partial h}\right)_p
+=-\frac{\rho\Gamma}{a^2}. \tag{19}
 $$</div>
-
-<p>Expanding Equation 7 with this explicit dependence gives</p>
+<p>JAXProp names $\Gamma$ as <code>G</code>. The numerical method uses $\rho,a,G,T,s$ directly, not a heat-capacity ratio inferred from the fluid. Shifted energy/enthalpy references are allowed, so positive $h$ or $e$ is not required.</p>
+<h3 id="material-equations">2.2 Product expansion and material balances</h3>
+<p>For shorter matrices set $u=v_m$, $w=v_\theta$, $D=\partial_t+u\partial_m$, $\kappa_A=A'/A$ and $\kappa_r=r'/r$. Expanding the conservative products and using mass balance gives</p>
 <div class="math-block">$$
-q_t+J_fq_m=-\kappa_A\begin{bmatrix}\rho v_m\\\rho v_m^2\\\rho v_m\ell\\\rho v_mh_0\end{bmatrix}
-+\rho v_\theta^2\kappa_r\begin{bmatrix}0\\1-G\\0\\-Gv_m\end{bmatrix}. \tag{9}
+D\rho+\rho\,\partial_m u=-\rho u\kappa_A. \tag{20}
 $$</div>
-
-<p>The <span class="math-inline">$G$</span> terms in this frozen-radius representation are essential. They do not add physical energy production to Equation 7; they compensate for moving the explicit-radius part of the flux derivative to the right-hand side.</p>
-<h3 id="33-primitive-and-material-forms">3.3 Primitive and material forms</h3>
-<p>With <span class="math-inline">$D=\partial_t+v_m\partial_m$</span>, continuity, momentum, angular momentum and thermodynamics imply</p>
 <div class="math-block">$$
-D\rho+\rho\,\partial_m v_m=-\rho v_m\kappa_A,\quad
-Dv_m+\rho^{-1}\partial_mp=v_\theta^2\kappa_r,\quad D\ell=0,\quad Dh=\rho^{-1}Dp. \tag{10}
+Du+\rho^{-1}\partial_m p=w^2\kappa_r-\frac{2\tau_w}{b\rho}\frac{u}{v}. \tag{21}
 $$</div>
-
-<p>Using Equation 6 gives the primitive quasilinear system</p>
 <div class="math-block">$$
-W_t+B W_m=g_W,\quad
-B=\begin{bmatrix}v_m&amp;\rho a^2&amp;0&amp;0\\1/\rho&amp;v_m&amp;0&amp;0\\0&amp;0&amp;v_m&amp;0\\0&amp;a^2&amp;0&amp;v_m\end{bmatrix},\quad
-g_W=\begin{bmatrix}-\rho a^2v_m\kappa_A\\v_\theta^2\kappa_r\\0\\-a^2v_m\kappa_A\end{bmatrix}. \tag{11}
+D\ell=-\frac{2r\tau_w}{b\rho}\frac{w}{v}. \tag{22}
 $$</div>
-
-<p>The <span class="math-inline">$G$</span> dependence cancels explicitly here because <span class="math-inline">$\rho_p+\rho_h/\rho=1/a^2$</span>. If <span class="math-inline">$v_\theta$</span> is used instead of <span class="math-inline">$\ell$</span>, its material equation is <span class="math-inline">$Dv_\theta=-v_mv_\theta\kappa_r$</span>. Equation 11 uses angular momentum and therefore has no corresponding third-row source.</p>
-<h2 id="4-characteristics-and-storage-transformations">4. Characteristics and storage transformations</h2>
-<h3 id="41-frozen-face-transverse-variables">4.1 Frozen-face transverse variables</h3>
-<p>At one fixed face radius introduce <span class="math-inline">$\overline W=(p,v_m,v_\theta,h)^T$</span>, <span class="math-inline">$\overline q=(\rho,\rho v_m,\rho v_\theta,\rho E)^T$</span> and ordinary transverse Euler flux <span class="math-inline">$\overline f=(\rho v_m,\rho v_m^2+p,\rho v_mv_\theta,\rho v_mh_0)^T$</span>. The transformations are</p>
+<p>Total energy combined with momentum and the Gibbs relation gives</p>
 <div class="math-block">$$
-D_r=\operatorname{diag}(1,1,1/r,1),\quad T_r=\operatorname{diag}(1,1,r,1),\quad
-\overline W=D_rW,\quad q=T_r\overline q,\quad f=T_r\overline f. \tag{12}
+Ds=\frac{2(\tau_wv+q_w)}{\rho bT}. \tag{23}
 $$</div>
-
-<p>All transformations in this section hold radius fixed. With <span class="math-inline">$\rho_p=(1+G)/a^2$</span> and <span class="math-inline">$\rho_h=-\rho G/a^2$</span>, the storage Jacobian is</p>
+<p>Shear contributes nonnegative entropy for $\tau_w\geq0$. The heat term includes entropy supplied to or removed from the fluid; it is not by itself a nonnegative heat-transfer entropy-generation rate. Separating entropy supply and irreversible transfer needs wall temperature.</p>
+<p>Substitute Equation 18 and define $\mathbf V=(\rho,u,\ell,s)^T$. The standard continuous quasilinear system is</p>
 <div class="math-block">$$
-C=\frac{\partial\overline q}{\partial\overline W}=
-\begin{bmatrix}
+\partial_t\mathbf V+\mathbf A_V\,\partial_m\mathbf V=\mathbf g_V. \tag{24}
+$$</div>
+<div class="math-block">$$
+\mathbf A_V=
+\begin{pmatrix}
+u&amp;\rho&amp;0&amp;0\\
+a^2/\rho&amp;u&amp;0&amp;T\Gamma\\
+0&amp;0&amp;u&amp;0\\
+0&amp;0&amp;0&amp;u
+\end{pmatrix}. \tag{25}
+$$</div>
+<div class="math-block">$$
+\mathbf g_V=
+\begin{pmatrix}
+-\rho u\kappa_A\\
+w^2\kappa_r-2\tau_wu/(b\rho v)\\
+-2r\tau_w w/(b\rho v)\\
+2(\tau_wv+q_w)/(\rho bT)
+\end{pmatrix}. \tag{26}
+$$</div>
+<p>The angular third variable has already absorbed geometric turning. If $w$ were used instead, its material equation would retain $-uw\kappa_r$ as well as tangential drag.</p>
+<h3 id="numerical-primitive-form">2.3 Numerical primitive basis</h3>
+<p>The solver and reconstruction use $\mathbf W=(p,u,\ell,h)^T$. Equation 19 gives $D\rho=(Dp-\rho\Gamma T Ds)/a^2$ because $\rho_p+\rho_h/\rho=1/a^2$. Substitute continuity and Equation 23 to obtain the pressure row, then use $Dh=T Ds+Dp/\rho$ for the enthalpy row. The equivalent primitive form is</p>
+<div class="math-block">$$
+\partial_t\mathbf W+\mathbf B\,\partial_m\mathbf W=\mathbf g_W. \tag{27}
+$$</div>
+<div class="math-block">$$
+\mathbf B=
+\begin{pmatrix}
+u&amp;\rho a^2&amp;0&amp;0\\
+1/\rho&amp;u&amp;0&amp;0\\
+0&amp;0&amp;u&amp;0\\
+0&amp;a^2&amp;0&amp;u
+\end{pmatrix}. \tag{28}
+$$</div>
+<div class="math-block">$$
+\mathbf g_W=
+\begin{pmatrix}
+-\rho a^2u\kappa_A+2\Gamma(\tau_wv+q_w)/b\\
+w^2\kappa_r-2\tau_wu/(b\rho v)\\
+-2r\tau_w w/(b\rho v)\\
+-a^2u\kappa_A+2(1+\Gamma)(\tau_wv+q_w)/(\rho b)
+\end{pmatrix}. \tag{29}
+$$</div>
+<p>This derivation explains primitive coefficients. The FVM still discretizes conservative balances; it does not substitute $\mathbf g_W$ for the integrated conservative source.</p>
+
+<h2 id="characteristic-analysis">3. Eigenvalue analysis and conservative projectors</h2>
+<h3 id="characteristic-speeds">3.1 Wave speeds and eigenbasis</h3>
+<div class="math-block">$$
+\det(\mathbf A_V-\lambda\mathbf I)
+=(u-\lambda)^2\big[(u-\lambda)^2-a^2\big]. \tag{30}
+$$</div>
+<div class="math-block">$$
+\lambda_-=u-a,\qquad \lambda_\ell=\lambda_s=u,\qquad\lambda_+=u+a. \tag{31}
+$$</div>
+<p>One right-eigenvector basis, ordered acoustic-minus, angular, entropy and acoustic-plus, is</p>
+<div class="math-block">$$
+\mathbf r_-=\begin{pmatrix}\rho\\-a\\0\\0\end{pmatrix},\qquad
+\mathbf r_\ell=\begin{pmatrix}0\\0\\1\\0\end{pmatrix}. \tag{32}
+$$</div>
+<div class="math-block">$$
+\mathbf r_s=\begin{pmatrix}-\rho T\Gamma/a^2\\0\\0\\1\end{pmatrix},\qquad
+\mathbf r_+=\begin{pmatrix}\rho\\a\\0\\0\end{pmatrix}. \tag{33}
+$$</div>
+<p>The basis determinant is $2\rho a\ne0$. Thus $\rho&gt;0$ and $a^2&gt;0$ provide a complete real eigenbasis, including rest and sonic states; the repeated convective eigenvalue is not defective. Angular and entropy fields are linearly degenerate. Acoustic genuine nonlinearity additionally depends on EOS convexity and is not guaranteed for arbitrary EOS solely by positive sound-speed squared.</p>
+<p>Although acoustic speeds depend explicitly on $u$ and $a$, swirl changes the EOS state, centrifugal forcing and sonic compatibility. Define $M_m=u/a$, $M_\theta=w/a$ and $M=\sqrt{M_m^2+M_\theta^2}$. Characteristic direction and stationary normal-shock admissibility use $M_m$. Total Mach can exceed one while a meridional acoustic wave still travels upstream.</p>
+<h3 id="conservative-projectors">3.2 Frozen-face storage transformation</h3>
+<p>Both face traces use the same radius and area. Define transverse primitives $\overline{\mathbf W}=(p,u,w,h)^T$ and densities $\overline{\mathbf U}_v=(\rho,\rho u,\rho w,\rho E)^T$. The angular transformations are</p>
+<div class="math-block">$$
+\mathbf T_r=\operatorname{diag}(1,1,r,1),\qquad
+\mathbf D_r=\operatorname{diag}(1,1,1/r,1). \tag{34}
+$$</div>
+<div class="math-block">$$
+\overline{\mathbf W}=\mathbf D_r\mathbf W,\qquad
+\mathbf U_v=\mathbf T_r\overline{\mathbf U}_v,\qquad
+\mathbf F_v=\mathbf T_r\overline{\mathbf F}_v. \tag{35}
+$$</div>
+<p>The per-volume storage Jacobian uses the derivatives in Equation 19:</p>
+<div class="math-block">$$
+\mathbf C=\frac{\partial\overline{\mathbf U}_v}{\partial\overline{\mathbf W}}
+=\begin{pmatrix}
 \rho_p&amp;0&amp;0&amp;\rho_h\\
-v_m\rho_p&amp;\rho&amp;0&amp;v_m\rho_h\\
-v_\theta\rho_p&amp;0&amp;\rho&amp;v_\theta\rho_h\\
-h_0\rho_p-1&amp;\rho v_m&amp;\rho v_\theta&amp;h_0\rho_h+\rho
-\end{bmatrix}. \tag{13}
+u\rho_p&amp;\rho&amp;0&amp;u\rho_h\\
+w\rho_p&amp;0&amp;\rho&amp;w\rho_h\\
+H\rho_p-1&amp;\rho u&amp;\rho w&amp;H\rho_h+\rho
+\end{pmatrix}. \tag{36}
 $$</div>
-
-<p>Writing <span class="math-inline">$\chi=\tfrac12(v_m^2+v_\theta^2)-h$</span>, its inverse is</p>
+<p>With $\chi=\tfrac12(u^2+w^2)-h$, the inverse is</p>
 <div class="math-block">$$
-C^{-1}=\begin{bmatrix}
-a^2+G\chi&amp;-Gv_m&amp;-Gv_\theta&amp;G\\
--v_m/\rho&amp;1/\rho&amp;0&amp;0\\
--v_\theta/\rho&amp;0&amp;1/\rho&amp;0\\
-[a^2+(1+G)\chi]/\rho&amp;-(1+G)v_m/\rho&amp;-(1+G)v_\theta/\rho&amp;(1+G)/\rho
-\end{bmatrix}. \tag{14}
+\mathbf C^{-1}=\begin{pmatrix}
+a^2+\Gamma\chi&amp;-\Gamma u&amp;-\Gamma w&amp;\Gamma\\
+-u/\rho&amp;1/\rho&amp;0&amp;0\\
+-w/\rho&amp;0&amp;1/\rho&amp;0\\
+[a^2+(1+\Gamma)\chi]/\rho&amp;-(1+\Gamma)u/\rho&amp;-(1+\Gamma)w/\rho&amp;(1+\Gamma)/\rho
+\end{pmatrix}. \tag{37}
 $$</div>
-
-<p>The angular storage Jacobian is <span class="math-inline">$\partial q/\partial W=T_rCD_r$</span>. Transformation through storage remains regular at rest and at a sonic state. Inverting a flux Jacobian would introduce singularities when a characteristic speed vanishes; the implementation does not do that.</p>
-<h3 id="42-eigenbasis-and-projectors">4.2 Eigenbasis and projectors</h3>
-<p>The characteristic speeds, in implementation order, are</p>
+<p>The implementation orders transverse primitive eigenvectors as $(u+a,u-a,u,u)$, with entropy and swirl last:</p>
 <div class="math-block">$$
-\lambda_+=v_m+a,\qquad\lambda_-=v_m-a,\qquad\lambda_s=v_m,\qquad\lambda_\theta=v_m. \tag{15}
+\mathbf R_p=\begin{pmatrix}
+\rho a&amp;-\rho a&amp;0&amp;0\\1&amp;1&amp;0&amp;0\\
+0&amp;0&amp;0&amp;1\\a&amp;-a&amp;1&amp;0
+\end{pmatrix}. \tag{38}
 $$</div>
-
-<p>For the primitive transverse system the right eigenvectors and dual left eigenvectors are</p>
 <div class="math-block">$$
-R_p=\begin{bmatrix}\rho a&amp;-\rho a&amp;0&amp;0\\1&amp;1&amp;0&amp;0\\0&amp;0&amp;0&amp;1\\a&amp;-a&amp;1&amp;0\end{bmatrix},\qquad
-L_p=\begin{bmatrix}1/(2\rho a)&amp;1/2&amp;0&amp;0\\-1/(2\rho a)&amp;1/2&amp;0&amp;0\\-1/\rho&amp;0&amp;0&amp;1\\0&amp;0&amp;1&amp;0\end{bmatrix},\qquad L_pR_p=I. \tag{16}
+\mathbf L_p=\begin{pmatrix}
+1/(2\rho a)&amp;1/2&amp;0&amp;0\\
+-1/(2\rho a)&amp;1/2&amp;0&amp;0\\
+-1/\rho&amp;0&amp;0&amp;1\\0&amp;0&amp;1&amp;0
+\end{pmatrix},\qquad \mathbf L_p\mathbf R_p=\mathbf I. \tag{39}
 $$</div>
-
-<p>The two equal-speed waves carry entropy and transverse velocity. Let <span class="math-inline">$r_k$</span> be column <span class="math-inline">$k$</span> of <span class="math-inline">$R_p$</span> and <span class="math-inline">$l_k$</span> row <span class="math-inline">$k$</span> of <span class="math-inline">$L_p$</span>. The conservative transverse projectors and angular flux Jacobian are</p>
+<p>For its columns $\mathbf r_k$ and dual rows $\mathbf l_k$,</p>
 <div class="math-block">$$
-P_k=(Cr_k)(l_kC^{-1}),\qquad \sum_kP_k=I,\qquad
-J_f=T_r\left(\sum_k\lambda_kP_k\right)T_r^{-1}. \tag{17}
+\mathbf P_k=(\mathbf C\mathbf r_k)(\mathbf l_k\mathbf C^{-1}),
+\qquad \sum_k\mathbf P_k=\mathbf I. \tag{40}
 $$</div>
-
-<p>The projectors remain defined when the two convective speeds coincide, or when an acoustic speed becomes zero. Focused tests compare them with the independently differentiated physical flux/storage Jacobians, including rest and both sonic directions. This verifies the algebraic decomposition; it is not a nonlinear stability theorem.</p>
-<h3 id="43-meridional-and-total-mach-numbers">4.3 Meridional and total Mach numbers</h3>
-<p>Define <span class="math-inline">$M_m=v_m/a$</span>, <span class="math-inline">$M_\theta=v_\theta/a$</span> and <span class="math-inline">$M=\sqrt{M_m^2+M_\theta^2}$</span>. Characteristic direction and meridional choking are determined by <span class="math-inline">$M_m$</span>. A swirling flow can have <span class="math-inline">$M&gt;1$</span> while <span class="math-inline">$M_m&lt;1$</span> and still have one acoustic characteristic pointing upstream. Boundary modes and normal-shock admissibility must therefore use meridional Mach.</p>
-<h2 id="5-steady-invariants-and-radial-flow-interpretation">5. Steady invariants and radial-flow interpretation</h2>
-<p>Along a smooth, forward, inviscid, adiabatic steady branch,</p>
 <div class="math-block">$$
-\dot m=A\rho v_m=\text{constant},\qquad\ell=\text{constant},\qquad h_0=\text{constant},\qquad s=\text{constant}. \tag{18}
+\left(\frac{\partial\mathbf F}{\partial\mathbf U}\right)_m
+=\mathbf T_r\left(\sum_k\lambda_k\mathbf P_k\right)\mathbf T_r^{-1}. \tag{41}
 $$</div>
+<p>The common area cancels from the frozen-geometry flux/state Jacobian. Storage transformations stay regular at zero characteristic speed; no sonic flux Jacobian is inverted. Independent AD comparisons verify the algebraic decomposition, not nonlinear stability.</p>
 
-<p>Combining these invariants with meridional momentum gives</p>
+<h2 id="spatial-discretization">4. Spatial discretization and numerical flux</h2>
+<h3 id="physical-mesh-and-storage">4.1 Physical mesh and integrated storage</h3>
+<p>Physical faces bound $N$ cells with representative arithmetic arclength midpoints $m_i$, widths $\Delta m_i$, radii $r_i$ and heights $b_i$. Controlled geometry quadrature computes volume:</p>
 <div class="math-block">$$
-(M_m^2-1)\frac{v_m&#x27;}{v_m}=\frac{A&#x27;}A+M_\theta^2\frac{r&#x27;}r. \tag{19}
+V_i=\int_{m_{i-1/2}}^{m_{i+1/2}}A(m)\,dm,\qquad
+\mathbf Q_i(\mathbf W_i)=V_i\mathbf U_v(\mathbf W_i,r_i). \tag{42}
 $$</div>
-
-<p>A regular internal sonic crossing requires the right-hand side to vanish where <span class="math-inline">$M_m=1$</span>, together with a compatible smooth branch. For constant height, <span class="math-inline">$A&#x27;/A=r&#x27;/r$</span>, so its numerator becomes <span class="math-inline">$(1+M_\theta^2)r&#x27;/r$</span>. A monotone constant-height radial inflow can accelerate subsonically toward a sonic exit; it cannot smoothly cross an internal sonic point. A further internal-transonic benchmark needs a separately selected compatible geometry.</p>
-<p>For outward constant-height flow, <span class="math-inline">$r&#x27;&gt;0$</span>. A meridionally subsonic branch decelerates; its swirl also decreases because <span class="math-inline">$v_\theta=\ell/r$</span>. This permits smooth diffusion of a flow that is supersonic in total speed but subsonic meridionally. A meridionally supersonic branch accelerates outward according to Equation 19. Supersonic outward diffusion with a compressive jump is a different solution family.</p>
-<p>At a stationary normal shock, upstream and downstream limits are evaluated at the same radius and area. The jump conditions are continuity of <span class="math-inline">$\rho v_m$</span>, <span class="math-inline">$p+\rho v_m^2$</span>, <span class="math-inline">$h_0$</span> and <span class="math-inline">$\ell$</span>, with an entropy increase. Tangential velocity is consequently continuous. The relevant upstream supersonic condition is <span class="math-inline">$M_{m1}&gt;1$</span>. The smooth entropy invariant applies separately on each side, with different entropy levels across the jump.</p>
-<p>In a fixed-angle backpressure family, <span class="math-inline">$\alpha_{in}$</span> stays fixed. The selected steady solution determines inlet velocity and therefore inlet <span class="math-inline">$\ell$</span>. Angular momentum is constant within each run; it is not imposed to be the same across all backpressures.</p>
-<h2 id="6-characteristic-numerical-flux">6. Characteristic numerical flux</h2>
-<h3 id="61-averaged-state-and-sonic-width">6.1 Averaged state and sonic width</h3>
-<p>Each face receives reconstructed angular primitives <span class="math-inline">$W_L,W_R$</span> and one common <span class="math-inline">$(r_f,A_f)$</span>. The characteristic state is their arithmetic primitive average <span class="math-inline">$W_*=(W_L+W_R)/2$</span>. Its direct HP EOS evaluation supplies <span class="math-inline">$\rho_*,a_*,G_*$</span> and the projectors in Equation 17. The side states supply physical <span class="math-inline">$\overline f_L,\overline f_R$</span>, conservative <span class="math-inline">$\overline q_L,\overline q_R$</span> and side characteristic speeds.</p>
-<p>For each wave define <span class="math-inline">$\Delta\lambda_k=\lambda_k(W_R)-\lambda_k(W_L)$</span>. With selected width factor <span class="math-inline">$\eta=0.1$</span>,</p>
+<p>$\mathbf Q_i$ is integrated cell content; $\mathbf U$ remains the area-weighted continuous state. Controlled geometry integration does not make the lumped flow field exact inside a cell. The semidiscrete balance is</p>
 <div class="math-block">$$
-\delta_0=\eta a_*,\qquad d_k^+=\tfrac12\left(\Delta\lambda_k+\sqrt{\Delta\lambda_k^2+\delta_0^2}\right),\qquad
-\delta_k=\delta_0+\tfrac12d_k^+. \tag{20}
+\frac{d\mathbf Q_i}{dt}
++\widehat{\mathbf F}_{i+1/2}-\widehat{\mathbf F}_{i-1/2}
+=\mathbf S_i. \tag{43}
 $$</div>
-
-<p>The strictly positive width keeps all evaluated divisions finite. The regularized absolute speed is the Harten-type function</p>
+<h3 id="source-discretization">4.2 Integrated geometry and wall sources</h3>
+<p>The source uses the current cell state and center metrics. Let $v_i=\sqrt{v_{m,i}^2+(\ell_i/r_i)^2}$, defining zero wall-force direction at zero speed. The components are</p>
 <div class="math-block">$$
-\phi_k=\begin{cases}(\lambda_k^2+\delta_k^2)/(2\delta_k),&amp;|\lambda_k|&lt;\delta_k,\\|\lambda_k|,&amp;|\lambda_k|\geq\delta_k,\end{cases}\qquad
-s_k=\lambda_k/\phi_k,\quad\nu_k=\phi_k-\lambda_k^2/\phi_k. \tag{21}
+S_{i,1}=0. \tag{44}
 $$</div>
-
-<p>This piecewise function is <span class="math-inline">$C^1$</span> in speed for fixed positive width, with a discontinuous second derivative at the join. The slope limiter is also nonsmooth at some states, so the complete residual is not claimed globally smooth.</p>
-<h3 id="62-implemented-flux-contraction">6.2 Implemented flux contraction</h3>
-<p>The shared characteristic kernel computes</p>
 <div class="math-block">$$
-\widehat{\overline f}=\tfrac12(\overline f_L+\overline f_R)
--\tfrac12\sum_kP_k\left[s_k(\overline f_R-\overline f_L)+\nu_k(\overline q_R-\overline q_L)\right],\qquad
-F_f=A_fT_{r_f}\widehat{\overline f}. \tag{22}
+\begin{aligned}
+S_{i,2}={}&p_i(A_{i+1/2}-A_{i-1/2})
++V_i\rho_i\ell_i^2r_i'/r_i^3\\
+&-\frac{2V_i}{b_i}\tau_{w,i}\frac{v_{m,i}}{v_i}.
+\end{aligned} \tag{45}
 $$</div>
-
-<p>The first jump is a physical-flux jump; the second is a conservative-state jump. The extra coefficient <span class="math-inline">$\nu_k$</span> is nonnegative. For a frozen linear system the combined characteristic viscosity is exactly <span class="math-inline">$\phi_k$</span>, including at a sonic speed. This observation does not prove nonlinear entropy stability. The arithmetic averaged state is not a Roe state, and no Roe jump identity is assumed.</p>
-<p>Face area and the angular-momentum radius multiplier are applied once, after the transverse contraction. The explicit diagnostic Rusanov option instead uses <span class="math-inline">$\widehat{\overline f}=\tfrac12[\overline f_L+\overline f_R-c_{LR}(\overline q_R-\overline q_L)]$</span>, with <span class="math-inline">$c_{LR}=\max(|v_{m,L}|+a_L,|v_{m,R}|+a_R)$</span>. It is a selected factory option, not a hidden fallback after a characteristic solve fails.</p>
-<h2 id="spatial-discretization">7. Finite volumes and reconstruction</h2>
-<h3 id="71-physical-cells-and-lumped-storage">7.1 Physical cells and lumped storage</h3>
-<p>Physical faces run from <span class="math-inline">$m_{1/2}=0$</span> to <span class="math-inline">$m_{N+1/2}=L$</span>. Representative cell positions are arithmetic arclength midpoints <span class="math-inline">$m_i=(m_{i-1/2}+m_{i+1/2})/2$</span>, with widths <span class="math-inline">$\Delta m_i$</span>. Geometric volumes are the integrals</p>
 <div class="math-block">$$
-V_i=\int_{m_{i-1/2}}^{m_{i+1/2}}A(m)\,dm,\qquad Q_i(W_i)=V_iq(W_i,r_i). \tag{23}
+S_{i,3}=-\frac{2V_ir_i}{b_i}\tau_{w,i}\frac{\ell_i/r_i}{v_i},
+\qquad S_{i,4}=\frac{2V_i}{b_i}q_{w,i}. \tag{46}
 $$</div>
-
-<p>Volumes use controlled quadrature split at geometry knots; they are not replaced by midpoint-area products. Storage is still a lumped nonlinear cell state at <span class="math-inline">$r_i$</span>. This separates geometric integration accuracy from the spatial approximation of the flow inside a cell.</p>
-<p>The integrated source and right-minus-left spatial residual are</p>
+<p>The exact face-area difference preserves uniform-pressure rest with zero swirl and wall inputs. Centrifugal/wall terms use midpoint-type flow/metric evaluations with integrated $V_i$. Zero shear and heat give exactly zero third/fourth sources. With wall inputs, angular and energy flux differences include wall torque and heating. There is no artificial shear sink in total energy.</p>
+<h3 id="constant-and-muscl">4.3 Constant and MUSCL reconstruction</h3>
+<p>The spatial blocks are the inlet face trace, physical cell states and outlet face trace, at actual coordinates $\mu_j$. Constant reconstruction uses adjacent blocks. MUSCL computes componentwise gradients of $\mathbf W=(p,v_m,\ell,h)^T$:</p>
 <div class="math-block">$$
-S_i=\begin{bmatrix}0\\p_i(A_{i+1/2}-A_{i-1/2})+V_i\rho_i(\ell_i/r_i)^2r_i&#x27;/r_i\\0\\0\end{bmatrix},\qquad
-R_i=F_{i+1/2}-F_{i-1/2}-S_i. \tag{24}
+\mathbf d_j^-=\frac{\mathbf W_j-\mathbf W_{j-1}}{\mu_j-\mu_{j-1}},
+\qquad
+\mathbf d_j^+=\frac{\mathbf W_{j+1}-\mathbf W_j}{\mu_{j+1}-\mu_j}. \tag{47}
 $$</div>
-
-<p>The pressure-area contribution uses the exact face-area difference; the centrifugal contribution uses the lumped cell state and center metrics. At a uniform quiescent state with zero swirl, the face pressure flux difference cancels <span class="math-inline">$p_i\Delta A_i$</span> exactly. This does not assert exact preservation of every nonuniform swirling equilibrium.</p>
-<h3 id="72-constant-and-nonuniform-muscl-reconstruction">7.2 Constant and nonuniform MUSCL reconstruction</h3>
-<p>The augmented spatial points are the inlet face, physical midpoints and outlet face. Denote them <span class="math-inline">$\mu_j$</span>, with corresponding blocks <span class="math-inline">$W_j$</span>, for <span class="math-inline">$j=0,\ldots,N+1$</span>. Constant reconstruction uses the adjacent blocks directly. MUSCL computes componentwise physical-distance gradients and harmonic van-Leer slopes:</p>
 <div class="math-block">$$
-d_j^-=(W_j-W_{j-1})/(\mu_j-\mu_{j-1}),\quad d_j^+=(W_{j+1}-W_j)/(\mu_{j+1}-\mu_j),\quad
-\zeta_j=\begin{cases}2d_j^-d_j^+/(d_j^-+d_j^++10^{-300}),&amp;d_j^-d_j^+&gt;0,\\0,&amp;d_j^-d_j^+\leq0.\end{cases} \tag{25}
+\zeta_{j,k}=\begin{cases}
+2d_{j,k}^-d_{j,k}^+/(d_{j,k}^-+d_{j,k}^++10^{-300}),
+&d_{j,k}^-d_{j,k}^+&gt;0,\\
+0,&d_{j,k}^-d_{j,k}^+\leq0.
+\end{cases} \tag{48}
 $$</div>
-
-<p>Boundary-block slopes are zero. The implementation uses a protected inactive denominator for safe reverse AD and retains the tiny inherited active denominator regularizer. Each side is evaluated at the actual face coordinate, <span class="math-inline">$W_{f,L}=W_j+\zeta_j(m_f-\mu_j)$</span> and <span class="math-inline">$W_{f,R}=W_{j+1}+\zeta_{j+1}(m_f-\mu_{j+1})$</span>. No uniform-grid half-width assumption is used.</p>
-<p>Reconstruction acts on <span class="math-inline">$p,v_m,\ell,h$</span>; <span class="math-inline">$v_\theta$</span> follows from the common face radius. All reconstructed states participate in admissibility checks. Componentwise slope limiting alone does not establish positivity or a total-variation bound for the coupled Euler update. Smooth-region spatial reconstruction and backward-Euler temporal accuracy must also be distinguished.</p>
-<h2 id="boundary-equations">8. Simultaneous algebraic boundaries</h2>
-<h3 id="81-unknowns-and-outgoing-reference">8.1 Unknowns and outgoing reference</h3>
-<p>The full unknown is <span class="math-inline">$z=(W_{in},W_1,\ldots,W_N,W_{out})$</span>, stored as <code>(N+2,4)</code>. The two extra blocks are independent exterior traces at the physical faces. They are not finite volumes and have zero storage. The same face-flux function couples them to the reconstructed interior traces.</p>
-<p>At least two physical cells are required. Define physical-distance extrapolation factors and primitive references</p>
 <div class="math-block">$$
-\beta_L=\frac{0-m_1}{m_1-m_2},\quad E_L=W_1+\beta_L(W_1-W_2),\qquad
-\beta_R=\frac{L-m_N}{m_N-m_{N-1}},\quad E_R=W_N+\beta_R(W_N-W_{N-1}). \tag{26}
+\mathbf W_{f,L}=\mathbf W_j+\boldsymbol\zeta_j(m_f-\mu_j),\qquad
+\mathbf W_{f,R}=\mathbf W_{j+1}+\boldsymbol\zeta_{j+1}(m_f-\mu_{j+1}). \tag{49}
 $$</div>
-
-<p>Current nearest-cell impedances are <span class="math-inline">$Z_L=\rho_1a_1$</span> and <span class="math-inline">$Z_R=\rho_Na_N$</span>. Entropy extrapolation is performed separately as <span class="math-inline">$s_{E,R}=s_N+\beta_R(s_N-s_{N-1})$</span>; it is not entropy evaluated at <span class="math-inline">$E_R$</span>. All these quantities depend on the current full trial state and are differentiated in the same Newton system.</p>
-<h3 id="82-subsonic-inlet-and-outlet-equations">8.2 Subsonic inlet and outlet equations</h3>
-<p>For a forward subsonic inlet, three incoming physical data are <span class="math-inline">$h_0,s_0,\alpha_{in}$</span>; one outgoing acoustic row supplies compatibility. At <span class="math-inline">$r_{in}=r(0)$</span> the four unscaled inlet constraints are</p>
+<p>Boundary-block slopes are zero. Actual distances handle nonuniform grids; no uniform half-cell assumption is imposed. Protected inactive arithmetic keeps AD finite. All reconstructed states are audited for admissibility. The limiter does not alone prove positivity or a system-wide total-variation bound.</p>
+<p><strong>MUSCL reconstructs face flux states, not source values.</strong> Both methods call the same source functions on cell states. Their sources can differ indirectly through different converged fields. A midpoint-type source is compatible with second-order consistency on smooth flows; another quadrature would be a separate numerical change.</p>
+<h3 id="6-characteristic-numerical-flux">4.4 Characteristic flux and sonic regularization</h3>
+<p>The arithmetic average of the reconstructed angular primitives supplies $\rho_*,a_*,\Gamma_*$ and projectors. This is not a Roe average and no Roe jump identity is assumed. For each implementation-ordered wave,</p>
 <div class="math-block">$$
-B_{in}=\begin{bmatrix}
-h_{in}+\tfrac12(v_{m,in}^2+\ell_{in}^2/r_{in}^2)-h_0\\
-s(h_{in},p_{in})-s_0\\
-(\ell_{in}/r_{in})\cos\alpha_{in}-v_{m,in}\sin\alpha_{in}\\
-p_{in}-p_{E,L}-Z_L(v_{m,in}-v_{m,E,L})
-\end{bmatrix}=0. \tag{27}
+\Delta\lambda_k=\lambda_k(\mathbf W_R)-\lambda_k(\mathbf W_L),
+\qquad \delta_0=\eta a_*,\qquad\eta=0.1. \tag{50}
 $$</div>
-
-<p>The fixed-angle form avoids division by inlet velocity. The selected angle satisfies <span class="math-inline">$|\alpha_{in}|&lt;\pi/2$</span>. An explicit alternative replaces the third row by <span class="math-inline">$\ell_{in}-\ell_{prescribed}$</span>; angle and angular momentum are never prescribed together. Inlet Mach or mass flow used to construct an analytical fixture is not an additional numerical inlet condition.</p>
-<p>For a forward subsonic outlet, pressure is prescribed and three outgoing constraints are</p>
 <div class="math-block">$$
-B_{out}=\begin{bmatrix}
-p_{out}-p_b\\
-p_{out}-p_{E,R}+Z_R(v_{m,out}-v_{m,E,R})\\
-s(h_{out},p_{out})-s_{E,R}\\
-\ell_{out}-\ell_{E,R}
-\end{bmatrix}=0. \tag{28}
+d_k^+=\tfrac12\left(\Delta\lambda_k+
+\sqrt{\Delta\lambda_k^2+\delta_0^2}\right),\qquad
+\delta_k=\delta_0+\tfrac12d_k^+. \tag{51}
 $$</div>
-
-<p>The signs of the inlet/outlet acoustic rows follow the outgoing acoustic direction at each boundary. These are local impedance/extrapolation closures, not a demonstrated exact nonreflecting boundary treatment. HP evaluation is direct at each trial trace. No pressure recovery, entropy inversion, boundary overwrite or nested nonlinear solve occurs during residual evaluation.</p>
-<h3 id="83-supersonic-modes-and-regime-limits">8.3 Supersonic modes and regime limits</h3>
-<p>A supersonic inlet prescribes all four primitives: <span class="math-inline">$B_{in}=W_{in}-W_{prescribed}$</span>. A supersonic outlet extrapolates all four: <span class="math-inline">$B_{out}=W_{out}-E_R$</span>. Its equations contain no backpressure. Regimes are explicit factory choices.</p>
-<p>The driver audits signed boundary <span class="math-inline">$M_m$</span>. Forward subsonic modes require <span class="math-inline">$0\leq M_m\leq1+\epsilon_M$</span> and supersonic modes require <span class="math-inline">$M_m\geq1-\epsilon_M$</span>, with implementation audit tolerance <span class="math-inline">$\epsilon_M=0.002$</span>. This tolerance is an audit convention near a sonic boundary, not automatic switching of the equation set. Reverse flow is unsupported. A physical transient that changes the selected boundary regime terminates and requires a rebuilt block.</p>
-<h2 id="9-full-implicit-residual-and-scaling">9. Full implicit residual and scaling</h2>
-<h3 id="91-fixed-reference-scales">9.1 Fixed reference scales</h3>
-<p>The same supplied fluid defines a finite reference HP state. For a subsonic reservoir setup it is <span class="math-inline">$(h_0,p_0)$</span>, consistent with the prepared reservoir <span class="math-inline">$(p_0,T_0)$</span>; for a supersonic inlet it is the prescribed static state. Let its density, sound speed and temperature be <span class="math-inline">$\rho_*,a_*,T_*$</span>. With <span class="math-inline">$r_*=r(0)$</span>,</p>
 <div class="math-block">$$
-q_*=(\rho_*,\rho_*a_*,\rho_*r_*a_*,\rho_*a_*^2)^T,\qquad
-W_*^{scale}=(p_*,a_*,r_*a_*,a_*^2)^T,\qquad s_*^{scale}=a_*^2/T_*. \tag{29}
+\varphi_k=\begin{cases}
+(\lambda_k^2+\delta_k^2)/(2\delta_k),&|\lambda_k|&lt;\delta_k,\\
+|\lambda_k|,&|\lambda_k|\geq\delta_k,
+\end{cases} \tag{52}
 $$</div>
-
-<p>These are fixed positive scales. In particular <span class="math-inline">$a_*^2$</span> is used for enthalpy differences rather than assuming a positive enthalpy reference level. Inlet rows in Equation 27 are divided by <span class="math-inline">$(a_*^2,s_*^{scale},a_*,p_*)$</span>; an angular-momentum inlet law uses <span class="math-inline">$r_*a_*$</span> for its third row. Outlet rows in Equation 28 use <span class="math-inline">$(p_*,p_*,s_*^{scale},r_*a_*)$</span>. Supersonic primitive rows use <span class="math-inline">$W_*^{scale}$</span>.</p>
-<h3 id="92-backward-euler-block">9.2 Backward-Euler block</h3>
-<p>For timestep <span class="math-inline">$\Delta t$</span>, the complete residual has <span class="math-inline">$4N+8$</span> rows:</p>
 <div class="math-block">$$
-\mathcal F(z^{n+1};z^n,\Delta t)=
-\begin{bmatrix}
-\widehat B_{in}(z^{n+1})\\
-\{[Q_i(W_i^{n+1})-Q_i(W_i^n)+\Delta t R_i(z^{n+1})]/(V_iq_*)\}_{i=1}^N\\
-\widehat B_{out}(z^{n+1})
-\end{bmatrix}=0. \tag{30}
+\sigma_k=\lambda_k/\varphi_k,\qquad
+\nu_k=\varphi_k-\lambda_k^2/\varphi_k. \tag{53}
 $$</div>
-
-<p>Division of physical rows is componentwise. Boundary rows are not multiplied by <span class="math-inline">$\Delta t$</span> and contain no previous boundary state. Only physical cells have storage. Boundary traces, EOS responses, reconstruction, numerical flux and sources all use the current iterate inside this one residual.</p>
-<p>The independently evaluated original steady residual uses physical rows <span class="math-inline">$\widehat R_i=R_i/(V_iq_*a_*/L)$</span> and the same scaled boundary rows. Root monitoring reports spatial RMS over all <span class="math-inline">$4N$</span> physical components, the largest absolute scaled BC component and</p>
+<p>The shared characteristic contraction operates on frozen-radius transverse state and flux:</p>
 <div class="math-block">$$
-\epsilon_{balance}=\max\left|\frac{F_{out}-F_{in}-\sum_iS_i}{A_{in}a_*q_*}\right|. \tag{31}
+\begin{aligned}
+\widehat{\overline{\mathbf F}}_v
+={}&\tfrac12(\overline{\mathbf F}_{v,L}+\overline{\mathbf F}_{v,R})\\
+&-\tfrac12\sum_k\mathbf P_k
+[\sigma_k\Delta\overline{\mathbf F}_v+
+\nu_k\Delta\overline{\mathbf U}_v].
+\end{aligned} \tag{54}
 $$</div>
-
-<p>Steady success requires admissibility, the selected boundary regime and all three measures below the original tolerance, <span class="math-inline">$10^{-8}$</span> in the canonical verification. A small inner timestep residual or small Newton increment alone is insufficient. The plotted convergence ordinate is the maximum of these three original-root measures.</p>
-<h2 id="10-newton-differentiation-and-linear-solution">10. Newton differentiation and linear solution</h2>
-<p>The shared Newton solver differentiates Equation 30 with respect to all current unknowns and solves <span class="math-inline">$J\Delta z=-\mathcal F$</span>. There are no separately converged BC variables and no frozen EOS or impedance derivatives in this Jacobian. State/residual kernels use JAX; backend callback derivative accuracy remains a separate EOS concern.</p>
-<p>The maximum block dependency radius is two: MUSCL interior rows reach two neighboring blocks, and the two-cell BC closure also reaches two. Four variables and five block colors therefore require up to <span class="math-inline">$4(2\cdot2+1)=20$</span> colored JVP directions, including boundary unknowns. Tiny systems use fewer directions. Dense AD is available for independent comparison with the declared sparse dependency pattern.</p>
-<p>The default banded solver groups two adjacent four-variable blocks into <span class="math-inline">$8\times8$</span> superblocks and applies block-tridiagonal elimination/back substitution. It avoids forming a dense global matrix. Pivoting is local to each superblock; it does not guarantee success for every nonsingular full Jacobian. Dense/colored Jacobians, banded directions and linear defects are exposed for audits.</p>
-<p>Backtracking trials use <span class="math-inline">$z+\alpha\Delta z$</span>, <span class="math-inline">$\alpha=1,1/2,\ldots,2^{-16}$</span> at default settings. A trial must satisfy domain/admissibility checks before residual evaluation. Its actual full scaled residual RMS must decrease by the Armijo factor <span class="math-inline">$1-10^{-4}\alpha$</span>, or already meet the inner residual target. Exhausted trials retain the preceding state and return failure; the timestep controller then decides whether to retry.</p>
-<p>The production factory defaults to a cap of 12 Newton corrections. The current verification campaign explicitly uses a cap of <strong>eight</strong>, as recommended by <code>controller study</code>. Both use residual RMS tolerance <span class="math-inline">$10^{-10}$</span> and maximum scaled update tolerance <span class="math-inline">$10^{-10}$</span>. When both tests are enabled, both are required. Update scaling uses the fixed primitive scales in Equation 29. No invalid state is clipped and no boundary state is projected after Newton. Both initial-driver audits and reconstructed-face audits prevent invalid trial states from reaching spatial flux evaluation.</p>
-<h2 id="time-integration">11. Steady and physical-time drivers</h2>
-<h3 id="111-shared-timestep-scale">11.1 Shared timestep scale</h3>
-<p>Both drivers use the local acoustic travel-time estimate</p>
 <div class="math-block">$$
-\Delta t=\mathrm{CFL}\min_i\frac{\Delta m_i}{|v_{m,i}|+a_i}. \tag{32}
+\widehat{\mathbf F}_f
+=A_f\mathbf T_{r_f}\widehat{\overline{\mathbf F}}_v. \tag{55}
 $$</div>
+<p>The jumps are physical flux and conservative density, respectively. Frozen-linear combined viscosity is $\varphi_k$, including sonic states. Positive width prevents evaluated zero denominators; this is not a nonlinear entropy-stability proof. The regularization is $C^1$ in speed for fixed width; higher derivatives and the limiter can be nonsmooth.</p>
+<p>Rusanov is an explicit diagnostic option, using average transverse flux minus half $c_{LR}$ times the state jump, with $c_{LR}=\max(|v_{m,L}|+a_L,|v_{m,R}|+a_R)$. It is not a hidden fallback. Sources enter Equation 43 separately and are differentiated inside the implicit residual.</p>
 
-<p>This estimate uses the fastest meridional signal. A stationary acoustic characteristic at <span class="math-inline">$v_m-a=0$</span> does not make its denominator vanish. The implicit algorithm can employ large pseudo-time CFL values, although Newton convergence and spatial accuracy are not guaranteed by that choice.</p>
-<h3 id="112-steady-pseudo-time-march">11.2 Steady pseudo-time march</h3>
-<p>Steady marching repeatedly solves Equation 30 using the previous accepted physical field as old storage. The current verification campaign uses the fixed-growth controller selected by the separate CFL investigation: initial CFL <strong>0.2</strong>, multiplier <strong>1.2 after every accepted timestep</strong>, multiplier <strong>0.5 after failure</strong>, maximum CFL <span class="math-inline">$10^6$</span>, and at most 12 retries per accepted update. It retains both strict inner stopping tests and a cap of <strong>eight Newton corrections</strong>. The first dimensional timestep is computed from Equation 32, so it changes with the case and mesh; it is approximately <span class="math-inline">$7.055338\times10^{-8}$</span> s for shock35 at 400 cells.</p>
-<p>The shared study loop calls the unchanged production timestep and original-residual monitors; it does not replace the Newton solver, change the spatial equations or add nested boundary solves. These are steady pseudo-time settings, not a recommendation for transient temporal accuracy. The verification driver records initial timestep, every accepted/rejected attempt, inner work, CFL and the four conservation components. The production <code>solve_steady</code> defaults remain separate: initial CFL 20 and work-dependent growth of 1.4, its square root, or one according to actual correction count. Passing growth 1.2 to that work-based driver is therefore not equivalent to the fixed-growth policy used here.</p>
-<p>The isolated study found that a strict cap of five could reject the first cold step even when its residual reached roundoff, because the fifth update had not yet passed the separate small-update test. The recommended cap of eight retains both tests without a residual-only acceptance exception. The recommendation was measured on shock35; this campaign tests its transfer to the other cases rather than assuming universal robustness.</p>
-<p>The steady spatial residual need not decrease at every accepted pseudo-time step: shock formation can transiently raise it. Success is determined by the separate original-root checks in Section 9. The initial cold guess uses uniform physical pressure, enthalpy and velocity data with <span class="math-inline">$\ell=r v_\theta$</span>; it is not an analytical solution profile. Rejected attempts and termination reasons remain in the history.</p>
-<h3 id="113-physical-time">11.3 Physical time</h3>
-<p><code>advance</code> uses the same backward-Euler residual but accumulates actual physical time. It caps the last timestep at the requested remaining time and stops only when that time is reached or an explicit failure/step limit occurs. Initial traces must already satisfy the algebraic BCs. Accepted steps must preserve the selected boundary regime.</p>
-<p>The optional accepted-step callback receives the new state and actual timestep, permitting the independent discrete budget</p>
+<h2 id="boundary-equations">5. Simultaneous algebraic boundaries</h2>
+<p>The full unknown $\mathbf z=(\mathbf W_{\rm in},\mathbf W_1,\ldots,\mathbf W_N,\mathbf W_{\rm out})$ has shape <code>(N+2,4)</code>. Exterior traces lie at physical faces, have zero storage and enter the current face fluxes. At least two physical cells provide outgoing references:</p>
 <div class="math-block">$$
-Q_{final}-Q_{initial}+\sum_n\Delta t_n\left(F_{out}^{n+1}-F_{in}^{n+1}-\sum_iS_i^{n+1}\right)=0,\qquad Q=\sum_iQ_i. \tag{33}
+\beta_L=\frac{-m_1}{m_1-m_2},\qquad
+\mathbf W_{e,L}=\mathbf W_1+\beta_L(\mathbf W_1-\mathbf W_2). \tag{56}
 $$</div>
-
-<p>This is a physical-time storage budget, distinct from a steady residual. Backward Euler is first order in time. A fixed-CFL mesh study changes spatial and temporal error together; it does not independently establish temporal order. Physical-time histories contain accepted times/steps and inner work, not an invented analytical convergence trajectory.</p>
-<h2 id="12-independent-verification-and-present-limits">12. Independent verification and present limits</h2>
-<h3 id="121-cell-integrated-reference-and-cp">12.1 Cell-integrated reference and Cp</h3>
-<p>The analytical reference module imports no FVM flux, spatial residual or numerical boundary implementation. It constructs steady branches from physical invariants and performs independent volume integration,</p>
 <div class="math-block">$$
-\overline q_i^{exact}=\frac1{V_i}\int_{m_{i-1/2}}^{m_{i+1/2}}q^{exact}(m)A(m)\,dm. \tag{34}
+\beta_R=\frac{L-m_N}{m_N-m_{N-1}},\qquad
+\mathbf W_{e,R}=\mathbf W_N+\beta_R(\mathbf W_N-\mathbf W_{N-1}). \tag{57}
 $$</div>
-
-<p>Quadrature splits at geometry knots and shocks, with special coordinate treatment at sonic endpoints. Plot fields use the equivalent primitive state recovered from <span class="math-inline">$\overline q_i^{exact}$</span> at <span class="math-inline">$r_i$</span>. They are not point samples at <span class="math-inline">$m_i$</span> or averages of primitive values. Conservative errors compare numerical <span class="math-inline">$q(W_i,r_i)$</span> with this projected <span class="math-inline">$\overline q_i^{exact}$</span>.</p>
-<p>The saved pressure-recovery coefficient is</p>
+<p>The nearest-cell impedances are $Z_L=\rho_1a_1$ and $Z_R=\rho_Na_N$. Entropy is extrapolated separately, $s_{e,R}=s_N+\beta_R(s_N-s_{N-1})$, rather than evaluated at the extrapolated primitive state. All references use the current trial field and participate in the full Jacobian.</p>
+<h3 id="subsonic-boundaries">5.1 Subsonic inlet and outlet</h3>
+<p>A forward subsonic inlet supplies total enthalpy, entropy and flow angle; an outgoing acoustic row closes the fourth unknown:</p>
 <div class="math-block">$$
-C_p=\frac{p-p_{in}}{p_0-p_{in}}. \tag{35}
+\mathbf B_{\rm in}=
+\begin{pmatrix}
+h_{\rm in}+\tfrac12(v_{m,\rm in}^2+\ell_{\rm in}^2/r_{\rm in}^2)-h_0\\
+s(h_{\rm in},p_{\rm in})-s_0\\
+(\ell_{\rm in}/r_{\rm in})\cos\alpha_{\rm in}-v_{m,\rm in}\sin\alpha_{\rm in}\\
+p_{\rm in}-p_{e,L}-Z_L(v_{m,\rm in}-v_{m,e,L})
+\end{pmatrix}=\mathbf0. \tag{58}
 $$</div>
-
-<p>The analytical curve uses its analytical inlet pressure; each numerical curve uses its own computed inlet pressure. Saved Cp curves retain this convention. For smooth cases, the finest-grid accuracy criteria are maximum Cp error below <span class="math-inline">$10^{-3}$</span> and all four volume-weighted conservative L1 errors, normalized by <span class="math-inline">$q_*$</span>, below <span class="math-inline">$10^{-3}$</span>. Shocked cases use the separately declared location criterion of at most two cells; their field errors remain reported.</p>
-<p>Every field comparison shows three physical trends: analytical reference, constant reconstruction and linear (MUSCL) reconstruction. All numerical line samples are retained. Constant reconstruction is dashed and linear reconstruction is solid; the dashed analytical curve is layered above those lines. Separate white-faced circular markers are layered last. The default skips ten points between markers (stride eleven); the two numerical marker sequences are offset by half a stride. At stride one both methods necessarily mark every point. Each method has its own root, BC, conservation and accuracy assessment, and failed targets remain visible.</p>
-<p>The conservation panel plots four absolute, signed-recorded global balance components against accepted implicit updates. With fixed nonzero flux scales <span class="math-inline">$F_{*,k}$</span>, the monitored quantity is</p>
+<p>The fixed-angle law avoids division by velocity and requires $|\alpha_{\rm in}|&lt;\pi/2$. An explicit alternative uses $\ell_{\rm in}-\ell_{\rm prescribed}$ as its third row. Angle and angular momentum are never imposed together. Reference inlet Mach is not an additional numerical boundary condition.</p>
+<p>A forward subsonic outlet prescribes pressure and three outgoing rows:</p>
 <div class="math-block">$$
-B_k=\frac{F_{out,k}-F_{in,k}-\sum_i S_{i,k}}{F_{*,k}}.
+\mathbf B_{\rm out}=
+\begin{pmatrix}
+p_{\rm out}-p_b\\
+p_{\rm out}-p_{e,R}+Z_R(v_{m,\rm out}-v_{m,e,R})\\
+s(h_{\rm out},p_{\rm out})-s_{e,R}\\
+\ell_{\rm out}-\ell_{e,R}
+\end{pmatrix}=\mathbf0. \tag{59}
 $$</div>
+<p>These local impedance/extrapolation laws are not exact nonlinear invariants or proven nonreflecting boundaries. Direct HP evaluation is used at trial traces, with no nested boundary root, entropy inversion or post-Newton overwrite.</p>
+<h3 id="supersonic-boundaries">5.2 Supersonic modes and limits</h3>
+<p>A supersonic inlet prescribes all primitives. A supersonic outlet extrapolates all four and imposes no ambient pressure. Regimes are factory choices, audited using signed meridional Mach: $0\leq M_m\leq1.002$ for subsonic modes and $M_m\geq0.998$ for supersonic modes. This is a sonic audit convention, not automatic switching. Reverse flow is unsupported; a physical transient changing the selected mode requires a rebuilt boundary block.</p>
 
-<p>A different color identifies each equation; dashed and solid lines distinguish constant and linear reconstruction. Meridional momentum includes geometric and centrifugal sources, so its flux alone need not be constant. These are steady balance defects during pseudo-time convergence, rather than physical-time conserved contents. The current fixed-growth campaign records all four components at every accepted update. Earlier archived runs retained only <span class="math-inline">$\max_k|B_k|$</span>, which cannot reconstruct four component histories. The report still displays an explicit missing-data message if such older files are loaded; it never substitutes a scalar maximum or final value for a trajectory. Exact zeros are retained in downloadable data and omitted on the logarithmic plot.</p>
-<h3 id="122-what-the-existing-evidence-establishes">12.2 What the existing evidence establishes</h3>
-<p>The canonical nine-case, four-mesh campaign contains 72 numerical solves. All 72 satisfy original spatial, BC and conservation root checks. Eleven of the 18 finest-grid analytical accuracy criteria pass: three constant-reconstruction results and eight MUSCL results. The seven failed combinations are constant reconstruction for radial outflow, radial inflow, sonic exit, conical subsonic, curved subsonic and supersonic expansion, plus MUSCL sonic exit. Lower residual does not remove these accuracy failures.</p>
-<p>Shock-location passes do not certify the whole shock profile. Same-station fitted jump audits check compressive branches, entropy rise and Rankine-Hugoniot defects; finite fitting windows can remain contaminated by a smeared shock. The finest shock70 constant solution has a local pressure peak 26.524% above the reference maximum over the audited six-cell shock window. That is a local-window statistic, not a global-domain pressure ratio. Complete field curves and raw states are retained.</p>
-<p>The graded radial-outflow mesh check converges both reconstructions, while the constant result still fails the Cp criterion. A compact entropy-contact test on a constant-radius channel reaches the requested physical time with forward pulse movement and decreasing density L1 error for both reconstructions. Its accepted-step backward-Euler budget defects are below <span class="math-inline">$2.5\times10^{-15}$</span> at the saved scales. This demonstrates a real transient and its discrete conservation budget; it does not establish general nonreflecting BC behavior or all transient regimes.</p>
-<p>Current limitations include low-Mach constant-reconstruction pressure error, sonic-exit accuracy, local characteristic shock-cell artifacts and finite Newton robustness. Reverse flow, automatic boundary-mode changes, nonclassical two-phase wave physics, global wall self-intersection detection, geometry-shape AD and heat/friction closures remain outside the verified prototype. Perfect-gas verification does not replace a future real-fluid integration and application campaign. The selected monotone radial-inflow case does not silently stand in for an unselected internal-transonic geometry.</p>
-<h2 id="appendix-a-perfect-gas-analytical-reference-only">Appendix A. Perfect-gas analytical reference only</h2>
-<p>The numerical method above contains no perfect-gas closure. This appendix defines only the independent verification oracle. For a calorically perfect gas with constants <span class="math-inline">$\gamma,R$</span> and an enthalpy datum <span class="math-inline">$h_{shift}$</span>,</p>
+<h2 id="full-implicit-residual">6. Time discretization and original residuals</h2>
+<h3 id="fixed-reference-scales">6.1 Fixed scales</h3>
+<p>A reference HP state from the same EOS supplies $\rho_*,a_*,T_*,p_*$. It is the prepared reservoir state for a subsonic setup or the prescribed static state for a supersonic inlet. With $r_*=r(0)$,</p>
 <div class="math-block">$$
-p=\rho RT,\qquad c_p=\frac{\gamma R}{\gamma-1},\qquad h=c_pT+h_{shift},\qquad a^2=\gamma RT,\qquad K=p/\rho^\gamma. \tag{A1}
+\mathbf U_{v,*}=(\rho_*,\rho_*a_*,\rho_*r_*a_*,\rho_*a_*^2)^T. \tag{60}
 $$</div>
-
-<p>On a smooth steady branch <span class="math-inline">$K,\dot m,\ell,h_0$</span> are constant. Density is found from the scalar equation</p>
 <div class="math-block">$$
-\frac{\gamma K}{\gamma-1}\rho^{\gamma-1}+\frac12\left(\frac{\dot m}{A\rho}\right)^2
-=h_0-h_{shift}-\frac12\left(\frac{\ell}{r}\right)^2. \tag{A2}
+\mathbf W_*^{\rm scale}=(p_*,a_*,r_*a_*,a_*^2)^T,\qquad
+s_*^{\rm scale}=a_*^2/T_*. \tag{61}
 $$</div>
+<p>Inlet rows use $(a_*^2,s_*^{\rm scale},a_*,p_*)$; an angular inlet law uses $r_*a_*$ for its third row. Outlet scales are $(p_*,p_*,s_*^{\rm scale},r_*a_*)$. Supersonic primitive rows use $\mathbf W_*^{\rm scale}$. Enthalpy differences use $a_*^2$, not a positive enthalpy datum.</p>
+<h3 id="backward-euler-residual">6.2 Backward Euler</h3>
+<p>The integrated spatial balance and one backward-Euler physical row are</p>
+<div class="math-block">$$
+\mathbf R_i(\mathbf z)=
+\widehat{\mathbf F}_{i+1/2}-\widehat{\mathbf F}_{i-1/2}-\mathbf S_i. \tag{62}
+$$</div>
+<div class="math-block">$$
+\boldsymbol{\mathcal R}_i=
+\frac{\mathbf Q_i(\mathbf W_i^{n+1})-\mathbf Q_i(\mathbf W_i^n)
++\Delta t\,\mathbf R_i(\mathbf z^{n+1})}
+{V_i\mathbf U_{v,*}}. \tag{63}
+$$</div>
+<p>Division is componentwise. The complete system has $4N+8$ equations:</p>
+<div class="math-block">$$
+\boldsymbol{\mathcal R}=
+\begin{pmatrix}
+\widehat{\mathbf B}_{\rm in}(\mathbf z^{n+1})\\
+\{\boldsymbol{\mathcal R}_i\}_{i=1}^N\\
+\widehat{\mathbf B}_{\rm out}(\mathbf z^{n+1})
+\end{pmatrix}=\mathbf0. \tag{64}
+$$</div>
+<p>Boundary rows contain no previous trace and are not multiplied by $\Delta t$. EOS, reconstruction, fluxes, prescribed wall-source functions and BCs all use the current iterate in this single residual. Nonzero torque and heating therefore enter both steady and physical-time calculations.</p>
+<h3 id="original-steady-measures">6.3 Original steady checks</h3>
+<p>The steady monitor independently evaluates the spatial equations without storage or timestep factors:</p>
+<div class="math-block">$$
+\widehat{\mathbf R}_i=
+\frac{\mathbf R_i}{V_i\mathbf U_{v,*}a_*/L}. \tag{65}
+$$</div>
+<div class="math-block">$$
+\mathbf B_{\rm balance}=
+\frac{\widehat{\mathbf F}_{\rm out}-\widehat{\mathbf F}_{\rm in}
+-\sum_i\mathbf S_i}
+{A_{\rm in}a_*\mathbf U_{v,*}}. \tag{66}
+$$</div>
+<p>The archived scalar policy required spatial RMS, maximum scaled BC component and maximum absolute balance component below $10^{-8}$, plus admissibility and the intended boundary regimes. The current campaign instead uses the equation-wise initial-relative policy in Section 8.4: every active equation must reach $10^{-9}$, with separate $10^{-8}$ absolute, boundary and global safeguards. A small Newton increment alone is insufficient. The top-left residual plot is the maximum active relative equation norm, not a mixture of local residuals and global defects.</p>
+<p>The four conservation curves display separate absolute components of Equation 66. These global flux-minus-source defects can exhibit cancellation and do not replace cellwise spatial RMS. Wall torque/heating are subtracted in their budgets. Histories use the current annular implementation, independently of the separate residual-monitoring investigation.</p>
 
-<p>Its minimum occurs at <span class="math-inline">$\rho_c=[\dot m^2/(\gamma K A^2)]^{1/(\gamma+1)}$</span>, the meridional sonic state. The high-density root is meridionally subsonic and the low-density root supersonic. A bracketed root selects the requested branch and raises when it does not exist. Choosing inlet Mach to construct these reference invariants does not prescribe numerical inlet Mach.</p>
-<p>At a normal shock, the independent reference uses upstream meridional Mach <span class="math-inline">$M_{m1}$</span>:</p>
+<h2 id="newton-solution">7. Newton differentiation and linear solution</h2>
+<p>The shared Newton algorithm differentiates the complete current residual and solves $\mathbf J\,\Delta\mathbf z=-\boldsymbol{\mathcal R}$. Boundary, EOS, reconstruction, flux and source derivatives are retained. Prescribed wall profiles are factory constants, while the named source functions receive current states and remain JAX-compatible for future constitutive laws.</p>
+<p>Maximum block dependency radius is two: MUSCL reaches two neighbors and the two-cell BC law also reaches two blocks. Four variables with five block colors need up to 20 colored JVP directions. Dense AD remains available to audit the declared stencil.</p>
+<p>The banded solve groups pairs of four-variable blocks into $8\times8$ superblocks, then performs block elimination/back substitution without a dense global matrix. Pivoting is local; it does not guarantee success for every nonsingular global Jacobian.</p>
+<p>Armijo trials use $\mathbf z+\alpha\Delta\mathbf z$ with $\alpha=1,1/2,\ldots,2^{-16}$ by default. Domain/admissibility are checked before residual evaluation. A trial must decrease full scaled RMS by the factor $1-10^{-4}\alpha$, or already satisfy the inner residual tolerance. Exhausted trials retain the preceding state and fail; the controller decides whether to retry.</p>
+<p>The production cap is 12 corrections. The study explicitly uses eight, with both inner residual RMS and fixed-scale update criteria at $10^{-10}$. Both are required. No clipping or post-Newton BC projection repairs a failed trial. Inner convergence, original steady-root convergence and analytical accuracy are separate assessments.</p>
+
+<h2 id="time-integration">8. Steady, grid-sequenced and physical-time drivers</h2>
+<p>The fastest meridional signal sets the acoustic travel-time scale:</p>
+<div class="math-block">$$
+\Delta t=\mathrm{CFL}\min_i\frac{\Delta m_i}{|v_{m,i}|+a_i}. \tag{67}
+$$</div>
+<p>A stationary acoustic characteristic $v_m-a=0$ does not make this denominator vanish. Large implicit pseudo-time CFL values are possible, but linear stability does not prove Newton convergence, admissibility or temporal accuracy.</p>
+<h3 id="steady-controller">8.1 Steady pseudo-time</h3>
+<p>The study starts at CFL 0.2, multiplies it by 1.2 after each accepted step, halves it after failure, caps it at $10^6$ and permits 12 retries. It calls the production timestep and original spatial/BC/balance monitors. Accepted/rejected attempts, actual CFL and inner work are retained. These settings are distinct from production defaults and are not physical-time accuracy recommendations.</p>
+<h3 id="grid-sequence">8.2 Coarse-to-fine initialization</h3>
+<p>The hierarchy has 50, 100, 200 and 400 physical cells, separately sequenced for constant and MUSCL. A converged coarse primitive field is transferred by bounded linear interpolation of $(p,v_m,\ell,h)$ in arclength. Independent boundary traces are transferred as guesses, not reprojected onto BCs; the target Newton solve enforces its coupled rows. CFL/controller history is reset at every level.</p>
+<p>This is grid sequencing, not nonlinear FAS or a conservative physical-time remap. The monitored campaign resets each equation's initial residual on every mesh and requires nine orders of reduction together with the absolute safeguards described below. The earlier archived campaign used a single $10^{-8}$ spatial/BC/balance target. The coarsest state is a uniform cold guess. Analytical profiles assess fields and select boundary data, never seed the sequence. Stage boundaries remain visible when histories from different meshes are combined.</p>
+<p>If either reconstruction fails on a mesh, both reconstructions on the next mesh restart from uniform cold physical guesses, with the failed stage's identity and hash recorded. Failures are not hidden or transferred as converged solutions. The configured stagnation check exits as a failure after 64 bitwise-identical accepted states at the maximum CFL: with unchanged state, timestep and deterministic operators, further identical attempts cannot improve the target. This changes failure detection, not the equations, tolerances or accepted trajectory before stagnation.</p>
+<h3 id="physical-time">8.3 Physical time</h3>
+<p><code>advance</code> uses the same backward-Euler residual with physical time, capping the last timestep at the requested remainder. Initial traces must satisfy algebraic BCs, and accepted steps preserve the selected regime. With total content $\mathbf Q=\sum_i\mathbf Q_i$, the callback permits an independent budget:</p>
+<div class="math-block">$$
+\begin{aligned}
+\mathbf Q_{\rm final}-\mathbf Q_{\rm initial}
++\sum_n\Delta t_n\bigg(
+\widehat{\mathbf F}_{\rm out}^{n+1}
+-\widehat{\mathbf F}_{\rm in}^{n+1}
+-\sum_i\mathbf S_i^{n+1}\bigg)=\mathbf0 .
+\end{aligned} \tag{68}
+$$</div>
+<p>This storage budget differs from a steady residual. Backward Euler is first order in time; fixed-CFL mesh refinement changes space and time together and does not independently establish temporal order.</p>
+
+<h3 id="equation-monitoring">8.4 Equation residuals and engineering monitors</h3>
+<p>The new steady monitor takes the original signed integrated spatial residual in each physical cell. It does not alter the residual or Jacobian solved by Newton. With fixed physical scales, define</p>
+<div class="math-block">$$
+z_{i,k}=
+\frac{L}{a_*}\frac{r_{i,k}}{V_i U_{v,*,k}},
+\qquad w_i=\frac{V_i}{\sum_jV_j}. \tag{68a}
+$$</div>
+<p>Each of the four transport equations has its own volume-weighted norm. Mean absolute and maximum values are retained as diagnostics; RMS is the default stopping norm:</p>
+<div class="math-block">$$
+R_{1,k}=\sum_iw_i|z_{i,k}|,
+\qquad R_{2,k}=\sqrt{\sum_iw_i z_{i,k}^2},
+\qquad R_{\infty,k}=\max_i|z_{i,k}|. \tag{68b}
+$$</div>
+<p>The initial state is sampled before the first update, at accepted-update index zero. For an equation whose initial norm exceeds the configured roundoff threshold, use</p>
+<div class="math-block">$$
+\widehat R_k^{(n)}=\frac{R_k^{(n)}}{R_k^{(0)}},
+\qquad D_k^{(n)}=-\log_{10}\widehat R_k^{(n)}. \tag{68c}
+$$</div>
+<p>Every active equation must satisfy $\widehat R_k\leq10^{-9}$ and $R_k\leq10^{-8}$. An initially zero or roundoff-level equation uses the absolute check only; no artificial denominator is used to claim nine orders of reduction. Boundary constraints and global balances retain their separate $10^{-8}$ limits. Admissibility, finite diagnostics, selected boundary regimes and all required engineering monitors must also pass. Inner Newton tolerances and the fixed-growth CFL policy remain separate and unchanged.</p>
+<p>YAML monitor definitions select a physical quantity, a spatial reduction and an optional stationarity requirement. The verification defaults track meridional mean Cp and outlet mass flow. The latter uses the actual numerical face flux, including reconstruction; the Cp mean uses physical cell widths. Monitors are sampled only at the initial and accepted states.</p>
+<div class="math-block">$$
+\langle C_p\rangle_m=
+\frac{\sum_i\Delta m_i C_{p,i}}{\sum_i\Delta m_i},
+\qquad \dot m_{\rm out}=\widehat F_{{\rm out},1}. \tag{68d}
+$$</div>
+<p>This mean Cp is an engineering convergence quantity, distinct from the mean absolute Cp error against the analytical reference. For a monitor value $J$, a complete window of accepted states must satisfy</p>
+<div class="math-block">$$
+\max_{n-W+1\leq j\leq n}J^{(j)}
+-\min_{n-W+1\leq j\leq n}J^{(j)}
+\leq\tau_{J,\rm abs}+\tau_{J,\rm rel}J_*. \tag{68e}
+$$</div>
+<p>The positive reference $J_*$ is fixed in configuration. Stationarity adds a requirement when enabled; a stable integral cannot replace local equation convergence. Rejected attempts are recorded separately without copying previous-state residuals onto an unevaluated candidate. A fresh evaluation of the returned state verifies the final result without inserting an extra duplicate sample into the monitor window.</p>
+
+<h2 id="geometry-details">9. Geometry and wall-source details</h2>
+<h3 id="geometry-midline-height">9.1 Midline, normal height and channel views</h3>
+<p>The host geometry uses a NURBSpy midline $\mathbf C(\xi)=(x(\xi),r(\xi))$ and a positive scalar height spline in normalized arclength $\sigma=m/L$:</p>
+<div class="math-block">$$
+m(\xi)=\int_0^\xi\|\mathbf C_\xi(\zeta)\|\,d\zeta,\qquad
+A'=2\pi(r'b+rb'). \tag{69}
+$$</div>
+<p>Derivatives use $d/dm=\|\mathbf C_\xi\|^{-1}d/d\xi$ and $b'=b_\sigma/L$. Geometry satisfies $(x')^2+(r')^2=1$. Radial inflow has $r'&lt;0$ while forward $v_m$ remains positive. Radial, conical and circular-arc channels share one metric builder. Controlled host arclength inversion/volume quadrature does not provide geometry-shape AD or global wall self-intersection detection.</p>
+<p>With normal $\mathbf n=(-r',x')$, walls are $\mathbf C\pm b\mathbf n/2$. The meridional view preserves equal axial/radial scales. Frontal and 3D views show the same annulus and representative directions; their midgap paths use</p>
+<div class="math-block">$$
+\theta(m)=\theta_0+\int_0^m
+\frac{v_\theta(\mu)}{r(\mu)v_m(\mu)}\,d\mu,
+\qquad (X,Y,Z)=(x,r\cos\theta,r\sin\theta). \tag{70}
+$$</div>
+<p>These are kinematic paths from a one-dimensional velocity field, not cross-gap profiles. Nonpositive meridional velocity is flagged rather than hidden by a denominator floor.</p>
+<h3 id="wall-source-details">9.2 Shear-stress placeholder</h3>
+<p><code>shear_stress_wall(W, r, fluid, prescribed=...)</code> returns shear magnitude in Pa. It broadcasts prescribed data and defaults to zero. Factory <code>tau_w</code> is a finite nonnegative scalar or one value per physical cell, captured at construction; rebuild the solver to change it. State/radius/fluid arguments reserve the location for a future constitutive law.</p>
+<p>A future law might use $\tau_w=C_f\rho v^2/2$ with a stated Fanning convention. Reynolds number, viscosity, roughness, transition and friction-factor correlations are not supplied by the placeholder. Drag opposes $(v_m,v_\theta)$ and torque is radius times tangential drag. At exactly zero speed the force is defined as zero with finite branch-selected AD. A prescribed nonzero constant shear magnitude is not a globally smooth physical law at rest; a predictive friction law would normally vanish with speed.</p>
+<p>The geometric centrifugal term and prescribed shear do not constitute empirical diffusion/curvature losses, blockage or separation models.</p>
+<h3 id="heat-flux-details">9.3 Heat-flux placeholder</h3>
+<p><code>heat_flux_wall(W, r, fluid, prescribed=...)</code> returns W/m², positive into the fluid. It broadcasts a fixed signed scalar/per-cell <code>q_w</code> and defaults to zero. It supplies no wall-temperature solve, heat-transfer coefficient correlation or conjugate heat-transfer model.</p>
+<p>Steady energy gives $\rho v_mH'=2q_w/b$. Thus zero heat preserves total enthalpy even with stationary-wall drag. Entropy obeys Equation 23; with wall temperature $T_w$, the irreversible transfer contribution is proportional to $q_w(1/T-1/T_w)$.</p>
+
+<h2 id="5-steady-invariants-and-radial-flow-interpretation">10. Zero-wall invariants and radial interpretation</h2>
+<p>Analytical diffuser verification sets both wall inputs to zero. Along a smooth forward steady branch,</p>
+<div class="math-block">$$
+\dot m=A\rho v_m=\mathrm{constant},\qquad
+\ell=\mathrm{constant},\qquad H=\mathrm{constant},\qquad s=\mathrm{constant}. \tag{71}
+$$</div>
+<p>Meridional momentum and these invariants give</p>
+<div class="math-block">$$
+(M_m^2-1)\frac{v_m'}{v_m}
+=\frac{A'}A+M_\theta^2\frac{r'}r. \tag{72}
+$$</div>
+<p>A regular internal sonic crossing requires the right side to vanish at $M_m=1$ and a compatible branch. For constant height it is $(1+M_\theta^2)r'/r$. Monotone constant-height radial inflow can approach a sonic exit but cannot cross internally smoothly. An outward meridionally subsonic branch decelerates even if total Mach exceeds one; an outward meridionally supersonic branch accelerates. A shock followed by subsonic diffusion is a separate family.</p>
+<p>Across a stationary shock at one radius/area, bounded distributed wall sources do not modify the infinitesimal jump conditions. Mass flux, meridional momentum flux, $H$ and $\ell$ are continuous, with a compressive entropy rise. Tangential velocity is continuous at that radius. Fixed inlet angle need not impose the same inlet $\ell$ across different backpressures.</p>
+
+<h2 id="verification-and-limits">11. Independent verification and interpretation</h2>
+<p>The reference imports no numerical flux, residual or BC implementation. It integrates angular conserved densities independently:</p>
+<div class="math-block">$$
+\overline{\mathbf U}_{v,i}^{\,\mathrm{exact}}
+=\frac1{V_i}\int_{m_{i-1/2}}^{m_{i+1/2}}
+\mathbf U_v^{\,\mathrm{exact}}(m)A(m)\,dm. \tag{73}
+$$</div>
+<p>Quadrature splits at knots and shocks and treats sonic endpoints separately. Plotted reference fields are primitives equivalent to the four conservative averages at the cell radius, not point samples or averages of primitives. Conservative errors use these projected densities and fixed $\mathbf U_{v,*}$ scales.</p>
+<div class="math-block">$$
+C_p=\frac{p-p_{\rm in}}{p_0-p_{\rm in}}. \tag{74}
+$$</div>
+<p>Each numerical coefficient uses its own computed inlet pressure; the analytical one uses its analytical inlet pressure. For each physical cell, let $\Delta m_i$ denote its meridional width. The smooth-case Cp criterion is the domain mean absolute difference:</p>
+<div class="math-block">$$
+E_{C_p}=\frac{\sum_i\Delta m_i
+|C_{p,i}-C_{p,i}^{\mathrm{ref}}|}{\sum_i\Delta m_i}
+\leq0.01. \tag{75}
+$$</div>
+<p>This midpoint quadrature uses physical lengths rather than volumes and prevents cancellation of positive and negative differences. Maximum Cp error remains supplementary. All four volume-weighted normalized conservative L1 errors must remain below $10^{-3}$. Shock locations may deviate by at most two cells; that target does not certify the entire shock profile.</p>
+<p>The results page compares analytical, constant and MUSCL lines for pressure, density, flow angle, meridional Mach, tangential Mach and Mach magnitude, without markers. Flow angle is $\alpha=\operatorname{atan2}(v_\theta,v_m)$. Residual/CFL histories and four conservation balances retain their distinct definitions. The final overview table preserves all failed targets.</p>
+<p>Root convergence, analytical accuracy, admissibility, conservation and branch selection are separate outcomes; a smaller residual need not reduce analytical error. Sonic-exit discrepancies, shock-cell artifacts and finite nonlinear robustness remain limitations. Perfect-gas verification does not validate all real-fluid applications. Reverse flow, automatic boundary changes, nonclassical two-phase waves, empirical loss closures and chemistry remain outside scope.</p>
+<p>Nonzero prescribed shear/heat checks separately assess source signs, kinetic-to-internal conversion and mass/torque/energy budgets. Native success is not their sole acceptance criterion. Settings, source/environment fingerprints, actual final fields and accepted/rejected histories are downloadable. Presentation rebuilds use saved data without simulations.</p>
+
+<h2 id="appendix-a-perfect-gas-analytical-reference-only">Appendix A. Perfect-gas verification reference</h2>
+<p>Only the independent reference uses constant $\gamma,R$ and enthalpy datum $h_{\mathrm{shift}}$:</p>
+<div class="math-block">$$
+p=\rho RT,\qquad c_p=\frac{\gamma R}{\gamma-1},\qquad
+h=c_pT+h_{\mathrm{shift}},\qquad a^2=\gamma RT. \tag{A1}
+$$</div>
+<p>With zero wall inputs, $K=p/\rho^\gamma$, $\dot m$, $\ell$ and $H$ are constant on each smooth branch. The bracketed density root satisfies</p>
+<div class="math-block">$$
+\frac{\gamma K}{\gamma-1}\rho^{\gamma-1}
++\frac12\left(\frac{\dot m}{A\rho}\right)^2
+=H-h_{\mathrm{shift}}-\frac12\left(\frac{\ell}{r}\right)^2. \tag{A2}
+$$</div>
+<p>The residual minimum is at $\rho_c=[\dot m^2/(\gamma KA^2)]^{1/(\gamma+1)}$. High-density and low-density roots are meridionally subsonic and supersonic respectively. A strict bracket raises when the requested branch does not exist. Inlet Mach selects reference invariants, not an extra numerical BC.</p>
 <div class="math-block">$$
 \frac{\rho_2}{\rho_1}=\frac{(\gamma+1)M_{m1}^2}{(\gamma-1)M_{m1}^2+2},\qquad
 \frac{p_2}{p_1}=1+\frac{2\gamma}{\gamma+1}(M_{m1}^2-1). \tag{A3}
 $$</div>
-
-<p>It retains <span class="math-inline">$\dot m,\ell,h_0$</span>, adopts the higher downstream entropy through a new <span class="math-inline">$K$</span>, and follows the downstream subsonic branch. The same-radius tangential velocity is continuous. Total Mach is not substituted into these normal-shock ratios.</p>
+<p>The shock reference retains $\dot m,\ell,H$, adopts downstream entropy through a new $K$, and follows the subsonic branch. Total Mach is not substituted into these ratios.</p>
 <h2 id="appendix-b-implementation-map">Appendix B. Implementation map</h2>
-<p>These links are local implementation provenance; the mathematical chapter does not require another derivation to be read first.</p>
-<table>
-<thead>
-<tr>
-<th>Operation</th>
-<th>Canonical implementation</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>NURBS metrics, arclength map, quadrature volumes</td>
-<td><code title="Repository provenance: ../../../src/nozzle_hyperbolic/geometry/annular.py">geometry/annular.py</code></td>
-</tr>
-<tr>
-<td>HP state access, conservative maps, admissibility</td>
-<td><code title="Repository provenance: ../../../src/nozzle_hyperbolic/models/euler_annular/state.py">euler_annular/state.py</code></td>
-</tr>
-<tr>
-<td>Physical flux, projectors and face geometry transform</td>
-<td><code title="Repository provenance: ../../../src/nozzle_hyperbolic/models/euler_annular/equations.py">equations.py</code>, <code title="Repository provenance: ../../../src/nozzle_hyperbolic/models/euler_annular/flux_jax.py">flux_jax.py</code></td>
-</tr>
-<tr>
-<td>Shared characteristic contraction and slope limiter</td>
-<td><code title="Repository provenance: ../../../src/nozzle_hyperbolic/numerics/characteristic.py">characteristic.py</code>, <code title="Repository provenance: ../../../src/nozzle_hyperbolic/numerics/reconstruction.py">reconstruction.py</code></td>
-</tr>
-<tr>
-<td>Integrated sources and simultaneous physical BCs</td>
-<td><code title="Repository provenance: ../../../src/nozzle_hyperbolic/models/euler_annular/sources.py">sources.py</code>, <code title="Repository provenance: ../../../src/nozzle_hyperbolic/models/euler_annular/boundaries.py">boundaries.py</code></td>
-</tr>
-<tr>
-<td>Model reconstruction, factory, drivers and diagnostics</td>
-<td><code title="Repository provenance: ../../../src/nozzle_hyperbolic/models/euler_annular/fvm.py">euler_annular/fvm.py</code></td>
-</tr>
-<tr>
-<td>Shared residual assembly, colored AD and banded solves</td>
-<td><code title="Repository provenance: ../../../src/nozzle_hyperbolic/solvers/finite_volume.py">finite_volume.py</code>, <code title="Repository provenance: ../../../src/nozzle_hyperbolic/numerics/jacobians.py">jacobians.py</code>, <code title="Repository provenance: ../../../src/nozzle_hyperbolic/numerics/linear.py">linear.py</code></td>
-</tr>
-<tr>
-<td>Shared admissible Armijo Newton algorithm</td>
-<td><code title="Repository provenance: ../../../src/nozzle_hyperbolic/solvers/time_marching/implicit.py">implicit.py</code></td>
-</tr>
-<tr>
-<td>Configured host-fluid callback adapter</td>
-<td><code title="Repository provenance: ../../../src/nozzle_hyperbolic/thermodynamics/adapters.py">adapters.py</code></td>
-</tr>
-<tr>
-<td>Independent steady perfect-gas reference/projection</td>
-<td><code title="Repository provenance: ../../../src/nozzle_hyperbolic/models/euler_annular/analytical/perfect_gas.py">analytical/perfect_gas.py</code></td>
-</tr>
-<tr>
-<td>Saved-state measurements, figures and open accuracy accuracy criteria</td>
-<td><a href="#overview">VERIFICATION_REPORT.md</a></td>
-</tr>
-</tbody>
-</table>
+<div class="table-wrap"><table><thead><tr><th>Operation</th><th>Canonical implementation</th></tr></thead><tbody>
+<tr><td>NURBS metrics and volumes</td><td><code>geometry/annular.py</code></td></tr>
+<tr><td>HP states, conservative maps and admissibility</td><td><code>models/euler_annular/state.py</code></td></tr>
+<tr><td>Physical flux and projectors</td><td><code>equations.py</code>, <code>flux_jax.py</code></td></tr>
+<tr><td>Prescribed wall placeholders</td><td><code>models/euler_annular/closures/wall.py</code></td></tr>
+<tr><td>Geometry, torque and energy sources</td><td><code>models/euler_annular/sources.py</code></td></tr>
+<tr><td>Coupled BCs</td><td><code>models/euler_annular/boundaries.py</code></td></tr>
+<tr><td>Factory, reconstruction and drivers</td><td><code>models/euler_annular/fvm.py</code></td></tr>
+<tr><td>Shared assembly, colored AD and banded solve</td><td><code>solvers/finite_volume.py</code>, <code>numerics/jacobians.py</code>, <code>numerics/linear.py</code></td></tr>
+<tr><td>Shared admissible Newton solve</td><td><code>solvers/time_marching/implicit.py</code></td></tr>
+<tr><td>Independent reference/projection</td><td><code>models/euler_annular/analytical/perfect_gas.py</code></td></tr>
+</tbody></table></div>

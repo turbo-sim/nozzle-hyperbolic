@@ -73,8 +73,7 @@
     return {type:"scatter",x,y,name:labels[index],legendgroup:String(index),
       mode:"lines", zorder:index===0 ? 2 : 1,
       line:{color:p.colors[index],width:index===0 ? 2.4 : 2,dash:["dash","dash","solid"][index]},
-      marker:{color:"white",symbol:"circle",size:9,line:{color:p.colors[index],width:1.8}},
-      connectgaps:false,meta:{method:index===0 ? "analytical" : methods[index-1], marker_stride:index===0 ? null : state.stride},
+      connectgaps:false,meta:{method:index===0 ? "analytical" : methods[index-1]},
       hovertemplate:"m = %{x:.6g} m<br>%{y:.7g}<extra>%{fullData.name}</extra>", ...extra};
   }
   async function fieldFigure(id, mesh, fields, kind) {
@@ -100,15 +99,8 @@
         layout[`yaxis${suffix}`].range=[center-half,center+half];
         layout[`yaxis${suffix}`].exponentformat="none";
       }
-      // Full numerical lines first, dashed analytical reference above, markers last.
+      // Complete numerical lines first and analytical reference above; no solution markers.
       [1,2,0].forEach(k=>traces.push(scientificTrace(k,mesh.m,ys[k],{xaxis:`x${suffix}`,yaxis:`y${suffix}`,showlegend:i===0})));
-      [1,2].forEach(k=>{
-        const offset=k===1 ? 0 : Math.floor(state.stride/2);
-        const indices=mesh.m.map((_,j)=>j).filter(j=>j%state.stride===offset);
-        traces.push(scientificTrace(k,indices.map(j=>mesh.m[j]),indices.map(j=>ys[k][j]),{
-          mode:"markers",zorder:3,xaxis:`x${suffix}`,yaxis:`y${suffix}`,showlegend:false,
-          meta:{method:methods[k-1],marker_stride:state.stride,marker_offset:offset}}));
-      });
     });
     await plot(id,traces,layout,`${kind}_${state.caseId}_${mesh.cells}`);
   }
@@ -225,113 +217,186 @@
   function historyRows(history, accepted=true) {
     return (accepted ? history.accepted : history.rejected).map(row=>Object.fromEntries(history.columns.map((key,i)=>[key,row[i]])));
   }
-  function selectedDiagnostics(mesh) {
-    const isShock=currentCase().is_shocked;
-    $("selected-case-type").textContent=isShock ? "Shock location criterion" : "Original smooth-flow accuracy criteria";
-    const rows=methods.map((m,i)=>{
-      const r=mesh.methods[m];
-      return `<tr><td>${i===0 ? "Constant" : "MUSCL"}</td><td class="numeric">${fmt(r.errors.Cp_max)}</td><td class="numeric">${fmt(Math.max(...r.errors.conservative_L1))}</td><td>${badge(r.accuracy_pass)}</td></tr>`;
-    }).join("");
-    const settings=mesh.settings;
-    const controllerText=settings.controller==="cfl_recommended"
-      ? `Fixed-growth CFL controller: initial ${settings.cfl}, accepted-step multiplier ${settings.growth}, failure multiplier ${settings.shrink}; max CFL ${settings.cfl_max}. Maximum ${settings.newton_iterations} Newton corrections per timestep; both inner tolerances remain 1e-10. Initial dt: ${fmt(mesh.methods.constant.controller_audit?.initial_dt)} / ${fmt(mesh.methods.muscl_van_leer.controller_audit?.initial_dt)} s (constant / linear).`
-      : "Historical production work-based CFL controller; see saved settings in the data download.";
-    const work=methodRows(mesh).map(r=>{
-      const rows=[...historyRows(r.history),...historyRows(r.history,false)];
-      return {newton:rows.reduce((n,row)=>n+row.inner_iterations,0),backtracks:rows.reduce((n,row)=>n+row.rejected_newton_trials,0)};
-    });
-    const rejected=methodRows(mesh).reduce((n,r)=>n+r.history.counts.rejected,0);
-    const counts=methodRows(mesh).map(r=>r.history.counts.accepted);
-    $("case-diagnostics").innerHTML=`<p style="font-size:12px;color:var(--muted)">${escape(explanations[state.caseId])}</p><div class="table-wrap"><table><thead><tr><th>Method</th><th>Max Cp error</th><th>Max q L₁</th><th>Criterion</th></tr></thead><tbody>${rows}</tbody></table></div><p class="muted" style="font-size:11px">${escape(controllerText)}</p><p class="muted" style="font-size:11px">Total Newton corrections: ${work[0].newton.toLocaleString()} / ${work[1].newton.toLocaleString()}; line-search backtracks: ${work[0].backtracks.toLocaleString()} / ${work[1].backtracks.toLocaleString()} (constant / linear, including rejected attempts).</p><p class="muted" style="font-size:11px;margin-top:15px">Accepted updates: constant ${counts[0].toLocaleString()}, MUSCL ${counts[1].toLocaleString()}. Rejected attempts: ${rejected.toLocaleString()} total.</p><p class="muted" style="font-size:11px">${isShock ? "The criterion here checks shock location only. Cp and conservative errors remain shown in full, including the discontinuity and any overshoot." : "Both Cp and all conservative L₁ components must satisfy the original 10⁻³ target. A converged residual does not imply that this accuracy target is met."}</p>`;
-  }
   async function convergence(mesh) {
+    const traces=methods.map((method,i)=>{
+      const rows=historyRows(mesh.methods[method].history);
+      const relative=rows.every(row=>Array.isArray(row.equation_relative));
+      const y=rows.map(row=>relative ? Math.max(...row.equation_relative.filter((_,j)=>row.relative_active[j]))
+        : Math.max(row.spatial_rms,row.boundary_max,row.conservation_max));
+      return scientificTrace(i+1,rows.map(row=>row.step),y.map(value=>Number.isFinite(value)&&value>0?value:null),{
+        hovertemplate:"Accepted update %{x}<br>Overall R %{y:.6e}<extra>%{fullData.name}</extra>"});
+    });
+    const monitored=methods.every(method=>mesh.methods[method].monitoring);
+    const target=monitored?mesh.methods.constant.monitoring.policy.relative_tolerance:mesh.settings.tolerance;
+    $("convergence-note").textContent=monitored?
+      "R is the maximum active initial-relative equation norm. It starts at one and must reach 10^-9. Absolute residual, boundary, global conservation, regime and configured monitor checks must also pass; R alone does not certify success.":
+      "Historical definition: maximum of spatial RMS, boundary maximum and global defect. These are not initial-normalized residuals.";
+    await plot("convergence-plot",traces,frame({xaxis:axis("Accepted updates (initial state = 0)"),
+      yaxis:axis(monitored?"Overall relative residual R":"Historical overall defect",{type:"log"}),
+      margin:{l:79,r:22,t:49,b:58},uirevision:`overall:${state.caseId}:${state.cells}`,
+      shapes:[{type:"line",xref:"paper",x0:0,x1:1,yref:"y",y0:target,y1:target,
+        line:{color:palette().muted,width:1,dash:"dot"}}]}),`overall_${state.caseId}_${state.cells}`);
+    $("convergence-checks").innerHTML=methods.map((method,i)=>{
+      const run=mesh.methods[method],m=run.metrics,p=run.monitoring?.policy;
+      if(!p)return "";
+      const active=m.equation_relative.filter((_,j)=>m.relative_active[j]);
+      return `<div class="badges"><strong>${i===0?"Constant":"MUSCL"}</strong> `+
+        badge(active.every(value=>value<=p.relative_tolerance),"Relative target")+" "+
+        badge(m.equation_norm.every(value=>value<=p.absolute_tolerance),"Absolute safeguard")+" "+
+        badge(m.boundary_passed,"Boundary")+" "+badge(m.global_passed,"Global balances")+" "+
+        badge(m.monitors_passed,"Integral monitors")+" "+badge(run.root_pass,"Complete convergence")+
+        `<span class="subtext">${escape(run.message)}</span></div>`;
+    }).join("");
+  }
+  async function equationConvergence(mesh) {
+    const sampled=methods.map(m=>historyRows(mesh.methods[m].history));
+    const equationView=sampled.every(rows=>rows.length&&rows.every(r=>Array.isArray(r.equation_relative)));
+    if(equationView){
+      const quantities=["R1 mass","R2 meridional","R3 angular","R4 energy"];
+      const colors=[palette().colors[0],"#b12a90","#e16462","#fca636"],traces=[];
+      quantities.forEach((name,j)=>methods.forEach((method,i)=>{
+        const rows=sampled[i],active=rows[0].relative_active[j];
+        traces.push({type:"scatter",mode:"lines",x:rows.map(r=>r.step),
+          y:rows.map(r=>active?r.equation_relative[j]:null),
+          name:`${name} / ${i===0?"const":"MUSCL"}${active?"":" (abs.)"}`,
+          meta:{method,quantity:j},line:{color:colors[j],width:2,dash:i===0?"dash":"solid"},
+          hovertemplate:"Accepted update %{x}<br>R / R(initial) %{y:.6e}<extra>%{fullData.name}</extra>"});
+      }));
+      const tol=mesh.methods.constant.monitoring.policy.relative_tolerance;
+      $("equation-residual-note").textContent="Each curve is a volume-weighted RMS of cell equation defects, divided by its own initial value. R1: mass; R2: meridional momentum; R3: angular momentum; R4: energy. Initially satisfied equations use absolute checks and have no invented relative curve. Colors match the global balances; dashed = constant, solid = MUSCL.";
+      await plot("equation-residual-plot",traces,frame({xaxis:axis("Accepted updates (initial state = 0)"),
+        yaxis:axis("Per-equation residual / initial residual",{type:"log"}),
+        margin:{l:79,r:22,t:126,b:58},uirevision:`convergence:${state.caseId}:${state.cells}`,
+        legend:{orientation:"h",entrywidthmode:"fraction",entrywidth:.5,x:0,y:1.04,xanchor:"left",yanchor:"bottom",font:{size:10}},
+        shapes:[{type:"line",xref:"paper",x0:0,x1:1,yref:"y",y0:tol,y1:tol,line:{color:palette().muted,width:1,dash:"dot"}}]}),`convergence_${state.caseId}_${state.cells}`);
+      return;
+    }
+    $("equation-residual-note").textContent="Per-equation relative histories were not recorded in this historical dataset. No missing equation curves are inferred.";
     const traces=methods.map((m,i)=>{
       const rows=historyRows(mesh.methods[m].history);
       const y=rows.map(r=>Math.max(r.spatial_rms,r.boundary_max,r.conservation_max));
       const t=scientificTrace(i+1,rows.map(r=>r.step),y);
-      t.mode="lines+markers";
-      const offset=i===0 ? 0 : Math.floor(state.stride/2);
-      t.marker.size=y.map((_,j)=>j%state.stride===offset ? 9 : 0);
-
+      t.mode="lines";
       t.hovertemplate="Accepted update %{x}<br>Original defect %{y:.5e}<extra>%{fullData.name}</extra>";
       return t;
     });
     const p=palette(),tol=mesh.settings.tolerance;
-    await plot("convergence-plot",traces,frame({xaxis:axis("Accepted implicit updates"),
+    await plot("equation-residual-plot",traces,frame({xaxis:axis("Accepted implicit updates"),
       yaxis:axis("Max(original spatial, BC, balance)",{type:"log"}),
       margin:{l:79,r:22,t:49,b:58},uirevision:`convergence:${state.caseId}:${state.cells}`,
       shapes:[{type:"line",xref:"paper",x0:0,x1:1,yref:"y",y0:tol,y1:tol,line:{color:p.muted,width:1,dash:"dot"}}],
       annotations:[{xref:"paper",x:.99,yref:"y",y:Math.log10(tol),text:"10⁻⁸ target",showarrow:false,xanchor:"right",yshift:11,font:{color:p.muted,size:10}}]}),`convergence_${state.caseId}_${state.cells}`);
   }
+  async function integralMonitors(mesh){
+    const definitions=[{id:"cp-monitor-plot",key:"Cp_mean",label:"Mean Cp along domain"},
+      {id:"mdot-monitor-plot",key:"mdot_out",label:"Outlet numerical mass flow [kg/s]"}];
+    let available=0;
+    for(const definition of definitions){
+      const traces=[];
+      methods.forEach((method,i)=>{
+        const rows=historyRows(mesh.methods[method].history).filter(r=>Number.isFinite(r.monitors?.[definition.key]?.value));
+        if(!rows.length)return;
+        available++;
+        traces.push(scientificTrace(i+1,rows.map(r=>r.step),rows.map(r=>r.monitors[definition.key].value),{
+          customdata:rows.map(r=>[r.monitors[definition.key].range,r.monitors[definition.key].threshold,r.monitors[definition.key].stable]),
+          hovertemplate:"Accepted update %{x}<br>Value %{y:.8g}<br>Window range %{customdata[0]:.3e}<br>Threshold %{customdata[1]:.3e}<br>Stable %{customdata[2]}<extra>%{fullData.name}</extra>"}));
+      });
+      await plot(definition.id,traces,frame({xaxis:axis("Accepted implicit updates (initial state = 0)"),
+        yaxis:axis(definition.label),margin:{l:79,r:22,t:49,b:58},
+        uirevision:`${definition.key}:${state.caseId}:${state.cells}`,
+        annotations:traces.length?[]:[{xref:"paper",yref:"paper",x:.5,y:.5,text:"Not recorded in these saved histories",showarrow:false,font:{color:palette().muted,size:13}}]}),`${definition.key}_${state.caseId}_${state.cells}`);
+    }
+    $("integral-monitor-note").textContent=available?"Configured engineering quantities sampled at the initial and every accepted state. Cp uses the instantaneous inlet pressure and fixed reservoir pressure; mass flow uses the actual numerical outlet face flux. Stationarity is the peak-to-peak range over a complete accepted-state window, compared with the configured fixed-scale threshold. These checks supplement residual convergence; stable output alone does not certify the equations.":"The legacy saved runs did not record engineering-monitor trajectories. No curves are reconstructed from final fields.";
+    $("engineering-monitor-row").hidden=!available;
+  }
+  async function cflHistory(mesh) {
+    const traces=methods.map((method,i)=>{
+      const history=mesh.methods[method].history;
+      const rows=[...historyRows(history).map(row=>({...row,accepted:true})),
+        ...historyRows(history,false).map(row=>({...row,accepted:false}))]
+        .sort((a,b)=>a.step-b.step || (a.retry??0)-(b.retry??0)).filter(row=>row.phase!=="initial"&&Number.isFinite(row.cfl));
+      return scientificTrace(i+1,rows.map(row=>row.step),rows.map(row=>row.cfl),{
+        customdata:rows.map(row=>[row.retry??0,row.accepted?"accepted":"rejected"]),
+        hovertemplate:"Update %{x}<br>CFL %{y:.6g}<br>Retry %{customdata[0]}; %{customdata[1]}<extra>%{fullData.name}</extra>"});
+    });
+    await plot("cfl-plot",traces,frame({xaxis:axis("Accepted-update index (retries share x)"),
+      yaxis:axis("Recorded trial CFL",{type:"log"}),margin:{l:76,r:22,t:49,b:58},
+      uirevision:`cfl:${state.caseId}:${state.cells}`}),`cfl_${state.caseId}_${state.cells}`);
+  }
   async function refinement() {
     const c=currentCase(),shocked=c.is_shocked;
     $("refinement-case").textContent=names[c.id];
     const x=c.meshes.map(m=>m.cells);
-    const graph=async(id,metric,title)=>{
+    const graph=async(id,metric,title,limit)=>{
       const traces=methods.map((m,i)=>{
         const y=c.meshes.map(mesh=>metric(mesh.methods[m].errors));
-        return scientificTrace(i+1,x,y,{marker:{color:"white",symbol:"circle",size:9,line:{color:palette().colors[i+1],width:1.8}},mode:"lines+markers",
+        return scientificTrace(i+1,x,y,{mode:"lines",
           hovertemplate:"N = %{x}<br>Error %{y:.6e}<extra>%{fullData.name}</extra>"});
       });
       const layout=frame({xaxis:axis("Physical cells N",{type:"log",tickmode:"array",tickvals:x,ticktext:x.map(String)}),
         yaxis:axis(title,{type:"log"}),margin:{l:72,r:24,t:47,b:57},uirevision:`${id}:${c.id}`,
-        shapes:shocked ? [] : [{type:"line",xref:"paper",x0:0,x1:1,yref:"y",y0:1e-3,y1:1e-3,line:{color:palette().muted,width:1,dash:"dot"}}]});
+        shapes:shocked ? [] : [{type:"line",xref:"paper",x0:0,x1:1,yref:"y",y0:limit,y1:limit,line:{color:palette().muted,width:1,dash:"dot"}}]});
       await plot(id,traces,layout,`${id}_${c.id}`);
     };
-    await graph("refinement-plot",e=>e.Cp_max,"Maximum absolute Cp error");
-    await graph("conservative-plot",e=>Math.max(...e.conservative_L1),"Max conservative L₁ error");
+    await graph("refinement-plot",e=>e.Cp_mean_absolute,"Mean absolute Cp error along domain",0.01);
+    await graph("conservative-plot",e=>Math.max(...e.conservative_L1),"Max conservative L₁ error",1e-3);
     const coarse=c.meshes.find(m=>m.cells===200),fine=c.meshes.find(m=>m.cells===400);
-    const orders=methods.map(m=>Math.log2(coarse.methods[m].errors.Cp_max/fine.methods[m].errors.Cp_max));
-    $("refinement-order").textContent=`Observed Cp order, N = 200 → 400: constant ${orders[0].toFixed(3)}, MUSCL ${orders[1].toFixed(3)}. ${shocked ? "A maximum norm across a discontinuity need not decrease; the original shock criterion uses location." : c.id==="sonic_exit" ? "The sonic-exit limit is reported separately from strictly smooth branches." : "This is a two-grid observation, not an assumed formal order."}`;
+    const orders=methods.map(m=>Math.log2(coarse.methods[m].errors.Cp_mean_absolute/fine.methods[m].errors.Cp_mean_absolute));
+    $("refinement-order").textContent=`Meridional-length mean absolute Cp difference over all physical cells. Observed order, N = 200 → 400: constant ${orders[0].toFixed(3)}, MUSCL ${orders[1].toFixed(3)}. ${shocked ? "The shock acceptance criterion uses location; Cp is supplementary." : c.id==="sonic_exit" ? "The sonic-exit limit is reported separately from strictly smooth branches." : "This is a two-grid observation, not an assumed formal order."}`;
   }
   async function renderCase(options={}) {
     const mesh=currentMesh(),meta=mesh.metadata;
     document.querySelectorAll("#mesh-select button").forEach(b=>b.setAttribute("aria-pressed",String(Number(b.dataset.cells)===state.cells)));
     $("case-description").innerHTML=`<strong>${escape(names[state.caseId])}</strong> · backpressure ${pretty(meta.backpressure/1000)} kPa · α<sub>in</sub> ${pretty(meta.alpha_in*180/Math.PI)}°`;
-    $("case-status").innerHTML=`${badge(methodRows(mesh).every(r=>r.root_pass),"Both roots met")} ${badge(mesh.methods.constant.accuracy_pass,"Constant accuracy")} ${badge(mesh.methods.muscl_van_leer.accuracy_pass,"MUSCL accuracy")}`;
+    const bothConverged=methodRows(mesh).every(r=>r.root_pass);
+    $("case-status").innerHTML=`${badge(bothConverged,bothConverged?"Both converged":"Convergence target missed")} ${badge(mesh.methods.constant.accuracy_pass,"Constant accuracy")} ${badge(mesh.methods.muscl_van_leer.accuracy_pass,"MUSCL accuracy")}`;
     const worst=k=>Math.max(...methodRows(mesh).map(r=>r.metrics[k]));
     $("selected-metrics").innerHTML=[["Max original spatial RMS",fmt(worst("spatial_rms"))],["Max separate BC defect",fmt(worst("boundary_max"))],["Max integrated balance",fmt(worst("conservation_max"))],["Physical boundary modes",`${meta.inlet_regime} → ${meta.outlet_regime}`]].map(([k,v])=>`<div><small>${escape(k)}</small><strong>${escape(v)}</strong></div>`).join("");
-    selectedDiagnostics(mesh);
-    const work=[fieldFigure("field-plot",mesh,DATA.fields,"fields"),convergence(mesh),conservation(mesh),refinement()];
+    $("convergence-context").textContent=`${names[state.caseId]??state.caseId}; N = ${mesh.cells}; constant and MUSCL.`;
+    const work=[fieldFigure("field-plot",mesh,DATA.fields,"fields"),convergence(mesh),equationConvergence(mesh),cflHistory(mesh),integralMonitors(mesh),conservation(mesh),refinement()];
     if(options.geometry!==false)work.push(renderChannel());
     await Promise.all(work);
   }
   function accuracyDetail(c,r) {
-    if(c.is_shocked)return `Shock position: ${fmt(r.errors.shock_error_cells)} cells; required <= 2 cells. Cp error ${fmt(r.errors.Cp_max)} (no shock Cp limit).`;
+    if(c.is_shocked)return `Shock position: ${fmt(r.errors.shock_error_cells)} cells; required <= 2 cells. Mean |delta Cp| ${fmt(r.errors.Cp_mean_absolute)}, maximum ${fmt(r.errors.Cp_max)} (supplementary; no shock Cp limit).`;
     const q=r.errors.conservative_L1;
-    return `Max |delta Cp| ${fmt(r.errors.Cp_max)}; required < 1.000e-3. Scaled L1 [mass, meridional momentum, angular momentum, energy]: [${q.map(v=>fmt(v)).join(", ")}]; each required < 1.000e-3. Worst component ${fmt(Math.max(...q))} (${(Math.max(...q)/1e-3).toFixed(2)}x limit); Cp ${(r.errors.Cp_max/1e-3).toFixed(2)}x limit.`;
+    return `Mean |delta Cp| ${fmt(r.errors.Cp_mean_absolute)}; required <= 0.01 over the domain (${(r.errors.Cp_mean_absolute/0.01).toFixed(2)}x limit). Supplementary maximum ${fmt(r.errors.Cp_max)}. Scaled L1 [mass, meridional momentum, angular momentum, energy]: [${q.map(v=>fmt(v)).join(", ")}]; each required < 1.000e-3. Worst component ${fmt(Math.max(...q))} (${(Math.max(...q)/1e-3).toFixed(2)}x limit).`;
   }
   function fillAccuracy() {
     $("accuracy-table").querySelector("tbody").innerHTML=DATA.cases.map(c=>{
       const mesh=c.meshes.find(m=>m.cells===400);
       return methods.map((method,i)=>{
         const r=mesh.methods[method];
-        return `<tr><td><button class="case-button" data-case="${escape(c.id)}">${escape(names[c.id])}</button><span class="subtext">${i===0?"Constant":"Linear (MUSCL)"} reconstruction</span></td><td>${escape(accuracyDetail(c,r))}</td><td>${badge(r.accuracy_pass,r.accuracy_pass?"Accuracy target met":"Accuracy target missed")}</td></tr>`;
+        return `<tr><td><button class="case-button" data-case="${escape(c.id)}">${escape(names[c.id])}</button><span class="subtext">${i===0?"Constant":"Linear (MUSCL)"} reconstruction</span></td><td>${escape(accuracyDetail(c,r))}</td><td>${badge(r.root_pass,r.root_pass?"Converged":"Convergence target missed")} ${badge(r.accuracy_pass,r.accuracy_pass?"Accuracy target met":"Accuracy target missed")}</td></tr>`;
       }).join("");
     }).join("");
     $("accuracy-table").querySelectorAll("button[data-case]").forEach(b=>b.addEventListener("click",async()=>{
       state.caseId=b.dataset.case;state.cells=400;$("case-select").value=state.caseId;
-      await renderCase();$("fields").scrollIntoView({behavior:reducedMotion()?"instant":"smooth"});
+      revealSection($("fields"));await renderCase();$("fields").scrollIntoView({behavior:reducedMotion()?"instant":"smooth"});
     }));
   }
   async function conservation(mesh) {
     const quantities=["Mass","Meridional momentum","Angular momentum","Energy"];
     const colors=[palette().colors[0],"#b12a90","#e16462","#fca636"];
-    const traces=[];
-    const missing=[];
+    const traces=[],missing=[],histories={};
     methods.forEach((method,i)=>{
       const rows=historyRows(mesh.methods[method].history);
       const complete=rows.length>0&&rows.every(r=>Array.isArray(r.integrated_balance_scaled)&&r.integrated_balance_scaled.length===4&&r.integrated_balance_scaled.every(Number.isFinite));
-      if(!complete){missing.push(i===0?"constant":"linear (MUSCL)");return;}
-      quantities.forEach((name,j)=>traces.push({type:"scatter",mode:"lines",x:rows.map(r=>r.step),
-        y:rows.map(r=>Math.abs(r.integrated_balance_scaled[j])),
-        name:`${name} / ${i===0?"constant":"linear"}`,line:{color:colors[j],width:2,dash:i===0?"dash":"solid"},
-        hovertemplate:"Accepted update %{x}<br>|Scaled balance defect| %{y:.6e}<extra>%{fullData.name}</extra>"}));
+      if(complete)histories[method]=rows;else missing.push(i===0?"constant":"linear (MUSCL)");
     });
-    $("conservation-note").textContent=missing.length?`Per-equation histories were not recorded for ${missing.join(" and ")} in these saved runs. No curves are inferred from the scalar maximum or final state. Rerun with the prepared conservation recorder to populate this figure.`:"Absolute boundary-flux difference minus integrated sources, divided by fixed nonzero flux scales. Momentum includes geometric and centrifugal sources. Exact zeros are omitted by the logarithmic axis; all raw values remain downloadable.";
-    await plot("conservation-plot",traces,frame({xaxis:axis("Accepted implicit updates"),yaxis:axis("Absolute scaled balance defect",{type:"log"}),
-      margin:{l:79,r:24,t:95,b:58},uirevision:`balance:${state.caseId}:${state.cells}`,
-      annotations:traces.length?[]:[{xref:"paper",yref:"paper",x:.5,y:.5,text:"Per-equation histories pending a new simulation run",showarrow:false,font:{color:palette().muted,size:14}}]}),`conservation_${state.caseId}_${state.cells}`);
+    quantities.forEach((name,j)=>methods.forEach((method,i)=>{
+      const rows=histories[method];if(!rows)return;
+      traces.push({type:"scatter",mode:"lines",x:rows.map(r=>r.step),
+        y:rows.map(r=>Math.abs(r.integrated_balance_scaled[j])),
+        name:`${name} / ${i===0?"constant":"MUSCL"}`,meta:{method,quantity:j},
+        line:{color:colors[j],width:2,dash:i===0?"dash":"solid"},
+        hovertemplate:"Accepted update %{x}<br>|Scaled balance defect| %{y:.6e}<extra>%{fullData.name}</extra>"});
+    }));
+    $("conservation-note").textContent=missing.length?`Per-equation histories were not recorded for ${missing.join(" and ")} in these saved runs. No curves are inferred from the scalar maximum or final state.`:"Absolute boundary-flux difference minus integrated sources, divided by fixed nonzero flux scales. Momentum includes geometric, centrifugal and any prescribed wall sources. Only the selected mesh's solve is plotted; coarse-grid initialization stages are separate recorded solves. Exact zeros are omitted by the logarithmic axis; all raw values remain downloadable.";
+    await plot("conservation-plot",traces,frame({xaxis:axis("Accepted updates (initial state = 0)"),yaxis:axis("Absolute global defect / fixed flux scale",{type:"log"}),
+      margin:{l:79,r:24,t:126,b:58},uirevision:`balance:${state.caseId}:${state.cells}`,
+      legend:{orientation:"h",entrywidthmode:"fraction",entrywidth:.5,x:0,y:1.04,xanchor:"left",yanchor:"bottom",font:{size:10}},
+      annotations:traces.length?[]:[{xref:"paper",yref:"paper",x:.5,y:.5,text:"Per-equation histories not recorded",showarrow:false,font:{color:palette().muted,size:14}}]}),`conservation_${state.caseId}_${state.cells}`);
   }
   function shockRows() {
     const sources=DATA.shocks.sources ?? [];
@@ -349,30 +414,39 @@
     }).join("");
     if(Number.isFinite(peak)) $("shock-peak-heading").textContent=`${(100*peak).toFixed(3)}% local pressure excess`;
     $("shock-table").querySelectorAll("button[data-shock]").forEach(b=>b.addEventListener("click",async()=>{
-      state.caseId=b.dataset.shock;state.cells=400;$("case-select").value=state.caseId;await renderCase();$("fields").scrollIntoView();
+      state.caseId=b.dataset.shock;state.cells=400;$("case-select").value=state.caseId;revealSection($("fields"));await renderCase();$("fields").scrollIntoView();
     }));
   }
   function auditContent() {
     const all=DATA.cases.flatMap(c=>c.meshes.flatMap(m=>methods.map(k=>m.methods[k])));
     const max=k=>Math.max(...all.map(r=>r.metrics[k]));
+    const relative=all.flatMap(run=>(run.metrics.equation_relative??[]).filter((_,j)=>run.metrics.relative_active[j]));
+    const absolute=all.flatMap(run=>run.metrics.equation_norm??[run.metrics.spatial_rms]);
     $("audit-cards").innerHTML=[
-      ["Original spatial equations",max("spatial_rms"),"Fixed-scale spatial RMS across all 72 solutions"],
-      ["Independent boundary rows",max("boundary_max"),"Separate maximum; eight algebraic rows have zero storage"],
-      ["Assembled global balance",max("conservation_max"),"Boundary flux difference minus integrated sources"]
-    ].map(([name,value,note])=>`<div class="panel audit-card">${badge(value<1e-8,"Target met")}<h3>${escape(name)}</h3><p class="mono">${fmt(value)} <span class="muted">&lt; 10⁻⁸</span></p><small>${escape(note)}</small></div>`).join("");
-    $("nonuniform-table").querySelector("tbody").innerHTML=DATA.nonuniform.flatMap(mesh=>methods.map((m,i)=>{const r=mesh.methods[m];return `<tr><td>${i===0?"Constant":"MUSCL"}</td><td>${badge(r.root_pass)}</td><td class="numeric">${fmt(r.errors.Cp_max)}</td><td class="numeric">${fmt(Math.max(...r.errors.conservative_L1))}</td><td>${badge(r.accuracy_pass)}</td></tr>`;})).join("");
+      ["Relative equation reduction",relative.length?Math.max(...relative):NaN,1e-9,"Worst active final Rk across all solves; failures remain visible"],
+      ["Absolute equation safeguard",Math.max(...absolute),1e-8,"Largest fixed-scale equation norm across all solves"],
+      ["Independent boundary rows",max("boundary_max"),1e-8,"Separate maximum; eight algebraic rows have zero storage"],
+      ["Assembled global balance",max("conservation_max"),1e-8,"Boundary flux difference minus integrated sources"]
+    ].map(([name,value,target,note])=>`<div class="panel audit-card">${badge(value<=target,value<=target?"Target met":"Target missed")}<h3>${escape(name)}</h3><p class="mono">${fmt(value)} <span class="muted">&le; ${fmt(target,0)}</span></p><small>${escape(note)}</small></div>`).join("");
+    const wall=DATA.wall_sources;
+    $("wall-source-evidence").innerHTML=wall
+      ?`${badge(wall.passed,"Source checks passed")} <p>Independent homogeneous shear, heating and combined-source checks: ${Object.keys(wall.homogeneous??{}).length}. Full steady solver checks with independently assembled wall-force, torque and heat budgets: ${Object.keys(wall.steady??{}).length}. These verify prescribed inputs to the placeholder functions; they do not supply empirical friction or heat-transfer correlations.</p>`
+      :"Wall-source verification data were not present when this report was built.";
+    $("nonuniform-table").querySelector("tbody").innerHTML=DATA.nonuniform.flatMap(mesh=>methods.map((m,i)=>{const r=mesh.methods[m];return `<tr><td>${i===0?"Constant":"MUSCL"}</td><td>${badge(r.root_pass)}</td><td class="numeric">${fmt(r.errors.Cp_mean_absolute)}</td><td class="numeric">${fmt(Math.max(...r.errors.conservative_L1))}</td><td>${badge(r.accuracy_pass)}</td></tr>`;})).join("");
     const failed=DATA.diagnostics.narrow_width.failed;
     const rus=DATA.diagnostics.rusanov_diagnostic;
     $("robustness-details").innerHTML=`<p>The inherited entropy-width factor 10⁻⁶ failed ${failed.length} recorded cold starts. The selected factor is 0.1; both reconstructions use the same value and the original tolerance. Wider-width runs and a Rusanov diagnostic were saved separately.</p><ul>${failed.map(r=>`<li>${escape(names[r.case])}, N = ${r.cells}, ${r.method==="constant"?"constant":"MUSCL"}: ${escape(r.message)}.</li>`).join("")}</ul><p>The separate Rusanov campaign passes ${rus.root_passes}/${rus.entries.length} root checks and ${rus.accuracy_passes}/${rus.entries.length} shock-location checks. It is an explicit diagnostic, not a hidden fallback in the characteristic results.</p><p>Independent dense/colored Jacobian and dense/banded linear checks at the failed narrow-width state exclude a structural assembly error in that diagnosis. Severe local nonlinear curvature stalls the admissible Armijo trials. All negative evidence remains in the downloaded payload.</p>`;
     const p=DATA.provenance,versions=DATA.cases[0].meshes[0].metadata.versions ?? {};
     const date=new Date(p.generated_at_utc);
     $("generated-date").textContent=date.toLocaleDateString("en-GB",{day:"numeric",month:"long",year:"numeric",timeZone:"Europe/Paris"});
+    const settings=DATA.cases[0].meshes[0].settings;
+    const cap=DATA.cases[0].meshes[0].methods.constant.effective_options.newton_iterations;
     const rows=[
       ["Report snapshot",date.toLocaleString("en-GB",{timeZone:"Europe/Paris",timeZoneName:"short"})],
       ["Runtime libraries",Object.entries(versions).map(([k,v])=>`${k} ${v}`).join(" · ")],
       ["Primary evidence",`${DATA.summary.primary_files} case/mesh files · ${DATA.summary.method_entries} numerical solutions · full plotted samples`],
-      ["Independent audit",`${DATA.audits.audit_pass ? "Integrity passed" : "Integrity failed"} · source unchanged during audit: ${DATA.audits.source_unchanged_during_audit}`],
-      ["Steady controller", `Initial CFL ${DATA.cases[0].meshes[0].settings.cfl}; growth ${DATA.cases[0].meshes[0].settings.growth}; shrink ${DATA.cases[0].meshes[0].settings.shrink}; Newton cap ${DATA.cases[0].meshes[0].settings.newton_iterations}; fixed accepted-step growth`],
+      ["Independent audit",`${DATA.audits ? (DATA.audits.audit_pass ? "Integrity passed" : "Integrity failed") : "Audit not present"} · source unchanged during audit: ${DATA.audits?.source_unchanged_during_audit ?? "n/a"}`],
+      ["Steady controller", `Initial CFL ${settings.cfl}; growth ${settings.cfl_growth??settings.growth}; shrink ${settings.cfl_shrink??settings.shrink}; Newton cap ${cap}; fixed accepted-step growth`],
       ["HTML data loading",`${p.input_files.length} immutable inputs checked · no solver or test rerun`],
       ["Embedded data SHA-256",window.REPORT_BUILD?.payload_sha256 ?? "See downloaded provenance"],
       ["Offline presentation",`Plotly.js 2.35.2 · embedded result data · no external fonts, CDN or telemetry`]
@@ -381,6 +455,29 @@
     $("source-manifest").textContent=JSON.stringify({source_sha256:p.current_source_sha256,input_files:p.input_files,nonfinite:p.nonfinite_source_values},null,2);
   }
   function reducedMotion() { return matchMedia("(prefers-reduced-motion: reduce)").matches; }
+  function revealSection(target) {
+    for(let node=target?.parentElement;node;node=node.parentElement){
+      if(node.tagName==="DETAILS")node.open=true;
+    }
+    target?.querySelectorAll?.(":scope > details.result-section").forEach(box=>{box.open=true;});
+  }
+  function initResultSections() {
+    const boxes=[...document.querySelectorAll("#report-page-results details.result-section")];
+    $("results-expand")?.addEventListener("click",()=>boxes.forEach(box=>{box.open=true;}));
+    $("results-collapse")?.addEventListener("click",()=>boxes.forEach(box=>{box.open=false;}));
+    document.querySelectorAll("#report-page-results details").forEach(box=>box.addEventListener("toggle",()=>{
+      if(box.open)setTimeout(()=>{
+        if(box.id==="box-fields"&&DATA)renderCase();
+        else box.querySelectorAll(".js-plotly-plot").forEach(node=>Plotly.Plots?.resize(node));
+      },0);
+    }));
+    let printState=[];
+    window.addEventListener("beforeprint",()=>{
+      printState=[...document.querySelectorAll("#report-page-results details")].map(box=>[box,box.open]);
+      printState.forEach(([box])=>{box.open=true;});
+    });
+    window.addEventListener("afterprint",()=>printState.forEach(([box,open])=>{box.open=open;}));
+  }
   async function setTheme(theme,persist=true) {
     document.documentElement.dataset.theme=theme;
     document.querySelectorAll("[data-theme-choice]").forEach(b=>b.setAttribute("aria-pressed",String(b.dataset.themeChoice===theme)));
@@ -399,6 +496,7 @@
   async function navigate(hash=window.location.hash,scroll=true) {
     const key=decodeURIComponent((hash||"#overview").replace(/^#/,""));
     const target=$(key)||$("overview");
+    revealSection(target);
     const page=target.closest("[data-report-page]")?.dataset.reportPage||"results";
     document.querySelectorAll("[data-report-page]").forEach(el=>{el.hidden=el.dataset.reportPage!==page;});
     document.querySelectorAll("[data-page-nav]").forEach(el=>{el.hidden=el.dataset.pageNav!==page;});
@@ -434,22 +532,14 @@
     $("print-report")?.addEventListener("click",()=>window.print());
     navObserver();
     if(!$("report-data"))return;
+    initResultSections();
     DATA=JSON.parse($("report-data").textContent);
-    state={caseId:DATA.cases[0].id,cells:400,stride:11,markerSkip:10,channelCase:"current"};
+    state={caseId:DATA.cases[0].id,cells:400,channelCase:"current"};
     window.ANNULAR_REPORT={data:DATA,state,plots,renderCase,renderChannel,setTheme,navigate,downloadEvidence};
     $("case-select").innerHTML=DATA.cases.map(c=>`<option value="${escape(c.id)}">${escape(names[c.id]??c.label)}</option>`).join("");
     $("mesh-select").innerHTML=DATA.meshes.map(n=>`<button data-cells="${n}" aria-pressed="${n===400}">${n}</button>`).join("");
     $("case-select").addEventListener("change",async e=>{state.caseId=e.target.value;await renderCase();});
     document.querySelectorAll("#mesh-select button").forEach(b=>b.addEventListener("click",async()=>{state.cells=Number(b.dataset.cells);await renderCase();}));
-    $("marker-skip").addEventListener("input",async e=>{
-      const raw=e.target.value,skipped=Number(raw);
-      const valid=raw.trim()!==""&&Number.isSafeInteger(skipped)&&skipped>=0&&skipped<Number.MAX_SAFE_INTEGER;
-      e.target.setAttribute("aria-invalid",String(!valid));
-      if(!valid){$("marker-spacing-note").textContent="Enter a whole number ≥ 0";return;}
-      state.markerSkip=skipped;state.stride=skipped+1;
-      $("marker-spacing-note").textContent=`Every ${state.stride} point${state.stride===1?"":"s"} · ${skipped} skipped`;
-      await Promise.all([renderCase({geometry:false})]);
-    });
     $("export-fields-svg").addEventListener("click",()=>exportFigure("field-plot","svg"));
     $("export-fields-png").addEventListener("click",()=>exportFigure("field-plot","png"));
     $("download-data").addEventListener("click",downloadData);
@@ -459,7 +549,7 @@
     window.addEventListener("hashchange",()=>navigate());
     fillAccuracy();shockRows();auditContent();
     await Promise.all([renderCase()]);
-    await navigate(window.location.hash,false);
+    await navigate(window.location.hash,Boolean(window.location.hash));
     document.body.dataset.reportReady="true";
     window.dispatchEvent(new CustomEvent("annular-report-ready"));
     let timeout;

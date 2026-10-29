@@ -14,14 +14,16 @@ import math
 from pathlib import Path
 import re
 
+from .accuracy import ACCURACY_DEFINITION, assessed_errors, accuracy_target_met
+
 
 FIELD_METADATA = (
     ("p", "Static pressure", "Pa"),
-    ("Cp", "Pressure recovery Cp", ""),
-    ("M_m", "Meridional Mach", ""),
-    ("v_m", "Meridional velocity", "m/s"),
-    ("v_theta", "Tangential velocity", "m/s"),
     ("rho", "Density", "kg/m3"),
+    ("alpha_deg", "Flow angle", "deg"),
+    ("M_m", "Meridional Mach", ""),
+    ("M_theta", "Tangential Mach", ""),
+    ("M", "Mach magnitude", ""),
 )
 METHOD_LABELS = {
     "constant": "FVM (constant reconstruction)",
@@ -34,8 +36,25 @@ HISTORY_COLUMNS = (
     "pseudo_time", "shock_proxy_m", "min_velocity_gradient", "inner_relative_update",
     "inlet_M_m", "outlet_M_m", "residual_only_accept", "next_cfl_factor",
     "inner_relative_update_nonfinite", "inner_residual_nonfinite",
+    "phase", "attempt", "elapsed", "equation_l1", "equation_l2", "equation_linf",
+    "equation_worst_cell", "equation_norm", "equation_relative", "relative_active",
+    "equation_passed", "equation_max_ratio", "overall_max_ratio", "all_equations_passed",
+    "boundary_ratio", "global_ratio", "finite", "monitors", "monitors_passed",
+    "diagnostics_evaluated", "candidate_diagnostics", "candidate_monitor_values",
 )
 CASE_FILE = re.compile(r"^.+?_(?:N)?[1-9][0-9]*\.json$")
+
+
+def resolve_verification_folder(study, folder=None):
+    """Accept an absolute, repository-relative or study-relative data folder."""
+    study = Path(study).resolve()
+    if folder is None:
+        return study/"outputs"/"grid_sequence_monitored_full"
+    folder = Path(folder)
+    if folder.is_absolute():
+        return folder.resolve()
+    candidate = study/folder
+    return candidate.resolve() if candidate.is_dir() or not folder.is_dir() else folder.resolve()
 
 
 def _finite_number(value):
@@ -44,6 +63,19 @@ def _finite_number(value):
 
 def _root_pass(saved, run):
     """Original saved spatial, boundary and conservation root contract."""
+    monitoring = run.get("monitoring")
+    if monitoring and monitoring.get("definition") in ("steady_spatial_fixed_scale_equation_v1", "steady_spatial_fixed_scale_per_equation_v1"):
+        metrics, policy = run["metrics"], monitoring["policy"]
+        initial, current = monitoring["initial_equation_norms"], metrics["equation_norm"]
+        equations = (len(initial)==len(current)==4 and
+            all(_finite_number(value) and value <= policy["absolute_tolerance"]
+                and (start <= policy["initial_floor"] or value <= start*policy["relative_tolerance"])
+                for start,value in zip(initial,current)))
+        return bool(run["success"] and metrics.get("admissible") and metrics.get("finite")
+            and equations and metrics["boundary_max"] <= policy["boundary_tolerance"]
+            and metrics["conservation_max"] <= policy["global_tolerance"]
+            and all(_finite_number(item["value"]) and (not item["required"] or item["stable"])
+                    for item in metrics.get("monitors",{}).values()))
     tolerance = saved["settings"]["tolerance"]
     return (run["success"] and run["metrics"].get("admissible", False)
             and all(_finite_number(run["metrics"][key]) and run["metrics"][key] <= tolerance
@@ -51,11 +83,7 @@ def _root_pass(saved, run):
 
 
 def _accuracy_pass(saved, run):
-    errors = run["errors"]
-    if saved.get("shock_m") is not None:
-        return _finite_number(errors["shock_error_cells"]) and errors["shock_error_cells"] <= 2
-    return (all(_finite_number(value) for value in (errors["Cp_max"], *errors["conservative_L1"]))
-            and errors["Cp_max"] < 1e-3 and max(errors["conservative_L1"]) < 1e-3)
+    return accuracy_target_met(saved, run)
 
 
 def _history(records, columns=HISTORY_COLUMNS):
@@ -64,7 +92,9 @@ def _history(records, columns=HISTORY_COLUMNS):
     accepted = [[row.get(key) for key in keys] for row in records if row.get("accepted", True)]
     rejected = [[row.get(key) for key in keys] for row in records if not row.get("accepted", True)]
     return dict(columns=keys, accepted=accepted, rejected=rejected,
-                counts=dict(total=len(records), accepted=len(accepted), rejected=len(rejected)),
+                counts=dict(total=len(records), accepted=len(accepted), rejected=len(rejected),
+                    initial=sum(row.get("phase")=="initial" for row in records),
+                    accepted_updates=sum(row.get("accepted",True) and row.get("phase")!="initial" for row in records)),
                 sampled=False)
 
 
@@ -153,6 +183,15 @@ class _Reader:
 
 
 def _fields(fields, names, cells, *, required=True):
+    fields = dict(fields)
+    if "alpha_deg" in names and "alpha_deg" not in fields:
+        fields["alpha_deg"] = [math.degrees(math.atan2(vt, vm))
+                               for vm, vt in zip(fields["v_m"], fields["v_theta"])]
+    if "M_theta" in names and "M_theta" not in fields:
+        fields["M_theta"] = [vt/a if a is not None else
+                               (vt*mm/vm if vm else math.copysign(mag, vt))
+                               for vm, vt, mm, mag, a in zip(fields["v_m"], fields["v_theta"],
+                               fields["M_m"], fields["M"], fields.get("a", [None]*cells))]
     result = {}
     for name in names:
         if name not in fields:
@@ -210,9 +249,11 @@ def _steady_mesh(reader, path, saved, methods):
             success=run["success"], message=run.get("message"), root_pass=_root_pass(saved, run),
             accuracy_pass=_accuracy_pass(saved, run),
             recorded_analytical_target_met=run.get("analytical_target_met"),
-            metrics=run["metrics"], errors=run["errors"],
+            metrics=run["metrics"], errors=assessed_errors(saved, run),
             effective_options=run.get("effective_options", run.get("options")),
             controller_audit=run.get("controller_audit"),
+            monitoring=run.get("monitoring"),
+            initialization=run.get("initialization"),
             audited_effective_options=audit.get("methods", {}).get(method, {}).get("effective_options"),
             flags=dict(admissible=run["metrics"].get("admissible"),
                        boundary_mach=run["metrics"].get("boundary_mach"),
@@ -299,7 +340,7 @@ def _diagnostics(reader, outputs):
                                    path=reader.relative(path), success=run["success"],
                                    root_pass=_root_pass(saved, run), accuracy_pass=_accuracy_pass(saved, run),
                                    message=run.get("message"), settings=saved["settings"],
-                                   metrics=run["metrics"], errors=run["errors"]))
+                                   metrics=run["metrics"], errors=assessed_errors(saved, run)))
     path = outputs/"diagnosis"/"shock35_N200_newton.json"
     diagnosis = reader.json(path, optional=True)
     # The detailed trial values are useful; large copied source maps are not
@@ -312,6 +353,32 @@ def _diagnostics(reader, outputs):
                     root_passes=sum(row["root_pass"] for row in rusanov),
                     accuracy_passes=sum(row["accuracy_pass"] for row in rusanov)),
                 narrow_width_newton=diagnosis)
+
+
+def _monitoring_validation(reader, outputs, primary=None):
+    """Summarize the selected new-policy campaign without duplicate histories."""
+    rows=[]
+    directory=primary if primary is not None else outputs/"grid_sequence_monitored"
+    if not directory.is_dir():
+        directory=outputs/"monitoring_smoke"
+    for path in _dataset_paths(directory):
+        saved=reader.json(path)
+        for method,run in saved["methods"].items():
+            meta=run.get("monitoring")
+            if not meta:
+                continue
+            metrics=run["metrics"]
+            active=[value for value,enabled in zip(metrics["equation_relative"],metrics["relative_active"]) if enabled]
+            rows.append(dict(case=saved["case"],cells=saved["cells"],method=method,
+                path=reader.relative(path),root_pass=_root_pass(saved,run),
+                max_absolute=max(metrics["equation_norm"]),
+                max_relative=max(active) if active else None,
+                accepted_updates=meta["accepted_updates"],reason=meta["reason"],
+                policy=meta["policy"],monitors=metrics.get("monitors",{}),
+                source_drift=reader.source_drift(saved.get("source_hashes",{}))))
+    return dict(available=bool(rows),runs=rows,
+        directory=reader.relative(directory),
+        note="Summary of the selected campaign; failed convergence targets are retained independently of analytical accuracy.")
 
 
 def _sanitize(value, replacements, path="$"):
@@ -327,17 +394,20 @@ def _sanitize(value, replacements, path="$"):
     raise TypeError(f"Unsupported HTML payload value at {path}: {type(value).__name__}")
 
 
-def build_report_data(study: Path) -> dict:
+def build_report_data(study: Path, *, verification_folder: Path | None = None) -> dict:
     """Build a self-contained strict-JSON payload, preserving every recorded run.
 
     Paths in provenance and plot records are relative to ``study``. Histories
     are columnar arrays with no sampling; rejected timesteps remain available.
-    Root and accuracy flags use the saved original criteria, while independent
-    audits and source drift are reported separately. No test or solver runs.
+    Root flags retain the saved original stopping definition. Accuracy uses the
+    current Cp mean-error criterion; original accuracy flags remain recorded.
+    Independent audits and source drift are separate. No test or solver runs.
     """
     reader = _Reader(Path(study))
     reader.read_text(Path(__file__))
+    reader.read_text(Path(__file__).with_name("accuracy.py"))
     study, outputs = reader.study, reader.study/"outputs"
+    primary = resolve_verification_folder(study, verification_folder)
     verification = study/"scripts"/"verify_annular.py"
     cases = reader.literal(verification, "DEFAULT_CASES")
     methods = reader.literal(verification, "RECONSTRUCTIONS")
@@ -346,7 +416,7 @@ def build_report_data(study: Path) -> dict:
     for case in cases:
         records = []
         for cells in meshes:
-            path = outputs/"verification"/f"{case}_{cells}.json"
+            path = primary/f"{case}_{cells}.json"
             if not path.is_file():
                 missing.append(reader.relative(path))
                 continue
@@ -388,6 +458,11 @@ def build_report_data(study: Path) -> dict:
             audited_root_passes=sum(bool(row["root_target_met"]) for row in audited),
             audited_array_reproduction_passes=sum(bool(row["saved_arrays_reproduced"]) for row in audited),
             root_tolerances=sorted({row["settings"]["tolerance"] for _, row, _, _ in entries}),
+            relative_tolerances=sorted({run["monitoring"]["policy"]["relative_tolerance"]
+                                       for _, _, _, run in entries if run.get("monitoring")}),
+            convergence_failures=[dict(case=case,cells=row["cells"],method=method,
+                                      reason=run.get("monitoring",{}).get("reason",run.get("message")))
+                                  for case,row,method,run in entries if not run["root_pass"]],
             delta_factors=sorted({row["settings"].get("delta_factor") for _, row, _, _ in entries}, key=str),
         ),
         cases=results,
@@ -395,14 +470,20 @@ def build_report_data(study: Path) -> dict:
         implementation=reader.json(outputs/"provenance"/"implementation_manifest.json", optional=True),
         campaign=reader.json(outputs/"cfl_recommended"/"campaign.json", optional=True),
         controller_audit=reader.json(outputs/"cfl_recommended"/"controller_audit.json", optional=True),
-        audits=reader.json(outputs/"verification"/"audits.json", optional=True),
-        acceptance=reader.json(outputs/"verification"/"acceptance.json", optional=True),
-        shocks=_shock_audits(reader, outputs/"verification"),
+        wall_sources=reader.json(outputs/"wall_sources"/"audit.json", optional=True),
+        audits=reader.json(primary/"audits.json", optional=True),
+        acceptance=reader.json(primary/"acceptance.json", optional=True),
+        accuracy_reassessment=reader.json(primary/"accuracy_reassessment.json", optional=True),
+        accuracy_definition=dict(identifier=ACCURACY_DEFINITION,
+            Cp_mean_absolute_limit=0.01, Cp_weighting="physical meridional cell width / domain length",
+            conservative_L1_max=1e-3, historical_result_files_unchanged=True),
+        shocks=_shock_audits(reader, primary),
         nonuniform=[_steady_mesh(reader, path, reader.json(path), methods)
                     for path in _dataset_paths(outputs/"nonuniform")],
         nonuniform_audits=reader.json(outputs/"nonuniform"/"audits.json", optional=True),
         transient=_transient(reader, outputs/"transient", methods),
         diagnostics=_diagnostics(reader, outputs),
+        monitoring_validation=_monitoring_validation(reader,outputs,primary),
     )
     payload["audit_source_drift"] = reader.source_drift(
         (payload["audits"] or {}).get("current_source_hashes", {}))
@@ -415,6 +496,7 @@ def build_report_data(study: Path) -> dict:
         numerical_sources_or_saved_json_modified=False, solver_or_tests_run=False,
         all_read_inputs_unchanged_during_load=True, current_sources_unchanged_during_load=True,
         authoritative_configuration_paths=[reader.relative(verification)],
+        primary_directory=reader.relative(primary),
         input_files=list(reader.inputs.values()), current_source_sha256=reader.current_sources,
         primary_file_count=payload["summary"]["primary_files"],
         rendered_method_entry_count=payload["summary"]["method_entries"],

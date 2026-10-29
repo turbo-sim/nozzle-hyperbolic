@@ -1,0 +1,55 @@
+schema_version: 1
+defaults:
+  model: euler_annular
+  fluid: {model: perfect_gas, name: Air}
+  geometry: {kind: radial, r_in: 0.1, r_out: 0.2, height: 0.005}
+  inlet: {p0: 200000.0, T0: 300.0, M_m: 0.1}
+  boundaries: {inlet: subsonic, outlet: subsonic, back_pressure: reference}
+  reference: {shock_fraction: null}
+  mesh: {cells: 200, refinement: [50, 100, 200, 400]}
+  numerical:
+    reconstruction: muscl_van_leer
+    flux_method: characteristic
+    delta_factor: 0.1
+    newton_iterations: 8
+    newton_tolerance: 1.0e-10
+    newton_residual_tolerance: 1.0e-10
+  walls: {shear_stress: 0.0, heat_flux: 0.0}
+  residuals:
+    norm: l2
+    weighting: volume
+    relative_tolerance: 1.0e-9
+    absolute_tolerance: 1.0e-8
+    boundary_tolerance: 1.0e-8
+    global_tolerance: 1.0e-8
+    initial_floor: 1.0e-14
+  # All enabled convergence monitors must stabilize, as well as the residuals.
+  # Cp uses the current inlet pressure and this case's fixed total pressure.
+  monitors:
+    - name: Cp_mean
+      quantity: pressure_coefficient
+      reduction: length_mean
+      convergence: true
+      window: 20
+      absolute_tolerance: 1.0e-8
+      relative_tolerance: 1.0e-6
+      reference: 1.0
+    - name: mdot_out
+      quantity: mass_flow
+      reduction: outlet
+      convergence: true
+      window: 20
+      absolute_tolerance: 1.0e-10
+      relative_tolerance: 1.0e-6
+      reference: 1.0
+  run:
+    max_steps: 16000
+    cfl: 0.2
+    cfl_growth: 1.2
+    cfl_shrink: 0.5
+    cfl_max: 1000000.0
+    max_retries: 12
+    # A bitwise-unchanged state at maximum CFL cannot make further progress.
+    # Stop as a failure after this many unchanged accepted updates (0 disables).
+    stagnation_steps: 64
+    print_every: 1

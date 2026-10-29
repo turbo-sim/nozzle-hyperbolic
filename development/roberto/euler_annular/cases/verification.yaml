@@ -1,0 +1,50 @@
+# Common settings live in common.yaml; only physical differences appear here.
+# M_m and shock_fraction select the independent verification reference and the
+# associated physical boundary data. The numerical initial state stays cold.
+extends: common.yaml
+schema_version: 1
+default_case: radial_outflow
+cases:
+  radial_outflow: {}
+  radial_inflow:
+    geometry: {r_in: 0.2, r_out: 0.1}
+  sonic_exit:
+    geometry: {r_in: 0.2, r_out: 0.1}
+    inlet: {M_m: sonic_exit}
+  swirl_diffusion:
+    inlet: {M_m: 0.3, alpha_tangent: 5.0}
+  conical_subsonic:
+    geometry:
+      kind: conical
+      length: 0.08
+      r_in: 0.1
+      height: 0.005
+      inclination_degrees: 30.0
+      semi_divergence_degrees: 2.0
+    inlet: {M_m: 0.2, alpha_degrees: 30.0}
+  curved_subsonic:
+    geometry:
+      kind: circular_arc
+      center: [0.0, 0.15]
+      radius: 0.05
+      theta_start_degrees: -90.0
+      theta_end_degrees: 0.0
+      height: 0.005
+    inlet: {M_m: 0.2, alpha_tangent: 1.5}
+  supersonic_expansion:
+    inlet: {M_m: 1.5, alpha_tangent: 0.3333333333333333}
+    boundaries: {inlet: supersonic, outlet: supersonic}
+  shock35:
+    inlet: {M_m: 1.5, alpha_tangent: 0.3333333333333333}
+    boundaries: {inlet: supersonic}
+    reference: {shock_fraction: 0.35}
+  shock70:
+    inlet: {M_m: 1.5, alpha_tangent: 0.3333333333333333}
+    boundaries: {inlet: supersonic}
+    reference: {shock_fraction: 0.7}
+  radial_outflow_m005:
+    inlet: {M_m: 0.05}
+  radial_outflow_m020:
+    inlet: {M_m: 0.2}
+  radial_outflow_swirl:
+    inlet: {M_m: 0.1, alpha_tangent: 1.5}
