@@ -624,10 +624,10 @@ def D_s_primitive(U_h, eos_g: PhaseProps, eos_l: PhaseProps,
            - sigma_Mg * (k_rho * rl + ag * (rg**2 - rl**2)) / (rl * rh2) * du)
         #    + (F_g * al * k_rho + F_l * (rg + al * k_rho)) / (al * rh2))
 
-    # Correction terms. Not present in the book but rederived from the primitve equations!
-    u_bar = ag * u_g + al * u_l
-    Ds_2 = Ds_2 + (rg + rl) * al * rl * du * u_bar * dlnA_dx / rh2
-    Ds_3 = Ds_3 - (rg + rl) * ag * rg * du * u_bar * dlnA_dx / rh2
+    # # Correction terms. Not present in the book but rederived from the primitve equations!
+    # u_bar = ag * u_g + al * u_l
+    # Ds_2 = Ds_2 + (rg + rl) * al * rl * du * u_bar * dlnA_dx / rh2
+    # Ds_3 = Ds_3 - (rg + rl) * ag * rg * du * u_bar * dlnA_dx / rh2
 
     # ── Row 4: void fraction ─────────────────────────────────────────────────
     Ds_4 = (al * a0sq / (rho_s * al_sq) * Mg
@@ -713,6 +713,19 @@ def D_VE_algebric(U_h, cq, closure, eos_g, eos_l, k):
     D5 = sigma_Mg * (h_ex_g + 0.5 * u_ex ** 2 + u_ex * u_g * density_term + u_g * A_common / rh2) + Fv_g * (u_int + u_g * density_term) + sigma_Qg
     D6 = sigma_Ml * (h_ex_l + 0.5 * u_ex ** 2 + u_ex * u_l * density_term + u_l * A_common / rh2) + Fv_l * (u_int + u_l * density_term) + sigma_Ql
 
+
+    # ── Interfacial p·dα/dt work of the source-driven void-fraction change ──
+    # (the area part of Dα is already in D_VE_area; this is the closure part,
+    #  = row 4 of D_s_primitive at dlnA_dx = 0)
+    ag_sq = eos_g.a**2;  al_sq = eos_l.a**2
+    rho_s = cq.rho_s
+    Tg_sSg = sigma_Mg * ((h_ex_g - h_g) + 0.5 * (u_ex - u_g)**2) + Fv_g * (u_int - u_g) + sigma_Qg
+    Tl_sSl = sigma_Ml * ((h_ex_l - h_l) + 0.5 * (u_ex - u_l)**2) + Fv_l * (u_int - u_l) + sigma_Ql
+    Mg = sigma_Mg - eos_g.rho_h / rg * Tg_sSg
+    Ml = sigma_Ml - eos_l.rho_h / rl * Tl_sSl
+    D_alpha = al * a0sq / (rho_s * al_sq) * Mg - ag * a0sq / (rho_s * ag_sq) * Ml
+    D5 = D5 - p * D_alpha
+    D6 = D6 + p * D_alpha
     # NOTE: area-change is a SEPARATE source (D_VE_area, below) so it can be
     # toggled independently; wall friction still TODO.
 
@@ -746,6 +759,15 @@ def D_VE_algebric_two_component(U_h, cq, closure, eos_g, eos_l, k):
     D4 = rg * rl / rh2 * Fv_l 
     D5 = Fv_g * (u_int + u_g * density_term) + sigma_Qg
     D6 = Fv_l * (u_int + u_l * density_term) + sigma_Ql
+
+    p = U_h[0]
+    ag_sq = eos_g.a**2;  al_sq = eos_l.a**2
+    a0sq = cq.a0sq;  rho_s = cq.rho_s
+    Mg = -eos_g.rho_h / rg * (Fv_g * (u_int - u_g) + sigma_Qg)
+    Ml = -eos_l.rho_h / rl * (Fv_l * (u_int - u_l) + sigma_Ql)
+    D_alpha = al * a0sq / (rho_s * al_sq) * Mg - ag * a0sq / (rho_s * ag_sq) * Ml
+    D5 = D5 - p * D_alpha
+    D6 = D6 + p * D_alpha
 
     # NOTE: area-change is a SEPARATE source (D_VE_area, below) so it can be
     # toggled independently; wall friction still TODO.
@@ -804,12 +826,12 @@ def D_VE_area(U_h, cq, closure, eos_g, eos_l):
     # D5 = z
     # D6 = z
     
-    # non-viscous (virtual-mass) area term, missing in reference
-    Phi  = ag * al * rg * rl * (rg + rl) / cq.rh2
-    e_nv = Phi * (u_g - u_l) * (ag * u_g + al * u_l) * G
-    D3 = D3 + e_nv
-    D4 = D4 - e_nv
-    D5 = D5 + u_g * e_nv
-    D6 = D6 - u_l * e_nv
+    # # non-viscous (virtual-mass) area term, missing in reference
+    # Phi  = ag * al * rg * rl * (rg + rl) / cq.rh2
+    # e_nv = Phi * (u_g - u_l) * (ag * u_g + al * u_l) * G
+    # D3 = D3 + e_nv
+    # D4 = D4 - e_nv
+    # D5 = D5 + u_g * e_nv
+    # D6 = D6 - u_l * e_nv
 
     return jnp.array([z, z, D3, D4, D5, D6])
