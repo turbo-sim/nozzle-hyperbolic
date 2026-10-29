@@ -58,6 +58,7 @@ class AnnularSolution:
     history: list[dict]
     final_metrics: dict
     physical_time: float = 0.0
+    monitoring: dict | None = None
 
 
 class AnnularSolver:
@@ -69,7 +70,7 @@ class AnnularSolver:
     """
 
     def __init__(self, fluid, mesh, inlet_data, outlet_pressure, options,
-                 inlet_regime, outlet_regime):
+                 inlet_regime, outlet_regime, tau_w=0.0, q_w=0.0):
         self.input_fluid = fluid
         fluid = as_jax_fluid(fluid)
         self.fluid, self.mesh, self.options = fluid, mesh, options
@@ -115,6 +116,11 @@ class AnnularSolver:
         content_scale = volumes[:, None]*q_ref
         flux_scale = content_scale*a_ref/mesh.geometry.length
         global_flux_scale = float(mesh.A_face[0])*a_ref*q_ref
+        # Fixed physical scales are also inputs to the opt-in equation-wise
+        # monitoring adapter. They do not alter the signed Newton equations.
+        self.conservative_scales = np.asarray(q_ref)
+        self.spatial_flux_scales = np.asarray(flux_scale)
+        self.global_flux_scales = np.asarray(global_flux_scale)
         variable_scale = jnp.asarray([self.scales[key] for key in ("p", "a", "ell", "h")])
 
         def reconstruct(full):
@@ -132,9 +138,15 @@ class AnnularSolver:
             return numerical_flux(left, right, r_face, area_face, fluid,
                                   options.delta_factor, options.flux_method)
 
+        self.tau_w = _wall_values(tau_w, nphysical, "tau_w", nonnegative=True)
+        self.q_w = _wall_values(q_w, nphysical, "q_w")
+        tau_wall, heat_wall = jnp.asarray(self.tau_w), jnp.asarray(self.q_w)
+        height = jnp.asarray(mesh.b)
+
         def source(full):
             return integrated_source(full[1:-1], radius, radius_slope,
-                                     area_face[:-1], area_face[1:], volumes, fluid)
+                                     area_face[:-1], area_face[1:], volumes, fluid,
+                                     height=height, tau_w=tau_wall, q_w=heat_wall)
 
         def storage(physical):
             return volumes[:, None]*primitive_to_conservative(physical, radius, fluid)
@@ -314,6 +326,24 @@ class AnnularSolver:
                                        history, metrics)
         return AnnularSolution(np.asarray(state), False, "Steady update limit reached", history, metrics)
 
+    def solve_steady_monitored(self, initial_state=None, *, residual_policy=None,
+                               monitors=(), pressure_total=None, max_steps=16000,
+                               cfl=0.2, cfl_growth=1.2, cfl_shrink=0.5,
+                               cfl_max=1e6, max_retries=12, stagnation_steps=0, callback=None):
+        """Opt-in equation-wise steady stopping and accepted-state monitors.
+
+        Every active equation must meet the configured initial-relative
+        reduction and absolute safeguard. Boundary/global constraints and
+        required monitor windows are checked separately. Legacy steady and
+        physical-time methods retain their existing definitions.
+        """
+        from .monitoring import solve_steady_monitored
+        return solve_steady_monitored(
+            self, initial_state, residual_policy=residual_policy, monitors=monitors,
+            pressure_total=pressure_total, max_steps=max_steps, cfl=cfl,
+            cfl_growth=cfl_growth, cfl_shrink=cfl_shrink, cfl_max=cfl_max,
+            max_retries=max_retries, stagnation_steps=stagnation_steps, callback=callback)
+
     def advance(self, initial_state, final_time, *, cfl=0.5, max_steps=100000,
                 max_retries=12, initial_bc_tolerance=1e-8, callback=None):
         """Backward-Euler physical time; no steady or plateau termination."""
@@ -369,12 +399,17 @@ class AnnularSolver:
 
 
 def make_annular_solver(fluid, mesh, *, inlet_data, outlet_pressure=None,
-                        inlet_regime="subsonic", outlet_regime="subsonic", **options):
+                        inlet_regime="subsonic", outlet_regime="subsonic",
+                        tau_w=0.0, q_w=0.0, **options):
     """Build one general-EOS model using shared implicit and banded infrastructure.
 
     Subsonic inlet_data supplies p0,T0,alpha_in, or h0,s0,p0,alpha_in.
     Supersonic inlet_data supplies state=(p,v_m,ell,h). Angle inputs are radians.
     Outlet regime is explicit; subsonic requires a finite positive backpressure.
+    tau_w is prescribed nonnegative wall shear magnitude in Pa; q_w is signed
+    heat flux in W/m^2, positive into the fluid. Each is scalar or length N and
+    defaults to zero. Profiles are fixed at construction; rebuild to change
+    them. The named wall closures are placeholders, not empirical correlations.
     """
     if inlet_regime not in ("subsonic", "supersonic") or outlet_regime not in ("subsonic", "supersonic"):
         raise ValueError("Boundary regimes must be 'subsonic' or 'supersonic'")
@@ -382,4 +417,16 @@ def make_annular_solver(fluid, mesh, *, inlet_data, outlet_pressure=None,
             outlet_pressure is None or not np.isfinite(outlet_pressure) or outlet_pressure <= 0):
         raise ValueError("A subsonic outlet requires a finite positive backpressure")
     return AnnularSolver(fluid, mesh, inlet_data, outlet_pressure, AnnularOptions(**options),
-                         inlet_regime, outlet_regime)
+                         inlet_regime, outlet_regime, tau_w=tau_w, q_w=q_w)
+
+
+def _wall_values(values, count, name, *, nonnegative=False):
+    """Validate and capture fixed scalar/per-cell wall inputs before tracing."""
+    try:
+        result = np.broadcast_to(np.asarray(values, dtype=float), (count,)).copy()
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a scalar or length-N array") from exc
+    if not np.all(np.isfinite(result)) or (nonnegative and np.any(result < 0)):
+        raise ValueError(f"{name} must be finite" + (" and nonnegative" if nonnegative else ""))
+    result.setflags(write=False)
+    return result
