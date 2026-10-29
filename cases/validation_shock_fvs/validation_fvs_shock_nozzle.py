@@ -62,12 +62,17 @@ hyp.set_plot_options(grid=False)
 # ── Fluid, grid, geometry ───────────────────────────────────────────────────
 lut = case_data["fluid"].get("lut", {})
 fluid_name = case_data["fluid"]["fluid_name"]
-fluid = jxp.FluidBicubic(
-    fluid_name=fluid_name, backend=lut.get("backend", "HEOS"),
-    h_min=float(lut["h_min"]), h_max=float(lut["h_max"]),
-    p_min=float(lut["p_min"]), p_max=float(lut["p_max"]),
-    N_h=int(lut["N_h"]), N_p=int(lut["N_p"]),
-    table_dir=lut.get("table_dir", "fluid_tables"))
+if case_data["fluid"].get("perfect_gas", False):
+    fluid = jxp.FluidPerfectGas(name=fluid_name)
+    eos_label = "perfect gas"
+else:
+    fluid = jxp.FluidBicubic(
+        fluid_name=fluid_name, backend=lut.get("backend", "HEOS"),
+        h_min=float(lut["h_min"]), h_max=float(lut["h_max"]),
+        p_min=float(lut["p_min"]), p_max=float(lut["p_max"]),
+        N_h=int(lut["N_h"]), N_p=int(lut["N_p"]),
+        table_dir=lut.get("table_dir", "fluid_tables"))
+    eos_label = f"LUT {lut['N_h']}x{lut['N_p']}"
 
 Nx = int(ns["Nx"])
 x1, x2 = float(ns["x1"]), float(ns["x2"])
@@ -103,7 +108,7 @@ _cfg_stub = types.SimpleNamespace(_settings=types.SimpleNamespace(
     path=(_here / SETTINGS_YAML).resolve(), chain=[(_here / SETTINGS_YAML).resolve()],
     overrides={}))
 _tables = sorted((_here / lut.get("table_dir", "fluid_tables")).glob(
-    f"{fluid_name}_{lut['N_h']}x{lut['N_p']}.pkl"))
+    f"{fluid_name}_{lut['N_h']}x{lut['N_p']}.pkl")) if not case_data["fluid"].get("perfect_gas", False) else []
 # write_run_info(out_dir, _cfg_stub,
 #                input_files={"eos_table": _tables[0]} if _tables else None)
 print(f"Output directory: {out_dir}")
@@ -113,6 +118,7 @@ def solver_parameters(p_out):
     """parameters dict for fvm_euler_1d — same keys and defaults as main.py."""
     g = lambda k, d: ns.get(k, d)
     return {
+        # False selects the general EOS FVS Newton path, also for FluidPerfectGas.
         "perfect_gas": False, "fluid_name": fluid_name, "fluid": fluid,
         "residuals": float(ns["residuals"]), "max_iterations": int(ns["max_iterations"]),
         "geometry": geo, "A_nodes": A, "dx": dx, "CFL": float(ns["CFL"]),
@@ -252,7 +258,7 @@ fig.legend(h_leg, l_leg, loc="lower center", ncol=len(l_leg), fontsize=11,
            bbox_to_anchor=(0.5, 0.0))
 fig.suptitle(f"Städtke FVS shock wave predictions at "
              f"{', '.join(f'{f*100:.0f}%' for f in fractions)} of the diverging "
-             f"section length ({fluid_name} LUT, N = {Nx})", y=0.995)
+             f"section length ({fluid_name} {eos_label}, N = {Nx})", y=0.995)
 fig.tight_layout(rect=(0, 0.07, 1, 1))
 fig.savefig(out_dir / "shock_validation.png", dpi=300)
 fig.savefig(out_dir / "shock_validation.pdf")
@@ -260,7 +266,7 @@ plt.close(fig)
 
 # ── Summary ─────────────────────────────────────────────────────────────────
 lines = [f"FVS single-phase shock validation — {SETTINGS_YAML}",
-         f"geometry {geo_fn_name}, {fluid_name} LUT {lut['N_h']}x{lut['N_p']}, N = {Nx}, "
+         f"geometry {geo_fn_name}, {fluid_name} {eos_label}, N = {Nx}, "
          f"dx = {dx*1e3:.4f} mm, p0 = {p0:.0f} Pa, T0 = {T0:.2f} K",
          f"throat x = {x_thr:.5f} m (x/L = {(x_thr - x1)/L:.4f}), "
          f"A_exit/A* = {A_ex[-1]/A_thr:.4f}, mdot_exact = {ex_curves['mdot']*1e3:.5f} g/s",

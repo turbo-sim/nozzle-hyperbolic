@@ -1,13 +1,13 @@
 # -----------------------------------------------------------------------------
-# Single-phase FVS validation: normal shock in the Lettieri nozzle, Air (LUT).
+# Single-phase FVS validation: normal shock in the Lettieri nozzle, perfect-gas Air.
 # Driven by validation_fvs_shock_nozzle.py (NOT main.py): for each fraction in
 # validation.shock_fractions the script computes the exact quasi-1D solution
 # with the same EOS (nozzle_exact_real_gas), takes the back pressure that holds
 # the shock at x_s = x_throat + f*(x_exit - x_throat), runs fvm_euler_1d with it
 # and plots the numerical vs exact profiles.
 #
-# Air at 2 bar / 295.15 K: near-ideal (exact solution within ~5e-4 of the
-# perfect-gas area-Mach + normal-shock relations).  Lettieri nozzle:
+# Perfect-gas Air at 2 bar / 295.15 K, using jaxprop.FluidPerfectGas for
+# both the exact solution and the FVS solver. Lettieri nozzle:
 # A_in/A* = 17.1, A_exit/A* = 1.69 (supersonic exit M = 2.0), throat at
 # x/L = 0.325.
 #
@@ -61,10 +61,10 @@ geometry:
   roughness: 0.0
 
 fluid:
-  perfect_gas: false
+  perfect_gas: true
   fluid_name: Air
-  use_lookup_table: true
-  lut:                   # same table as settings_nozzle_validation.yaml (Air_100x80)
+  use_lookup_table: false
+  lut:                   # used only when perfect_gas is false
     backend:   HEOS
     h_min:     150000.0
     h_max:     500000.0
