@@ -1,5 +1,109 @@
 # EulerNozzle physical verification cases
 
+## Current baseline reports before the shared-engine migration
+
+Open either standalone offline report:
+
+- **[Steady nozzle: eight backpressure regimes](STEADY_REPORT.html)** — 64 solves:
+  eight operating conditions, constant and Van Leer MUSCL reconstruction, and
+  four independent meshes.
+- **[Sod shock tube: physical-time baseline](SOD_REPORT.html)** — one standard
+  Riemann problem on 50/100/200/400 physical cells, with three snapshots from
+  each transient run.
+
+Both follow the annular report's presentation: case/time and mesh selectors,
+geometry or initial-state views, six numerical/reference field plots without
+markers, history/conservation panels, refinement errors, case tables, collapsible
+results sections, light/dark themes, and internal Theory and Reproduce pages.
+All libraries, numerical evidence and JSON downloads are embedded. Copying
+either HTML file alone is sufficient for offline reading.
+
+The steady cases are subsonic flow, the exactly sonic-throat/subsonic-exit
+analytical limit, shocks at 35% and 70% of divergence, shock exactly at the exit,
+an overexpanded pressure below the shock-at-exit value, exactly adapted
+discharge, and an underexpanded pressure below the adapted value. The last
+three share the same ideal internal profile; external jet adjustment is outside
+this model. At a shock exactly at the exit, the plotted reference uses the
+upstream limit on the exit plane.
+
+The steady report preserves the established **51/101/201/401-node convention**:
+two boundary slots and **49/99/199/399 physical points**, with a node at the
+throat. These are not annular's 50/100/200/400-cell meshes. All solves start
+independently from the ordinary simple initialization; no exact field or
+coarse-grid solution is supplied as a seed.
+
+The source FVS/Newton/AD/banded kernels and boundary maps are unchanged. The
+steady host controller is reused from the retained backpressure study, not
+annular's new monitored driver. Its stopping criteria are study RMS ≤ $10^{-8}$
+and native source SSR < $10^{-8}$. Additional per-equation relative residuals
+are recorded as diagnostics; **nine-order reduction does not control this
+baseline**. The controller rejects a timestep after nine failed trials, whereas
+the production application driver can force acceptance on its last retry.
+The report identifies this distinction explicitly. Both use the production
+implicit kernel with one unchecked Newton correction per pseudo-time update.
+
+All 64 steady runs meet the recorded residual targets; 15/16 finest-grid results
+pass the established pressure/density/Mach mean-error thresholds. The constant
+sonic-limit case fails the Mach error check. The finest MUSCL sonic-limit
+result passes those mean-error checks but still has throat Mach about 0.890
+instead of 1; constant gives about 0.809. This pointwise discrepancy is retained
+and reported separately from domain-mean accuracy.
+
+For Sod, one standard physical case is enough for this controlled baseline:
+it already contains a rarefaction, contact and shock. Refinement and three times
+provide additional checks without introducing new physics. The existing
+HLL/constant/forward-Euler path is retained, with one global physical timestep
+clipped before each output. All snapshots pass on 100/200/400 cells; the
+50-cell run misses the velocity-error target at later times. Conservation
+budgets remain near roundoff. Additional Riemann and smooth-wave tests can
+extend verification later.
+
+Configuration files:
+[cases/steady.yaml](cases/steady.yaml) and [cases/sod.yaml](cases/sod.yaml).
+They import the physical setup and baseline numerical constants from the
+existing examples below; the backpressure reference is reused from
+[`backpressure_sensitivity`](../backpressure_sensitivity/README.md).
+The 81 production Python source files are fingerprinted before/after running
+and checked again by the audits. This records the current working tree, not
+an assumed clean version of HEAD.
+
+From the repository root:
+
+```powershell
+.venv/Scripts/python.exe -u -m development.roberto.euler_nozzle.scripts.run_baselines steady
+.venv/Scripts/python.exe -u -m development.roberto.euler_nozzle.scripts.run_baselines sod
+.venv/Scripts/python.exe -m development.roberto.euler_nozzle.scripts.audit_baselines steady
+.venv/Scripts/python.exe -m development.roberto.euler_nozzle.scripts.audit_baselines sod
+.venv/Scripts/python.exe -m development.roberto.euler_nozzle.scripts.report_baselines
+.venv/Scripts/python.exe -m development.roberto.euler_nozzle.scripts.audit_reports
+```
+
+`outputs/baseline_steady/` and `outputs/baseline_sod/` contain strict JSON,
+actual histories, fields, provenance and audit records. The HTML builder only
+reads saved evidence; presentation changes do not require numerical reruns.
+The steady runner resumes completed entries if source/config match; use
+`--output` to retain a different campaign. Browser audits use isolated copies
+and profiles under `outputs/html_audit/`, with no live user browser profile.
+
+Independent audits passed for all **64 steady states and four Sod runs**.
+The Sod audit replays every saved timestep using independent NumPy HLL algebra,
+including fields, physical clock and integrated boundary-flux budgets. The
+steady audit reevaluates the source residuals and independent analytical errors.
+These audits verify the saved baseline; they do not certify unimplemented
+refactor code.
+
+When comparing the refactor, keep these artifacts and their source fingerprints
+unchanged. Save new campaigns separately. Structural extraction should reproduce
+the corresponding operator values and discrete roots. The planned mesh,
+coupled-boundary and Newton/stopping migrations are intentional numerical
+changes: compare matched physical domains/resolutions, analytical errors,
+conservation, sonic/shock locations and actual convergence criteria rather than
+requiring identical iteration counts. For Sod, compare the same physical times
+and boundary-flux budgets. Do not reinterpret old relative-residual observations
+as evidence that the future nine-order criterion was used.
+
+## Original standalone examples and historical verification
+
 These two examples compare numerical Euler solutions with independent
 analytical or semi-analytical references. They verify the implementation
 against known solutions, rather than validating it against experiments.
