@@ -34,6 +34,7 @@ snakeviz = "^2.2.2"
 parse = "^1.22.0"
 line-profiler = "^5.0.2"
 tensorboard = "^2.20.0"
+pyyaml = "^6.0.3"
 
 
 [tool.poetry.group.dev.dependencies]
