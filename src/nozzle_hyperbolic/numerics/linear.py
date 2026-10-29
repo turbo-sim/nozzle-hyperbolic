@@ -1,4 +1,7 @@
 """Unchanged definitions relocated from the TwoFluid solver modules."""
+import operator
+
+import jax
 import jax.numpy as jnp
 
 
@@ -35,3 +38,77 @@ def _equil_lstsq(A, B, rcond=1e-14):
     Bs = B * (dr[:, None] if B.ndim == 2 else dr)
     Y  = jnp.linalg.lstsq(As, Bs, rcond=rcond)[0]
     return Y * (dc[:, None] if B.ndim == 2 else dc)
+
+
+def solve_block_banded(blocks, rhs, radius=None):
+    """Solve a square block-banded system without constructing a dense matrix.
+
+    ``blocks[i, d]`` is the derivative of row block i with respect to block
+    i+d-radius, shape ``(nblocks, 2*radius+1, nvar, nvar)``. ``rhs`` is flat.
+    Missing off-domain blocks must be zero. Grouping radius adjacent blocks
+    produces a block-tridiagonal system; a block Thomas elimination follows.
+    Padding adds identity rows for an incomplete final group.
+
+    Pivoting is local to a superblock, not across superblocks. A nonsingular
+    full matrix can still defeat this factorization; callers must check the
+    correction and linear defect. This is the existing Euler algorithm with
+    its variable count and bandwidth parameterized.
+    """
+    nblocks, ndiag, nvar, ncol = blocks.shape
+    radius = (ndiag - 1) // 2 if radius is None else operator.index(radius)
+    if radius < 0 or ndiag != 2 * radius + 1 or nvar != ncol:
+        raise ValueError("Expected square blocks with 2*radius+1 diagonals")
+    if nblocks < 1 or nvar < 1 or rhs.shape != (nblocks * nvar,):
+        raise ValueError("Block count, variable count and flat rhs must agree")
+    cells_per_group = max(radius, 1)
+    ngroups = -(-nblocks // cells_per_group)
+    padded_count = ngroups * cells_per_group
+    group_size = nvar * cells_per_group
+    padded = jnp.pad(blocks, ((0, padded_count - nblocks), (0, 0), (0, 0), (0, 0)))
+    if padded_count > nblocks:
+        padded = padded.at[nblocks:, radius].set(jnp.eye(nvar, dtype=padded.dtype))
+    diagonal = jnp.zeros((ngroups, group_size, group_size), padded.dtype)
+    upper = jnp.zeros_like(diagonal)
+    lower = jnp.zeros_like(diagonal)
+    for a in range(cells_per_group):
+        for d in range(ndiag):
+            off = a + d - radius
+            block = padded[a::cells_per_group, d]
+            rows = slice(nvar * a, nvar * a + nvar)
+            if 0 <= off < cells_per_group:
+                diagonal = diagonal.at[:, rows, nvar*off:nvar*off+nvar].set(block)
+            elif off >= cells_per_group:
+                o = off - cells_per_group
+                upper = upper.at[:, rows, nvar*o:nvar*o+nvar].set(block)
+            else:
+                o = off + cells_per_group
+                lower = lower.at[:, rows, nvar*o:nvar*o+nvar].set(block)
+    b = jnp.pad(rhs, (0, nvar * (padded_count - nblocks))).reshape(ngroups, group_size)
+
+    def forward(carry, inputs):
+        previous_upper, previous_rhs = carry
+        diagonal_i, upper_i, lower_i, rhs_i = inputs
+        reduced_diagonal = diagonal_i - lower_i @ previous_upper
+        reduced_rhs = rhs_i - lower_i @ previous_rhs
+        solved = jnp.linalg.solve(
+            reduced_diagonal, jnp.concatenate([upper_i, reduced_rhs[:, None]], axis=1)
+        )
+        result = (solved[:, :-1], solved[:, -1])
+        return result, result
+
+    zero = (jnp.zeros((group_size, group_size), padded.dtype),
+            jnp.zeros((group_size,), padded.dtype))
+    _, (upper_factors, rhs_factors) = jax.lax.scan(
+        forward, zero, (diagonal, upper, lower, b)
+    )
+
+    def backward(next_x, inputs):
+        upper_i, rhs_i = inputs
+        x_i = rhs_i - upper_i @ next_x
+        return x_i, x_i
+
+    _, solution = jax.lax.scan(
+        backward, jnp.zeros((group_size,), padded.dtype),
+        (upper_factors, rhs_factors), reverse=True,
+    )
+    return solution.reshape(-1)[:nvar * nblocks]

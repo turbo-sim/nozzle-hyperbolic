@@ -108,6 +108,9 @@ from nozzle_hyperbolic.models.euler_nozzle.state import (
 from nozzle_hyperbolic.solvers.time_marching.cfl import (
     _compute_dt,
 )
+from nozzle_hyperbolic.numerics.jacobians import make_block_operators
+from nozzle_hyperbolic.solvers.finite_volume import flux_divergence
+from nozzle_hyperbolic.solvers.time_marching.implicit import make_newton_solver
 
 
 
@@ -422,6 +425,14 @@ def make_jax_stadtke_step(fluid, A, A_face, dAdx, D_h, roughness, dx, CFL, p_out
     as unknowns. ``steady_residual`` has physical flux units; its Jacobian and
     Newton direction contain no pseudo-time storage term.
 
+    The operator dictionary also exposes ``physical_residual(U_new,U_old,dt)``
+    for full (N,3) arrays with independent boundary values, and the unchanged
+    ``inlet_boundary``/``outlet_boundary`` maps. This physical operator returns
+    the interior flat rows without applying a boundary map. ``solver_metadata``
+    (also ``step.solver_metadata``) publishes nvar, interior block count,
+    stencil radius, Jacobian/linear choices, Newton settings and its scale
+    callback for retained matched studies; no private closure access is needed.
+
     ``flux_variant='regularized'`` uses consistent characteristic splitting
     with conservative sonic viscosity and no inverse of the singular flux
     Jacobian. ``'legacy'`` retains the historical implementation solely for
@@ -704,6 +715,15 @@ def make_jax_stadtke_step(fluid, A, A_face, dAdx, D_h, roughness, dx, CFL, p_out
         U   = jnp.concatenate([U_n[:1], U_int, U_n[-1:]], axis=0)
         U   = _bc_inlet(U)
         U   = _bc_outlet(U)
+        return _physical_residual(U, U_n, dt)
+
+    def _physical_residual(U, U_n, dt):
+        """Physical rows for independent full new/old (N,3) states.
+
+        No boundary map is applied here. Current boundary values participate
+        in spatial flux/reconstruction; storage uses old physical cells only.
+        Both internal and coupled formulations use this one physical path.
+        """
 
         if cell_local_jac:
             E_U   = _eos_cells_local(U)                      # (N,3): ρ, a, μ
@@ -763,7 +783,7 @@ def make_jax_stadtke_step(fluid, A, A_face, dAdx, D_h, roughness, dx, CFL, p_out
         # For cells 1..N-2: right faces = F_hat[1:], left faces = F_hat[:-1]
         Vc    = V_cell[1:-1, None]                                         # (N-2, 1)
         dV    = V_new[1:-1] - V_old[1:-1]                                  # (N-2, 3)
-        fdiv  = A_face[1:, None] * F_hat[1:] - A_face[:-1, None] * F_hat[:-1]  # (N-2, 3)
+        fdiv  = flux_divergence(A_face[:, None] * F_hat)                    # (N-2, 3)
         R     = Vc * dV + dt * fdiv - dt * Vc * src[1:-1]
         return R.flatten()
 
@@ -783,127 +803,19 @@ def make_jax_stadtke_step(fluid, A, A_face, dAdx, D_h, roughness, dx, CFL, p_out
     # eps_filter>0 adds a ±2-cell 4th-order stencil → widen the band even for
     # constant recon so the colored Jacobian stays exact (guard: jacobian_validate).
     _stencil_width = 1 if (recon == 'constant' and eps_filter == 0.0) else 2
-    _cell_stride   = 2 * _stencil_width + 1          # cells between same-color columns
-    _stride        = 3 * _cell_stride                # DOF stride (3 vars/cell)
-    _m_dof         = 3 * (N - 2)                      # total interior DOFs
-    _n_colors      = min(_stride, _m_dof)             # graceful if N tiny
-
-    _jac_dense = jax.jacobian(_residual, argnums=0)
-
-    def _colored_columns(U_int_flat, U_n_flat, dt):
-        m_loc = U_int_flat.shape[0]
-        # Linearize once: the expensive nonlinear residual (EOS chain) runs a
-        # single time; each colored seed is then a cheap linear JVP.
-        _, jvp_fn = jax.linearize(lambda u: _residual(u, U_n_flat, dt), U_int_flat)
-        cols_idx  = jnp.arange(m_loc)
-        color_ids = jnp.arange(_n_colors)
-        S  = (cols_idx[None, :] % _stride == color_ids[:, None]).astype(U_int_flat.dtype)
-        return jax.vmap(jvp_fn)(S)                     # (n_colors, m): summed columns
-
-    def _jac_colored(U_int_flat, U_n_flat, dt):
-        m_loc = U_int_flat.shape[0]
-        Jc    = _colored_columns(U_int_flat, U_n_flat, dt)
-        # De-interleave: for each row r (cell lr=r//3), the in-band columns are
-        # cells lr-sw..lr+sw × 3 vars; each has a unique color within the band,
-        # so J[r, c] = Jc[color(c), r].
-        rows = jnp.arange(m_loc)
-        lr   = rows // 3
-        J    = jnp.zeros((m_loc, m_loc), dtype=U_int_flat.dtype)
-        for dc in range(-_stencil_width, _stencil_width + 1):
-            for vc in range(3):
-                lc     = lr + dc
-                c      = lc * 3 + vc
-                valid  = (lc >= 0) & (lc <= (N - 3))
-                c_safe = jnp.clip(c, 0, m_loc - 1)
-                val    = jnp.where(valid, Jc[c_safe % _stride, rows], 0.0)
-                J      = J.at[rows, c_safe].add(val)   # invalid → adds 0 at clipped col
-        return J
-
-    _jac_fn = _jac_colored if jacobian_mode == 'colored' else _jac_dense
-
-    # ── SPEED-UP (linear_solver='banded'): O(N) Newton solve ─────────────────
-    # The dense path builds a (3(N-2))² matrix and LU-factors it: O(N³), ~0.5 s
-    # per solve at N=500 (99 % of the step).  The Jacobian is block-banded with
-    # 3×3 blocks at cell offsets -sw..+sw, so:
-    #   1. read the blocks straight from the colored columns (no dense matrix);
-    #   2. group sw cells into one super-block (3sw×3sw) → block-TRIDIAGONAL;
-    #   3. block Thomas: one LU per super-block, [G_i | g_i] = D'_i⁻¹[U_i | b'_i],
-    #      back substitution x_i = g_i − G_i x_{i+1} (mat-vecs only).
-    # Pivoting happens inside each super-block only (no pivoting across
-    # blocks); matched the dense LU to ~1e-12 on every tested case, including
-    # SER at CFL 50.  The sparsity guard is the same as for the colored
-    # Jacobian (jacobian_validate).
-    _Nc   = N - 2                                 # interior cells
-    _sw   = _stencil_width
-    _D    = 2 * _sw + 1                           # block offsets per row
-    _s    = _sw                                   # cells per super-block
-    _M    = -(-_Nc // _s)                         # number of super-blocks
-    _Ncp  = _M * _s                               # padded cell count
-    _S3   = 3 * _s                                # super-block size
-
-    def _jac_blocks(U_int_flat, U_n_flat, dt):
-        """J_blk[i, d] = ∂R_i/∂U_{i+d-sw}  (Nc, D, 3, 3), from the colored columns."""
-        Jc  = _colored_columns(U_int_flat, U_n_flat, dt)
-        i   = jnp.arange(_Nc)
-        blk = []
-        for d in range(_D):
-            lc    = i + d - _sw
-            valid = (lc >= 0) & (lc <= _Nc - 1)
-            cols  = []
-            for vc in range(3):
-                col  = (lc * 3 + vc) % _stride
-                vals = jnp.stack([Jc[col, 3 * i + vr] for vr in range(3)], axis=1)
-                cols.append(jnp.where(valid[:, None], vals, 0.0))
-            blk.append(jnp.stack(cols, axis=2))         # (Nc, 3, 3)  [row var, col var]
-        return jnp.stack(blk, axis=1)                   # (Nc, D, 3, 3)
+    _block_operators = make_block_operators(
+        _residual, N - 2, 3, _stencil_width,
+        jacobian_mode=jacobian_mode, linear_solver=linear_solver,
+    )
+    _jac_dense = _block_operators["dense_jacobian"]
+    _jac_colored = _block_operators["colored_jacobian"]
+    _jac_fn = _block_operators["jacobian"]
+    _jac_blocks = _block_operators["jacobian_blocks"]
+    _newton_dU = _block_operators["direction"]
 
     def _banded_solve(J_blk, R):
-        """Solve J dU = -R with J given as 3×3 blocks (block-tridiagonal LU)."""
-        Jp = jnp.pad(J_blk, ((0, _Ncp - _Nc), (0, 0), (0, 0), (0, 0)))
-        if _Ncp > _Nc:                                  # padded cells: identity rows
-            Jp = Jp.at[_Nc:, _sw].set(jnp.eye(3, dtype=Jp.dtype))
-        Dm = jnp.zeros((_M, _S3, _S3), Jp.dtype)        # diagonal super-blocks
-        Um = jnp.zeros((_M, _S3, _S3), Jp.dtype)        # upper  (super-block k+1)
-        Lm = jnp.zeros((_M, _S3, _S3), Jp.dtype)        # lower  (super-block k-1)
-        for a in range(_s):                             # local row cell
-            for d in range(_D):
-                off = a + d - _sw                       # local column cell
-                blk = Jp[a::_s, d]                      # (M, 3, 3)
-                if 0 <= off < _s:
-                    Dm = Dm.at[:, 3*a:3*a+3, 3*off:3*off+3].set(blk)
-                elif off >= _s:
-                    o = off - _s
-                    Um = Um.at[:, 3*a:3*a+3, 3*o:3*o+3].set(blk)
-                else:
-                    o = off + _s
-                    Lm = Lm.at[:, 3*a:3*a+3, 3*o:3*o+3].set(blk)
-        b = jnp.pad(-R, (0, 3 * (_Ncp - _Nc))).reshape(_M, _S3)
-
-        def fwd(carry, inp):
-            G_prev, g_prev = carry
-            D_i, U_i, L_i, b_i = inp
-            Dp = D_i - L_i @ G_prev
-            bp = b_i - L_i @ g_prev
-            Z  = jnp.linalg.solve(Dp, jnp.concatenate([U_i, bp[:, None]], axis=1))
-            return (Z[:, :-1], Z[:, -1]), (Z[:, :-1], Z[:, -1])
-
-        z0 = (jnp.zeros((_S3, _S3), Dm.dtype), jnp.zeros((_S3,), Dm.dtype))
-        _, (G, g) = jax.lax.scan(fwd, z0, (Dm, Um, Lm, b))
-
-        def bwd(x_next, inp):
-            G_i, g_i = inp
-            x_i = g_i - G_i @ x_next
-            return x_i, x_i
-        _, X = jax.lax.scan(bwd, jnp.zeros((_S3,), Dm.dtype), (G, g), reverse=True)
-        return X.reshape(-1)[:3 * _Nc]
-
-    def _newton_dU(U_k, U_n_flat, dt):
-        """One Newton update dU = -J⁻¹R."""
-        R_k = _residual(U_k, U_n_flat, dt)
-        if linear_solver == 'banded':
-            return _banded_solve(_jac_blocks(U_k, U_n_flat, dt), R_k)
-        J_k = _jac_fn(U_k, U_n_flat, dt)
-        return jnp.linalg.solve(J_k, -R_k)
+        """Preserve the nozzle residual-to-direction sign convention."""
+        return _block_operators["solve_blocks"](J_blk, -R)
 
     def _newton_scale(U_k):
         """Reference magnitudes for the newton_tol test: |p| per cell, global
@@ -913,6 +825,11 @@ def make_jax_stadtke_step(fluid, A, A_face, dAdx, D_h, roughness, dx, CFL, p_out
                           jnp.full_like(U[:, 1], jnp.max(jnp.abs(U[:, 1])) + 1.0),
                           jnp.full_like(U[:, 2], jnp.max(jnp.abs(U[:, 2])))],
                          axis=1).reshape(-1)
+
+    _solve_newton = make_newton_solver(
+        _residual, _newton_dU, _newton_scale,
+        max_iterations=newton_iter, tolerance=newton_tol,
+    )
 
     @jax.jit
     def jac_diff(U_n, dt):
@@ -939,27 +856,8 @@ def make_jax_stadtke_step(fluid, A, A_face, dAdx, D_h, roughness, dx, CFL, p_out
         U_n_flat  = U_n.reshape(-1)                    # (3*N,)
         U_k       = U_n[1:-1].reshape(-1)              # (3*(N-2),) — initial Newton iterate
 
-        # ── Newton iterations ─────────────────────────────────────────────
-        if newton_tol > 0.0:
-            # SPEED-UP (newton_tol): stop once the relative update drops below
-            # newton_tol (remaining error ~newton_tol² by quadratic convergence).
-            # At CFL 0.5 Newton needs 5–6 iterations in transients and 1–3 near
-            # steady state; newton_iter stays the hard cap.
-            def _nt_cond(c):
-                return (c[0] < newton_iter) & (c[2] > newton_tol)
-
-            def _nt_body(c):
-                dU = _newton_dU(c[1], U_n_flat, dt)
-                return (c[0] + 1, c[1] + dU,
-                        jnp.max(jnp.abs(dU) / (_newton_scale(c[1]) + 1e-300)))
-
-            _, U_k, _ = jax.lax.while_loop(
-                _nt_cond, _nt_body, (0, U_k, jnp.float64(jnp.inf)))
-        else:
-            def body(_, U_k):
-                return U_k + _newton_dU(U_k, U_n_flat, dt)
-
-            U_k = jax.lax.fori_loop(0, newton_iter, body, U_k)
+        # Same full-step Newton rules, now shared with other square models.
+        U_k, _ = _solve_newton(U_k, U_n_flat, dt)
 
         # ── Reconstruct full solution with updated BCs ────────────────────
         U_new = jnp.concatenate([U_n[:1], U_k.reshape(N - 2, 3), U_n[-1:]], axis=0)
@@ -995,6 +893,20 @@ def make_jax_stadtke_step(fluid, A, A_face, dAdx, D_h, roughness, dx, CFL, p_out
         U_L, U_R = _muscl_ph(U) if recon != 'constant' else (U[:-1], U[1:])
         F_hat    = _face_flux(U_L, U_R, fluid, delta_factor)   # (N-1, 3)
         return A_face * F_hat[:, 0]
+
+    solver_metadata = {
+        'nvar': 3,
+        'nblocks': N - 2,
+        'stencil_radius': _stencil_width,
+        'jacobian_mode': jacobian_mode,
+        'linear_solver': linear_solver,
+        'newton_iter': newton_iter,
+        'newton_tol': newton_tol,
+        'newton_scale': _newton_scale,
+    }
+    # Explicit construction metadata for retained studies; no closure access
+    # or changes to the historical four/five-return tuple contracts.
+    step.solver_metadata = solver_metadata
 
     if not return_operators:
         return step, compute_dt, jac_diff, face_mass_flux
@@ -1056,6 +968,10 @@ def make_jax_stadtke_step(fluid, A, A_face, dAdx, D_h, roughness, dx, CFL, p_out
         'steady_residual_norm': steady_residual_norm,
         'conservative_state': jax.jit(_V_from_U),
         'cell_volumes': V_cell,
+        'physical_residual': jax.jit(_physical_residual),
+        'inlet_boundary': jax.jit(_bc_inlet),
+        'outlet_boundary': jax.jit(_bc_outlet),
+        'solver_metadata': solver_metadata,
     }
     return step, compute_dt, jac_diff, face_mass_flux, operators
 
