@@ -82,6 +82,22 @@ Important Euler navigation:
   residual operators, cold initialization, steady and physical-time drivers.
   Unknowns are `(p, v_m, ell, h)`; `v_theta=ell/r`. Numerical paths use sound
   speed and Gruneisen, with perfect-gas formulas confined to analytical references.
+- `models/euler_annular/closures/wall.py`: named zero-default/prescribed
+  `shear_stress_wall` and `heat_flux_wall` placeholders. Shear contributes angular
+  wall torque; only heat adds total energy. Empirical correlations are deferred.
+  The current report campaign uses `verify_grid_sequence` with 50/100/200/400
+  physical cells and bounded primitive initialization between converged meshes.
+- `solvers/residuals.py`, `solvers/monitoring.py`, and
+  `solvers/convergence_output.py`: reusable fixed-scale equation norms,
+  scalar-monitor windows, plain-text convergence tables and strict JSON.
+  Annular's opt-in `solve_steady_monitored` connects these; nozzle and legacy
+  annular drivers keep their previous stopping definitions. Annular YAML inputs
+  live in `development/roberto/euler_annular/cases/`; its `run_case.py` runs one
+  named case with live convergence output. Keep historical histories labelled
+  with their actual residual definition.
+  The main report now reads `outputs/grid_sequence_monitored_full/`: all 72
+  nine-order reruns, with four N400 MUSCL stagnation failures retained. Results
+  uses eight native collapsible boxes and a 2-by-2 overall/CFL/local/global view.
 - `models/two_fluid/solver.py`: substantial model-specific implicit assembly
   and boundary construction; do not assume it shares Euler's implementation.
 

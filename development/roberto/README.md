@@ -1,9 +1,21 @@
 # Roberto: development verification and numerical studies
 
+The [shared hyperbolic infrastructure assessment and implementation plan](shared_hyperbolic/IMPLEMENTATION_PLAN.md)
+reviews an incremental common numerical engine for EulerNozzle, EulerAnnular,
+and future scalar models. It preserves model-specific physics and boundary
+laws, with coupled boundary residuals, a common mesh/MUSCL implementation and
+annular's safeguarded Newton and convergence policies as the final Euler
+design. Two-fluid migration is deferred.
+
 The readable EulerNozzle verification examples live in
 [`euler_nozzle/`](euler_nozzle/README.md). Its note explains the physical
 conditions, references, numerical settings, and acceptance checks for the
 steady nozzle and unsteady Sod shock tube.
+Its new standalone [steady baseline](euler_nozzle/STEADY_REPORT.html) covers
+eight backpressure regimes with constant/MUSCL reconstruction and four meshes;
+the separate [Sod baseline](euler_nozzle/SOD_REPORT.html) covers three physical
+times and four meshes. Both retain the current source kernels, saved numerical
+evidence and independent audits before the shared-engine migration.
 
 Run from the repository root after `poetry install`:
 
@@ -39,3 +51,20 @@ same five-case residual and physical audits.
 The [backpressure analysis](backpressure_sensitivity/README.md) follows a descending
 operating-pressure sweep from rest through choking, internal shocks and
 supersonic discharge, including overexpanded and underexpanded operation.
+
+The [EulerAnnular prototype](euler_annular/README.md) implements the general-EOS
+curvilinear annular FVM with swirl, NURBSpy spline geometry and simultaneous
+algebraic boundary blocks. The study contains the accepted implementation plan
+and questionnaire, analytical/constant/MUSCL verification drivers, and reports
+that distinguish converged discrete roots from analytical accuracy limits.
+
+The annular solver retains angular-momentum storage and now includes named
+wall-shear and heat-flux placeholders. Its updated report uses a 50/100/200/400
+grid sequence with bounded primitive interpolation to initialize each finer
+mesh, and separates original-equation convergence from analytical accuracy.
+
+The [multigrid study](multigrid/README.md) benchmarks EulerNozzle implicit
+single-grid solves against coarse-to-fine initialization, with repeated timings
+and one shareable standalone [HTML report](multigrid/REPORT.html) at the study
+root. Numerical artifacts remain under `outputs/`. Its separate annular design note
+assesses future nonlinear FAS cycles; FAS is not implemented.

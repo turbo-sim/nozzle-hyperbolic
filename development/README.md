@@ -7,6 +7,9 @@ All development work is grouped under this single directory:
   records the previous run results and their limitations.
 - [roberto/](roberto/README.md): current Euler verification examples, numerical
   fixes, Newton/PTC, implicit-integration and boundary-condition studies.
+- [residual_monitoring/](residual_monitoring/README.md): shared nozzle/annular
+  residual definitions, convergence policy, compatibility discussion, and proposed
+  implementation plan; documentation only.
 
 Each collection retains its existing thematic organization. New controlled
 studies belong under `roberto/<study>/`, with human-facing notes at the study
