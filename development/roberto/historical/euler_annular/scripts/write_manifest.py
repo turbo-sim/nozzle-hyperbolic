@@ -47,10 +47,10 @@ def source_snapshot():
         "pyproject.toml", "poetry.lock",
         "development/roberto/historical/euler_nozzle/verify_euler_nozzle_steady.py",
         "development/roberto/historical/euler_nozzle/verify_euler_nozzle_sod.py",
-        "development/roberto/BC_residual/scripts/source_adapter.py",
-        "development/roberto/BC_residual/scripts/boundary_system.py",
-        "development/roberto/BC_residual/scripts/coupled_step.py",
-        "development/roberto/BC_residual/scripts/compare_implicit.py",
+        "development/roberto/historical/BC_residual/scripts/source_adapter.py",
+        "development/roberto/historical/BC_residual/scripts/boundary_system.py",
+        "development/roberto/historical/BC_residual/scripts/coupled_step.py",
+        "development/roberto/historical/BC_residual/scripts/compare_implicit.py",
     ))
     return {relative(path): sha256(path.read_bytes()).hexdigest()
             for path in sorted(paths) if path.is_file()}

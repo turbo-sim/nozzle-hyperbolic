@@ -41,13 +41,13 @@ example with legacy/corrected fluxes and optional smooth reconstruction.
 Its [explanatory note](numerical_fixes/README.md) separates AD/regularity repairs
 from changes to the finite-volume equations.
 
-The [implicit-integration sensitivity studies](implicit_integration/README.md)
+The [implicit-integration sensitivity studies](historical/implicit_integration/README.md)
 compare inner Newton caps and CFL controllers across the same five nozzle cases.
-The standalone [HTML report](implicit_integration/REPORT.html) contains internal
+The standalone [HTML report](historical/implicit_integration/REPORT.html) contains internal
 pages for all three studies plus theory, with convergence, pressure, actual CFL,
 inner-work and recorded-time plots rebuilt from the 105 retained solves.
 
-The [boundary-condition study](BC_residual/README.md) compares internal
+The [boundary-condition study](historical/BC_residual/README.md) compares internal
 ghost treatment with coupled algebraic boundary equations using matched implicit
 Newton and banded solvers. Its reports retain repeated timing samples and the
 same five-case residual and physical audits.
@@ -67,8 +67,8 @@ wall-shear and heat-flux placeholders. Its updated report uses a 50/100/200/400
 grid sequence with bounded primitive interpolation to initialize each finer
 mesh, and separates original-equation convergence from analytical accuracy.
 
-The [multigrid study](multigrid/README.md) benchmarks EulerNozzle implicit
+The [multigrid study](historical/multigrid/README.md) benchmarks EulerNozzle implicit
 single-grid solves against coarse-to-fine initialization, with repeated timings
-and one shareable standalone [HTML report](multigrid/REPORT.html) at the study
+and one shareable standalone [HTML report](historical/multigrid/REPORT.html) at the study
 root. Numerical artifacts remain under `outputs/`. Its separate annular design note
 assesses future nonlinear FAS cycles; FAS is not implemented.

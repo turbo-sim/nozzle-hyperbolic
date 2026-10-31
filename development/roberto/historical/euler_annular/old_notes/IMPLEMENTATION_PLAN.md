@@ -408,8 +408,8 @@ recommendation does not replace the earlier explicit coupled-block instruction.
 The resolved decision is one coupled Newton system with no nested BC solve.
 
 Follow the formulation and numerical findings of the
-[boundary-condition study](../../../BC_residual/REPORT.html#theory) and its
-[matched implicit report](../../../BC_residual/REPORT.html#results): physical
+[boundary-condition study](../../BC_residual/REPORT.html#theory) and its
+[matched implicit report](../../BC_residual/REPORT.html#results): physical
 block ordering, independent current boundary unknowns, zero boundary storage,
 one shared Newton/colored/banded implementation, and separate spatial/BC audits.
 The study's three-equation/six-extra-unknown layout becomes four equations and

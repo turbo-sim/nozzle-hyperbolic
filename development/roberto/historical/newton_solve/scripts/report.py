@@ -14,14 +14,14 @@ import re
 import sys
 
 import markdown
-from development.roberto.implicit_integration.scripts.report import (
+from development.roberto.historical.implicit_integration.scripts.report import (
     csv_bytes, download, flag, json_safe, script_safe, table,
 )
 from .report_data import STUDY, NAMES, audit, cold_runs, load, make_payload, numerical_files, sha
 
 ASSETS=Path(__file__).resolve().parent/'report_assets'
-SHARED=STUDY.parent.parent/'BC_residual/scripts/report_assets'
-IMPLICIT=STUDY.parent.parent/'implicit_integration/scripts/report_assets'
+SHARED=STUDY.parent/'BC_residual/scripts/report_assets'
+IMPLICIT=STUDY.parent/'implicit_integration/scripts/report_assets'
 PAGES=(('cold','Cold starts'),('performance','PTC cost'),('adapted','Adapted starts'),
        ('theory','Mechanism'),('notes','Earlier notes'))
 

@@ -7,6 +7,10 @@ Canonical analytical references live beside their physical models in
 
 | Directory | Retained material |
 |---|---|
+| [`BC_backpressure/`](BC_backpressure/README.md) | Outlet-law, backpressure, and boundary-regime investigations |
+| [`BC_residual/`](BC_residual/README.md) | Coupled versus internal boundary equations and matched timing studies |
+| [`implicit_integration/`](implicit_integration/README.md) | Newton caps, CFL policies, and implicit integration sensitivity |
+| [`multigrid/`](multigrid/README.md) | Single-grid versus coarse-to-fine initialization benchmarks and FAS design notes |
 | [`backpressure_sensitivity/`](backpressure_sensitivity/README.md) | Nozzle operating-pressure sweep, choking, shocks, and outflow comparisons |
 | [`euler_annular/`](euler_annular/README.md) | Annular Euler geometry, steady/transient verification, source checks, and accuracy studies |
 | [`euler_nozzle/`](euler_nozzle/README.md) | Steady nozzle and Sod reference comparisons and baseline reports |

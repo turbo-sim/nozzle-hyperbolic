@@ -124,11 +124,11 @@ Keep the single `development/` parent; do not recreate `development_new/` or
 | [euler_nozzle](development/roberto/historical/euler_nozzle/README.md) | Readable steady nozzle and unsteady Sod verification against analytic solutions |
 | [numerical_fixes](development/roberto/numerical_fixes/README.md) | Flux/projector/entropy-regularization and limiter repairs; legacy/corrected comparison |
 | [newton_solve](development/roberto/historical/newton_solve/README.md) | Retained Newton/PTC/implicit comparison and consolidated explanations of earlier failures |
-| [implicit_integration](development/roberto/implicit_integration/README.md) | Inner Newton work and CFL/controller sensitivities |
-| [BC_residual](development/roberto/BC_residual/README.md) | Internal versus coupled BC equations with matched implicit solver machinery and repeated timings |
+| [implicit_integration](development/roberto/historical/implicit_integration/README.md) | Inner Newton work and CFL/controller sensitivities |
+| [BC_residual](development/roberto/historical/BC_residual/README.md) | Internal versus coupled BC equations with matched implicit solver machinery and repeated timings |
 | [backpressure_sensitivity](development/roberto/historical/backpressure_sensitivity/README.md) | Perfect-gas implicit operating map, choking/shock-exit behavior and outlet branch selection |
 | [euler_annular](development/roberto/historical/euler_annular/README.md) | General-EOS annular solver, NURBSpy geometry, answered design decisions, analytical/constant/MUSCL verification and independent saved-state audits |
-| [multigrid](development/roberto/multigrid/README.md) | EulerNozzle implicit single-grid versus coarse-to-fine initialization benchmark; annular multigrid design note; no FAS implementation |
+| [multigrid](development/roberto/historical/multigrid/README.md) | EulerNozzle implicit single-grid versus coarse-to-fine initialization benchmark; annular multigrid design note; no FAS implementation |
 
 The steady baseline has five regimes: supersonic exit, shocks at 35% and 70%
 of the divergent section, sonic-throat/subsonic-exit limiting flow, and fully
@@ -237,7 +237,7 @@ used by neighboring studies when reorganizing it.
 
 To rebuild the implicit-integration report from the retained 105-run dataset,
 without importing numerical solvers or rerunning cases, use
-`poetry run python -B -m development.roberto.implicit_integration.scripts.report`.
+`poetry run python -B -m development.roberto.historical.implicit_integration.scripts.report`.
 It writes root `REPORT.html` with three sensitivity pages and one theory page;
 saved timing samples and numerical JSON/CSV files remain unchanged. See that
 study's README for the optional isolated offline browser audit.
@@ -246,16 +246,16 @@ To regenerate the EulerNozzle grid-sequencing benchmark and its HTML
 reports, run from the repository root:
 
 ```powershell
-poetry run python -u -m development.roberto.multigrid.scripts.run_demo
-poetry run python -m development.roberto.multigrid.scripts.audit_results
-poetry run python -m development.roberto.multigrid.scripts.report_results
+poetry run python -u -m development.roberto.historical.multigrid.scripts.run_demo
+poetry run python -m development.roberto.historical.multigrid.scripts.audit_results
+poetry run python -m development.roberto.historical.multigrid.scripts.report_results
 ```
 
 See the study README for effective settings and smaller smoke commands. The
 default benchmark compares single-grid and coarse-to-fine initialization on
 three cases and two reconstructions, with ten measured samples plus an excluded
 complete solve per method. It changes no source and implements no FAS. Place
-HTML reports directly in `development/roberto/multigrid/`; keep numerical data,
+HTML reports directly in `development/roberto/historical/multigrid/`; keep numerical data,
 logs and figures in its `outputs/` subfolder. The generator writes one
 `REPORT.html` containing internal results and theory pages, with all rendering
 resources and offered downloads embedded. To update only the report from saved
