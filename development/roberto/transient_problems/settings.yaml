@@ -1,0 +1,27 @@
+cells: 200
+frames: 101
+cfl: 0.5
+max_steps: 30000
+scheme:
+  flux: hll
+  reconstruction: constant
+  newton_iterations: 30
+  newton_update_tolerance: 1.0e-10
+  newton_residual_tolerance: 1.0e-12
+  max_backtracks: 24
+sod:
+  length: 1.0
+  diaphragm: 0.5
+  left: {rho: 1.0, u: 0.0, p: 100000.0}
+  right: {rho: 0.125, u: 0.0, p: 10000.0}
+  end_acoustic_times: 0.2
+nozzle_step:
+  length: 0.2
+  inlet_area: 0.0003
+  throat_area: 0.00015
+  reservoir_pressure: 200000.0
+  reservoir_temperature: 300.0
+  back_pressure_ratio: 0.01
+  end_acoustic_times: 4.0
+  outlet_formulation: finite_wave
+  outlet_regime: auto
