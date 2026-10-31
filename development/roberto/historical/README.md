@@ -7,7 +7,6 @@ Canonical analytical references live beside their physical models in
 
 | Directory | Retained material |
 |---|---|
-| [`verification_references/`](verification_references/) | Import-only compatibility modules forwarding to model-owned analytical references |
 | [`backpressure_sensitivity/`](backpressure_sensitivity/README.md) | Nozzle operating-pressure sweep, choking, shocks, and outflow comparisons |
 | [`euler_annular/`](euler_annular/README.md) | Annular Euler geometry, steady/transient verification, source checks, and accuracy studies |
 | [`euler_nozzle/`](euler_nozzle/README.md) | Steady nozzle and Sod reference comparisons and baseline reports |

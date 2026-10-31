@@ -10,6 +10,7 @@ import pysolver_view as psv
 
 from development.roberto.historical.euler_nozzle import verify_euler_nozzle_steady as baseline
 from nozzle_hyperbolic.geometry.duct import get_symmetric_nozzle
+from nozzle_hyperbolic.models.euler_nozzle.analytical.perfect_gas import subsonic_reference
 from nozzle_hyperbolic.models.euler_nozzle.analytical.general_eos import (
     nozzle_exact_real_gas,
 )
@@ -54,11 +55,13 @@ class SteadyNozzleProblem:
         x_fine = np.linspace(self.x[0], self.x[-1], baseline.N_EXACT)
         area_fine = np.asarray(get_symmetric_nozzle(x_fine, **baseline.NOZZLE).A)
         if case["branch"] == "subsonic":
-            fine = baseline.subsonic_reference(
-                area_fine, self.fluid, case["throat_mach"]
+            fine = subsonic_reference(
+                area_fine, self.fluid, case["throat_mach"],
+                throat_area=baseline.NOZZLE["A_throat"], p0=self.p0, T0=self.T0,
             )
-            self.reference = baseline.subsonic_reference(
-                self.area, self.fluid, case["throat_mach"]
+            self.reference = subsonic_reference(
+                self.area, self.fluid, case["throat_mach"],
+                throat_area=baseline.NOZZLE["A_throat"], p0=self.p0, T0=self.T0,
             )
             self.p_back = float(fine["p"][-1])
         else:

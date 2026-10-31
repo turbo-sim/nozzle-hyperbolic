@@ -13,7 +13,7 @@ import numpy as np
 
 from development.roberto.historical.euler_nozzle import verify_euler_nozzle_steady as baseline
 from development.roberto.historical.backpressure_sensitivity.scripts.run_sweep import ImplicitNozzle, STUDY, hashes
-from nozzle_hyperbolic.models.euler_nozzle.analytical.perfect_gas import PerfectGasReference
+from nozzle_hyperbolic.models.euler_nozzle.analytical.perfect_gas import PerfectGasReference, subsonic_reference
 from nozzle_hyperbolic.models.euler_nozzle.analytical.general_eos import nozzle_exact_real_gas
 
 
@@ -24,7 +24,8 @@ def main():
     report = json.loads((args.output / 'summary.json').read_text(encoding='utf-8'))
     model = ImplicitNozzle(report['mesh_points'])
     ref = PerfectGasReference(model.fluid)
-    sub = baseline.subsonic_reference(model.area, model.fluid, .6)
+    sub = subsonic_reference(model.area, model.fluid, .6,
+                             throat_area=ref.At, p0=ref.p0, T0=ref.T0)
     ours = ref.profile(model.x, float(sub['p'][-1] / ref.p0))
     checks = dict(
         subsonic_pressure_max_relative_error=float(np.max(abs(ours['p'] - sub['p'])) / ref.p0),

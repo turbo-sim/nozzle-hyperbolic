@@ -54,7 +54,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import nozzle_hyperbolic as hyp
 import nozzle_hyperbolic.fvm_solver.geometry as _geom
-from nozzle_hyperbolic.models.euler_nozzle.analytical.nozzle_exact_real_gas import nozzle_exact_real_gas
+from nozzle_hyperbolic.models.euler_nozzle.analytical.general_eos import nozzle_exact_real_gas
 # from run_info import write_run_info
 
 hyp.set_plot_options(grid=False)

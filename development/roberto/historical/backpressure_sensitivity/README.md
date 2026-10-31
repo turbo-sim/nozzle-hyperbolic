@@ -45,7 +45,7 @@ The superseded HTML is retained only as an ignored presentation archive.
 | Script | Purpose |
 |---|---|
 | `run_sweep.py` | Numerical backpressure sweep, continuation and diagnostics |
-| `reference.py` | Existing perfect-gas analytical operating map |
+| `src/nozzle_hyperbolic/models/euler_nozzle/analytical/` | Canonical analytical operating map; imported directly |
 | `audit_results.py` | Independent saved-field residual/reference audit |
 | `plot_results.py` | Optional static PNG/PDF export and detailed output record |
 | `build_html_report.py` | Repackage the unchanged dataset into the standalone HTML |

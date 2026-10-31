@@ -4,6 +4,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from ...numerics.mesh import Mesh
+from .analytical import translated_trigonometric
 
 
 class AdvectionModel:
@@ -42,8 +43,9 @@ class AdvectionModel:
         self.global_flux_scales = jnp.array([speed_scale])
 
     def profile(self, coordinate, time=0.0):
-        phase = 2 * jnp.pi * (jnp.asarray(coordinate) - self.speed * time) / self.length
-        return jnp.sin(phase) + 0.25 * jnp.cos(2 * phase)
+        return translated_trigonometric(
+            coordinate, time, speed=self.speed, length=self.length
+        )
 
     def reference(self, time=0.0):
         return {"q": self.profile(self.mesh.centers, time)}

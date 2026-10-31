@@ -56,7 +56,7 @@ import numpy as np
 
 from nozzle_hyperbolic.geometry.duct import get_symmetric_nozzle
 from nozzle_hyperbolic.models.euler_nozzle.analytical.perfect_gas import (
-    subsonic_reference as _subsonic_reference,
+    subsonic_reference,
 )
 from nozzle_hyperbolic.models.euler_nozzle.analytical.general_eos import (
     nozzle_exact_real_gas,
@@ -67,12 +67,6 @@ from nozzle_hyperbolic.models.euler_nozzle.fvm import (
 )
 
 
-def subsonic_reference(area, fluid, throat_mach):
-    """Apply this study's physical data to the canonical unchoked reference."""
-    return _subsonic_reference(
-        area, fluid, throat_mach, throat_area=NOZZLE["A_throat"],
-        p0=P_STAGNATION, T0=T_STAGNATION,
-    )
 
 
 def solution_face_mass_flux(primitive, parameters):
@@ -149,8 +143,14 @@ def main(show=True, *, solver_overrides=None, output_dir=None, strict=True):
         # This general-EOS reference reduces to the classical area-Mach and
         # normal-shock relations when supplied with FluidPerfectGas.
         if case["branch"] == "subsonic":
-            curve = subsonic_reference(area_exact, fluid, case["throat_mach"])
-            reference = subsonic_reference(area, fluid, case["throat_mach"])
+            curve = subsonic_reference(
+                area_exact, fluid, case["throat_mach"],
+                throat_area=NOZZLE["A_throat"], p0=P_STAGNATION, T0=T_STAGNATION,
+            )
+            reference = subsonic_reference(
+                area, fluid, case["throat_mach"],
+                throat_area=NOZZLE["A_throat"], p0=P_STAGNATION, T0=T_STAGNATION,
+            )
             rho0 = P_STAGNATION / (float(fluid.constants.R) * T_STAGNATION)
         else:
             exact = nozzle_exact_real_gas(x_exact, area_exact, **reference_args)

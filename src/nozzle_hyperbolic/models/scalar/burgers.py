@@ -10,6 +10,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from ...numerics.mesh import Mesh
+from .analytical import burgers_riemann
 
 
 class BurgersModel:
@@ -51,14 +52,9 @@ class BurgersModel:
         self.global_flux_scales = np.array([scale**2])
 
     def profile(self, coordinate, time=0.0):
-        x = jnp.asarray(coordinate) - self.location
-        if self.left > self.right:
-            return jnp.where(
-                x < 0.5 * (self.left + self.right) * time, self.left, self.right
-            )
-        safe_time = jnp.where(jnp.asarray(time) > 0, time, 1.0)
-        fan = jnp.clip(x / safe_time, self.left, self.right)
-        return jnp.where(time > 0, fan, jnp.where(x < 0, self.left, self.right))
+        return burgers_riemann(
+            coordinate, time, left=self.left, right=self.right, location=self.location
+        )
 
     def initial_state(self):
         return self.profile(self.mesh.points)[:, None]

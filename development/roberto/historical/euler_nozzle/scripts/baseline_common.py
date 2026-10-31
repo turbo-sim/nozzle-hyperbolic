@@ -53,7 +53,6 @@ def provenance():
     inputs = [*sorted((STUDY / "cases").glob("*.yaml")),
               *sorted((STUDY / "scripts").glob("*.py")),
               STUDY / "verify_euler_nozzle_steady.py", STUDY / "verify_euler_nozzle_sod.py",
-              STUDY.parent / "backpressure_sensitivity/scripts/reference.py",
               STUDY.parent / "backpressure_sensitivity/scripts/run_sweep.py"]
     return dict(created=datetime.now(ZoneInfo("Europe/Paris")).isoformat(),
                 commit=git("rev-parse", "HEAD"), branch=git("branch", "--show-current"),
@@ -70,7 +69,7 @@ def validate_saved_campaign(report, cfg):
     dependencies=[STUDY/f"verify_euler_nozzle_{report['kind']}.py"]
     if report["kind"]=="steady":
         dependencies += [STUDY.parent/"backpressure_sensitivity/scripts"/name
-                         for name in ("reference.py","run_sweep.py")]
+                         for name in ("run_sweep.py",)]
     for path in dependencies:
         relative=path.relative_to(ROOT).as_posix()
         if sha256(path.read_bytes()).hexdigest()!=report["provenance"]["input_hashes"][relative]:

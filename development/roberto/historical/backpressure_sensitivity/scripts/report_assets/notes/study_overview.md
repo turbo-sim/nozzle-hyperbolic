@@ -89,7 +89,6 @@ backpressure_sensitivity/
   PHYSICS_AND_BOUNDARIES.md
   REPORT.md
   scripts/
-    reference.py          area-Mach and normal-shock operating map
     run_sweep.py          source-kernel integration, continuation and diagnostics
     plot_results.py       saved-data figures and full operating-point table
     audit_results.py      independent reference/saved-field residual checks
