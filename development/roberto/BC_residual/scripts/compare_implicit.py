@@ -20,9 +20,9 @@ import jax.numpy as jnp
 import numpy as np
 
 from development.roberto.BC_residual.scripts.coupled_step import CoupledStep
-from development.roberto.euler_nozzle import verify_euler_nozzle_steady as baseline
-from development.roberto.newton_solve.scripts.investigate_ptc import json_value
-from development.roberto.newton_solve.scripts.problem import SteadyNozzleProblem
+from development.roberto.historical.euler_nozzle import verify_euler_nozzle_steady as baseline
+from development.roberto.historical.newton_solve.scripts.investigate_ptc import json_value
+from development.roberto.historical.newton_solve.scripts.problem import SteadyNozzleProblem
 
 MODES = ("production", "coupled")
 CASE_IDS = ("supersonic", "shock35", "shock70", "sonic", "subsonic")

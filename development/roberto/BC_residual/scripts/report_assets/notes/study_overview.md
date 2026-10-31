@@ -94,8 +94,8 @@ when coupled.
 The retained 100-sample timing results describe the original measured revision,
 which used the documented read-only closure adapter. They were not rerun or
 replaced after this compatibility migration. A separate 21-point subsonic
-[compatibility smoke log](../euler_annular/outputs/implementation_baseline/boundary_adapter_smoke.log)
-and [saved audits](../euler_annular/outputs/implementation_baseline/boundary_adapter_smoke.json)
+[compatibility smoke log](../historical/euler_annular/outputs/implementation_baseline/boundary_adapter_smoke.log)
+and [saved audits](../historical/euler_annular/outputs/implementation_baseline/boundary_adapter_smoke.json)
 record source/coupled convergence from identical cold fields, plus augmented
 linear and boundary-dependency checks. That small smoke is not a new timing
 comparison or a replacement for the five-case benchmark.

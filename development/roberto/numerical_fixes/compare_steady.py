@@ -336,7 +336,7 @@ def main():
         matplotlib.use("Agg")
     import jaxprop as jxp
     import numpy as np
-    from development.roberto.euler_nozzle import verify_euler_nozzle_steady as baseline
+    from development.roberto.historical.euler_nozzle import verify_euler_nozzle_steady as baseline
     from nozzle_hyperbolic.models.euler_nozzle import flux_jax
 
     if not hasattr(flux_jax, "_jax_F_fvs_stadtke_legacy"):
@@ -369,7 +369,7 @@ def main():
             str(p.relative_to(root)): hashlib.sha256(p.read_bytes()).hexdigest()
             for p in sources
         },
-        setup_module="development.roberto.euler_nozzle.verify_euler_nozzle_steady",
+        setup_module="development.roberto.historical.euler_nozzle.verify_euler_nozzle_steady",
         comparison_note="Same five cases, backend, mesh, initialization, production timestepper and thresholds. Legacy means legacy flux with current safe Van Leer, not a complete historical AD implementation. Solve/compile times separate; one repeat is not a speed benchmark.",
         runs=[],
     )

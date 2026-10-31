@@ -1,5 +1,9 @@
 # Roberto: development verification and numerical studies
 
+Earlier studies and compatibility reference imports are now grouped in
+[`historical/`](historical/README.md). The archive retains their saved
+evidence and original numerical methods; some entry points use retired APIs.
+
 The [shared hyperbolic infrastructure assessment and implementation plan](shared_hyperbolic/IMPLEMENTATION_PLAN.md)
 reviews an incremental common numerical engine for EulerNozzle, EulerAnnular,
 and future scalar models. It preserves model-specific physics and boundary
@@ -8,26 +12,26 @@ annular's safeguarded Newton and convergence policies as the final Euler
 design. Two-fluid migration is deferred.
 
 The readable EulerNozzle verification examples live in
-[`euler_nozzle/`](euler_nozzle/README.md). Its note explains the physical
+[`historical/euler_nozzle/`](historical/euler_nozzle/README.md). Its note explains the physical
 conditions, references, numerical settings, and acceptance checks for the
 steady nozzle and unsteady Sod shock tube.
-Its new standalone [steady baseline](euler_nozzle/STEADY_REPORT.html) covers
+Its new standalone [steady baseline](historical/euler_nozzle/STEADY_REPORT.html) covers
 eight backpressure regimes with constant/MUSCL reconstruction and four meshes;
-the separate [Sod baseline](euler_nozzle/SOD_REPORT.html) covers three physical
+the separate [Sod baseline](historical/euler_nozzle/SOD_REPORT.html) covers three physical
 times and four meshes. Both retain the current source kernels, saved numerical
 evidence and independent audits before the shared-engine migration.
 
 Run from the repository root after `poetry install`:
 
 ```powershell
-poetry run python -m development.roberto.euler_nozzle.verify_euler_nozzle_steady --no-show
-poetry run python -m development.roberto.euler_nozzle.verify_euler_nozzle_sod --no-show
+poetry run python -m development.roberto.historical.euler_nozzle.verify_euler_nozzle_steady --no-show
+poetry run python -m development.roberto.historical.euler_nozzle.verify_euler_nozzle_sod --no-show
 ```
 
 The original research drivers are grouped under
 [`development/alberto/`](../alberto/README.md). The focused
-[Newton/PTC/implicit comparison](newton_solve/README.md) lives in
-`newton_solve/`. Its standalone [HTML report](newton_solve/REPORT.html) combines
+[Newton/PTC/implicit comparison](historical/newton_solve/README.md) lives in
+`historical/newton_solve/`. Its standalone [HTML report](historical/newton_solve/REPORT.html) combines
 the cold-start comparison, PTC performance evidence, retained custom adapted
 starts, mathematical explanations and useful earlier notes. The discarded
 optimizer experiments and their results have been removed.
@@ -48,11 +52,11 @@ ghost treatment with coupled algebraic boundary equations using matched implicit
 Newton and banded solvers. Its reports retain repeated timing samples and the
 same five-case residual and physical audits.
 
-The [backpressure analysis](backpressure_sensitivity/README.md) follows a descending
+The [backpressure analysis](historical/backpressure_sensitivity/README.md) follows a descending
 operating-pressure sweep from rest through choking, internal shocks and
 supersonic discharge, including overexpanded and underexpanded operation.
 
-The [EulerAnnular prototype](euler_annular/README.md) implements the general-EOS
+The [EulerAnnular prototype](historical/euler_annular/README.md) implements the general-EOS
 curvilinear annular FVM with swirl, NURBSpy spline geometry and simultaneous
 algebraic boundary blocks. The study contains the accepted implementation plan
 and questionnaire, analytical/constant/MUSCL verification drivers, and reports

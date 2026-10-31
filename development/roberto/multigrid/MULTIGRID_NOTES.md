@@ -23,7 +23,7 @@ multigrid as a replacement for the banded solver is not the first priority.
 
 ### What the existing results support
 
-The [CFL study](../euler_annular/cfl_investigation/REPORT.md) provides the
+The [CFL study](../historical/euler_annular/cfl_investigation/REPORT.md) provides the
 following evidence for shock35 at 400 cells:
 
 - With initial CFL 0.2, accepted-step growth 1.2, failure shrink 0.5 and a cap
@@ -356,7 +356,7 @@ Existing modules to import:
   the forced coarse smoother uses these unchanged building blocks.
 - [State maps](../../../src/nozzle_hyperbolic/models/euler_annular/state.py):
   EOS evaluation, $q$ construction and the optional conservative recovery path.
-- [Verification case factory](../euler_annular/scripts/verify_annular.py):
+- [Verification case factory](../historical/euler_annular/scripts/verify_annular.py):
   reuse `make_case` and the same boundary data, reference and cold-start rule.
   Analytical profiles must never initialize the numerical hierarchy.
 

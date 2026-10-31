@@ -14,7 +14,7 @@ from time import perf_counter
 import jax
 import numpy as np
 
-from development.roberto.euler_nozzle import verify_euler_nozzle_steady as baseline
+from development.roberto.historical.euler_nozzle import verify_euler_nozzle_steady as baseline
 from .time_integration import solve_implicit
 from .problem import BoundaryProblem
 
@@ -50,7 +50,7 @@ def controller_settings(max_iterations=5000):
         policy="Fixed CFL growth after acceptance; halving after failure; no SER",
         shrink_factor=0.5,
         implicit_residual_tolerance=1e-10,
-        recommendation="euler_annular/cfl_investigation/REPORT.md",
+        recommendation="historical/euler_annular/cfl_investigation/REPORT.md",
         nominal_cfl=settings["CFL"],
         ser_beta=settings["ser_beta"],
         ser_cfl_max=settings["ser_cfl_max"],
@@ -99,9 +99,9 @@ def source_hashes():
 
 def shared_hashes():
     names = [
-        "development/roberto/euler_nozzle/verify_euler_nozzle_steady.py",
-        "development/roberto/newton_solve/scripts/problem.py",
-        "development/roberto/newton_solve/scripts/pseudo_time.py",
+        "development/roberto/historical/euler_nozzle/verify_euler_nozzle_steady.py",
+        "development/roberto/historical/newton_solve/scripts/problem.py",
+        "development/roberto/historical/newton_solve/scripts/pseudo_time.py",
     ]
     return {
         name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest() for name in names

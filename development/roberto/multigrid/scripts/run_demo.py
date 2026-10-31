@@ -21,9 +21,9 @@ import jax.numpy as jnp
 import jaxprop as jxp
 import numpy as np
 
-from development.roberto.euler_nozzle import verify_euler_nozzle_steady as baseline
-from development.roberto.newton_solve.scripts.problem import SteadyNozzleProblem
-from development.roberto.newton_solve.scripts.pseudo_time import solve_implicit
+from development.roberto.historical.euler_nozzle import verify_euler_nozzle_steady as baseline
+from development.roberto.historical.newton_solve.scripts.problem import SteadyNozzleProblem
+from development.roberto.historical.newton_solve.scripts.pseudo_time import solve_implicit
 
 STUDY = Path(__file__).resolve().parents[1]
 ROOT = STUDY.parents[2]

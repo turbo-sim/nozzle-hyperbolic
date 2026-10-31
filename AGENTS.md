@@ -92,7 +92,7 @@ Important Euler navigation:
   scalar-monitor windows, plain-text convergence tables and strict JSON.
   Annular's opt-in `solve_steady_monitored` connects these; nozzle and legacy
   annular drivers keep their previous stopping definitions. Annular YAML inputs
-  live in `development/roberto/euler_annular/cases/`; its `run_case.py` runs one
+  live in `development/roberto/historical/euler_annular/cases/`; its `run_case.py` runs one
   named case with live convergence output. Keep historical histories labelled
   with their actual residual definition.
   The main report now reads `outputs/grid_sequence_monitored_full/`: all 72
@@ -107,6 +107,11 @@ that use them. General-EOS Euler versus a perfect-gas property backend is not
 necessarily a separate solver: inspect both the actual fluid object and any
 implementation flags. Do not infer the EOS from a flag named `perfect_gas`.
 
+Earlier nozzle, annular, backpressure and Newton studies, plus compatibility
+reference imports, are indexed under
+[`development/roberto/historical/`](development/roberto/historical/README.md).
+Their saved evidence retains measurement-time paths and source hashes.
+
 ## Current development studies
 
 Start with [development/README.md](development/README.md) for the Alberto/Roberto split,
@@ -116,13 +121,13 @@ Keep the single `development/` parent; do not recreate `development_new/` or
 
 | Study | Purpose |
 |---|---|
-| [euler_nozzle](development/roberto/euler_nozzle/README.md) | Readable steady nozzle and unsteady Sod verification against analytic solutions |
+| [euler_nozzle](development/roberto/historical/euler_nozzle/README.md) | Readable steady nozzle and unsteady Sod verification against analytic solutions |
 | [numerical_fixes](development/roberto/numerical_fixes/README.md) | Flux/projector/entropy-regularization and limiter repairs; legacy/corrected comparison |
-| [newton_solve](development/roberto/newton_solve/README.md) | Retained Newton/PTC/implicit comparison and consolidated explanations of earlier failures |
+| [newton_solve](development/roberto/historical/newton_solve/README.md) | Retained Newton/PTC/implicit comparison and consolidated explanations of earlier failures |
 | [implicit_integration](development/roberto/implicit_integration/README.md) | Inner Newton work and CFL/controller sensitivities |
 | [BC_residual](development/roberto/BC_residual/README.md) | Internal versus coupled BC equations with matched implicit solver machinery and repeated timings |
-| [backpressure_sensitivity](development/roberto/backpressure_sensitivity/README.md) | Perfect-gas implicit operating map, choking/shock-exit behavior and outlet branch selection |
-| [euler_annular](development/roberto/euler_annular/README.md) | General-EOS annular solver, NURBSpy geometry, answered design decisions, analytical/constant/MUSCL verification and independent saved-state audits |
+| [backpressure_sensitivity](development/roberto/historical/backpressure_sensitivity/README.md) | Perfect-gas implicit operating map, choking/shock-exit behavior and outlet branch selection |
+| [euler_annular](development/roberto/historical/euler_annular/README.md) | General-EOS annular solver, NURBSpy geometry, answered design decisions, analytical/constant/MUSCL verification and independent saved-state audits |
 | [multigrid](development/roberto/multigrid/README.md) | EulerNozzle implicit single-grid versus coarse-to-fine initialization benchmark; annular multigrid design note; no FAS implementation |
 
 The steady baseline has five regimes: supersonic exit, shocks at 35% and 70%
@@ -224,7 +229,7 @@ development/roberto/<study>/
 ## Performance measurements
 
 To rebuild the retained Newton/PTC/custom-adapted report without numerical
-solves, use `poetry run python -B -m development.roberto.newton_solve.scripts.report`.
+solves, use `poetry run python -B -m development.roberto.historical.newton_solve.scripts.report`.
 The standalone root HTML includes the useful mechanism/performance notes stored
 under `scripts/report_assets/notes/`. Discarded optimizer experiments are not
 part of this study; preserve the common problem and implicit-helper imports

@@ -177,8 +177,8 @@ original spatial/boundary targets in 21 accepted updates; their final pressure
 fields differed by at most $3.2\times10^{-10}$ Pa. An independent dense
 linearization verified the augmented banded correction, and dependency checks
 verified current-ghost flux coupling and zero old-ghost storage dependence.
-See the [smoke log](../euler_annular/outputs/implementation_baseline/boundary_adapter_smoke.log)
-and [raw audits](../euler_annular/outputs/implementation_baseline/boundary_adapter_smoke.json).
+See the [smoke log](../historical/euler_annular/outputs/implementation_baseline/boundary_adapter_smoke.log)
+and [raw audits](../historical/euler_annular/outputs/implementation_baseline/boundary_adapter_smoke.json).
 The original 100 timing samples were not rerun; this small compatibility check
 makes no new performance or five-case robustness claim.
 

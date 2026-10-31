@@ -125,7 +125,7 @@ so their threshold limits can differ by boundary discretization error.
 
 Both methods use the unchanged full-step nozzle Newton engine, colored AD and
 banded solves. Following the conservative recommendation in
-[the annular CFL study](../euler_annular/cfl_investigation/REPORT.md), the
+[the annular CFL study](../historical/euler_annular/cfl_investigation/REPORT.md), the
 study-local controller starts at CFL 0.2, multiplies accepted CFL by 1.2,
 halves it after failure and caps it at $10^6$. It allows eight Newton corrections
 and twelve retries. Unlike the earlier study, no SER ramp is used.

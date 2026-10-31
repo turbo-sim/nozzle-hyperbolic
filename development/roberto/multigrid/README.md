@@ -181,7 +181,7 @@ remain under `outputs/`.
 
 ## Matched physical and numerical setup
 
-Reuse the [steady nozzle verification](../euler_nozzle/README.md) and
+Reuse the [steady nozzle verification](../historical/euler_nozzle/README.md) and
 `SteadyNozzleProblem`, with its perfect-gas Air backend, symmetric
 converging-diverging geometry, 200 kPa/300 K reservoir and back pressures for
 shock35, shock70 and the fully subsonic control. Analytical solutions determine

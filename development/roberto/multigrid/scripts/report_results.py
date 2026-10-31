@@ -28,7 +28,7 @@ import numpy as np
 
 
 STUDY = Path(__file__).resolve().parents[1]
-ASSETS = STUDY.parent / "euler_annular/scripts/report_assets"
+ASSETS = STUDY.parent / "historical/euler_annular/scripts/report_assets"
 METHODS = ("single_grid", "grid_sequence")
 NAMES = {"single_grid": "Single grid", "grid_sequence": "Coarse to fine"}
 RECON = {"constant": "Constant", "muscl_van_leer": "MUSCL"}

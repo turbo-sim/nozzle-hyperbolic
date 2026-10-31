@@ -44,7 +44,7 @@ The commented local dependencies in `pyproject.toml` support development against
 the neighboring `jaxprop`, `pysolver_view`, and `nurbspy` repositories. Enable a
 local entry in place of its published-version entry, then regenerate the lockfile.
 
-The [EulerAnnular prototype](development/roberto/euler_annular/README.md) solves
+The [EulerAnnular prototype](development/roberto/historical/euler_annular/README.md) solves
 quasi-1D curvilinear annular Euler flow with swirl, general JAXProp
 thermodynamics and simultaneous algebraic boundary equations. Its verification
 driver compares analytical, constant-reconstruction and MUSCL results. Read the

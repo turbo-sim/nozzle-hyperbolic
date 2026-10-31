@@ -18,8 +18,8 @@ import numpy as np
 
 from development.roberto.BC_residual.scripts.boundary_system import boundary_constraints
 from development.roberto.BC_residual.scripts.source_adapter import independent_ghost_operators
-from development.roberto.euler_nozzle import verify_euler_nozzle_steady as baseline
-from development.roberto.newton_solve.scripts.problem import SteadyNozzleProblem
+from development.roberto.historical.euler_nozzle import verify_euler_nozzle_steady as baseline
+from development.roberto.historical.newton_solve.scripts.problem import SteadyNozzleProblem
 
 
 STUDY = Path(__file__).resolve().parents[1]

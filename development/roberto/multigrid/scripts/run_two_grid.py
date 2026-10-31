@@ -37,9 +37,9 @@ def main(
             "Choose a new output directory to preserve the completed dataset"
         )
     shared = [
-        ROOT / "development/roberto/newton_solve/scripts/problem.py",
-        ROOT / "development/roberto/newton_solve/scripts/pseudo_time.py",
-        ROOT / "development/roberto/euler_nozzle/verify_euler_nozzle_steady.py",
+        ROOT / "development/roberto/historical/newton_solve/scripts/problem.py",
+        ROOT / "development/roberto/historical/newton_solve/scripts/pseudo_time.py",
+        ROOT / "development/roberto/historical/euler_nozzle/verify_euler_nozzle_steady.py",
     ]
     hashes = lambda: {
         p.relative_to(ROOT).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()

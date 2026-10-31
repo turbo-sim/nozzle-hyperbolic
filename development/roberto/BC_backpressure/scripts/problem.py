@@ -11,7 +11,7 @@ import jaxprop as jxp
 import numpy as np
 import pysolver_view as psv
 
-from development.roberto.newton_solve.scripts.problem import SteadyNozzleProblem
+from development.roberto.historical.newton_solve.scripts.problem import SteadyNozzleProblem
 from nozzle_hyperbolic.numerics.jacobians import make_block_operators
 from nozzle_hyperbolic.solvers.time_marching.implicit import make_newton_solver
 from nozzle_hyperbolic.numerics.reconstruction import muscl_van_leer_ph
