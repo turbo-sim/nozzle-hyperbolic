@@ -53,10 +53,12 @@ import jaxprop as jxp
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 import numpy as np
-from scipy.optimize import brentq
 
 from nozzle_hyperbolic.geometry.duct import get_symmetric_nozzle
-from nozzle_hyperbolic.models.euler_nozzle.analytical.nozzle_exact_real_gas import (
+from nozzle_hyperbolic.models.euler_nozzle.analytical.perfect_gas import (
+    subsonic_reference as _subsonic_reference,
+)
+from nozzle_hyperbolic.models.euler_nozzle.analytical.general_eos import (
     nozzle_exact_real_gas,
 )
 from nozzle_hyperbolic.models.euler_nozzle.fvm import (
@@ -66,32 +68,11 @@ from nozzle_hyperbolic.models.euler_nozzle.fvm import (
 
 
 def subsonic_reference(area, fluid, throat_mach):
-    """Perfect-gas subsonic branch, including the exactly sonic throat limit.
-
-    A/A* = f(M), so A* = A_throat/f(M_throat). For an unchoked solution A*
-    is a virtual critical area SMALLER than the geometric throat. Supplying
-    the physical throat to a choked reference would give the wrong mass flow.
-    """
-    if not 0.0 < throat_mach <= 1.0:
-        raise ValueError("The subsonic reference needs 0 < throat_mach <= 1.")
-    gamma = float(fluid.constants.gamma)
-    gas_constant = float(fluid.constants.R)
-
-    def area_mach(mach):
-        return ((2.0 / (gamma + 1.0) * (1.0 + 0.5 * (gamma - 1.0) * mach**2))
-                ** ((gamma + 1.0) / (2.0 * (gamma - 1.0))) / mach)
-
-    critical_area = NOZZLE["A_throat"] / area_mach(throat_mach)
-    ratios = np.asarray(area) / critical_area
-    mach = np.array([
-        1.0 if np.isclose(ratio, 1.0, rtol=0.0, atol=1.0e-13)
-        else brentq(lambda m: area_mach(m) - ratio, 1.0e-8, 1.0, xtol=1.0e-14)
-        for ratio in ratios
-    ])
-    temperature_ratio = 1.0 / (1.0 + 0.5 * (gamma - 1.0) * mach**2)
-    pressure = P_STAGNATION * temperature_ratio ** (gamma / (gamma - 1.0))
-    density = pressure / (gas_constant * T_STAGNATION * temperature_ratio)
-    return dict(p=pressure, rho=density, M=mach)
+    """Apply this study's physical data to the canonical unchoked reference."""
+    return _subsonic_reference(
+        area, fluid, throat_mach, throat_area=NOZZLE["A_throat"],
+        p0=P_STAGNATION, T0=T_STAGNATION,
+    )
 
 
 def solution_face_mass_flux(primitive, parameters):

@@ -25,6 +25,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from nozzle_hyperbolic.geometry.annular import conical_channel
+from nozzle_hyperbolic.models.euler_annular.analytical.transient import exact_homogeneous
 
 from nozzle_hyperbolic.models.euler_annular import make_annular_solver
 from nozzle_hyperbolic.models.euler_annular.sources import integrated_source
@@ -37,24 +38,6 @@ STUDY = Path(__file__).resolve().parents[1]
 LINESTYLES = {"shear": "--", "heat": ":", "combined": "-"}
 
 
-def exact_homogeneous(time, fluid, *, density, temperature, v_m, v_theta,
-                      height, radius, tau_w, q_w):
-    """Exact spatially homogeneous conservative state, independent of model maps."""
-    gas_constant, gamma = float(fluid.constants.R), float(fluid.constants.gamma)
-    cv = gas_constant/(gamma-1)
-    cp = cv+gas_constant
-    initial_speed = np.hypot(v_m, v_theta)
-    speed = initial_speed-2*tau_w*time/(density*height)
-    if speed < 0:
-        raise ValueError("The analytic shear solution is used only before stopping")
-    meridional, tangential = speed*np.array([v_m, v_theta])/initial_speed
-    total_energy = cv*temperature+0.5*initial_speed**2+2*q_w*time/(density*height)
-    internal_energy = total_energy-0.5*speed**2
-    temp = internal_energy/cv
-    pressure = density*gas_constant*temp
-    conservative = density*np.array([1., meridional, radius*tangential, total_energy])
-    primitive = np.array([pressure, meridional, radius*tangential, cp*temp])
-    return conservative, primitive, temp
 
 
 def homogeneous_checks(fluid, output):

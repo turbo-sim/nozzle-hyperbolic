@@ -13,8 +13,8 @@ import numpy as np
 
 from development.roberto.euler_nozzle import verify_euler_nozzle_steady as baseline
 from development.roberto.backpressure_sensitivity.scripts.run_sweep import ImplicitNozzle, STUDY, hashes
-from development.roberto.backpressure_sensitivity.scripts.reference import PerfectGasReference
-from nozzle_hyperbolic.models.euler_nozzle.analytical.nozzle_exact_real_gas import nozzle_exact_real_gas
+from nozzle_hyperbolic.models.euler_nozzle.analytical.perfect_gas import PerfectGasReference
+from nozzle_hyperbolic.models.euler_nozzle.analytical.general_eos import nozzle_exact_real_gas
 
 
 def main():

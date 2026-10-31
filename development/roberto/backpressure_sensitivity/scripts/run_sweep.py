@@ -29,7 +29,7 @@ import jaxprop as jxp
 import numpy as np
 
 from development.roberto.euler_nozzle import verify_euler_nozzle_steady as baseline
-from development.roberto.backpressure_sensitivity.scripts.reference import PerfectGasReference
+from nozzle_hyperbolic.models.euler_nozzle.analytical.perfect_gas import PerfectGasReference
 from nozzle_hyperbolic.geometry.duct import get_symmetric_nozzle
 from nozzle_hyperbolic.models.euler_nozzle.fvm import make_jax_stadtke_step
 from nozzle_hyperbolic.models.euler_nozzle.initialization import stadtke_puh_initialization_simple

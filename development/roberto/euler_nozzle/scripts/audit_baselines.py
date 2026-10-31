@@ -8,7 +8,7 @@ import numpy as np
 
 from .baseline_common import STUDY, save, source_hashes
 from .run_baselines import ObservedNozzle, fields
-from development.roberto.backpressure_sensitivity.scripts.reference import PerfectGasReference
+from nozzle_hyperbolic.models.euler_nozzle.analytical.perfect_gas import PerfectGasReference
 from nozzle_hyperbolic.models.euler_nozzle.analytical.shock_tube import sod_exact
 
 

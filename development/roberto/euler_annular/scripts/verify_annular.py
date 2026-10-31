@@ -49,17 +49,8 @@ def make_case(name, fluid):
 
 
 def reference_fields(case, mesh, W):
-    """Equivalent exact cell states, with independent perfect-gas diagnostics."""
-    reference = case.reference
-    temperature = (W[:, 3]-reference.h_shift)/reference.cp
-    density = W[:, 0]/(reference.R*temperature)
-    sound = np.sqrt(reference.gamma*reference.R*temperature)
-    v_theta = W[:, 2]/mesh.r_center
-    return dict(p=W[:, 0], v_m=W[:, 1], v_theta=v_theta, rho=density,
-                T=temperature, M_m=W[:, 1]/sound,
-                M_theta=v_theta/sound, alpha_deg=np.rad2deg(np.arctan2(v_theta, W[:, 1])),
-                M=np.hypot(W[:, 1], v_theta)/sound,
-                h0=W[:, 3]+0.5*(W[:, 1]**2+v_theta**2), ell=W[:, 2])
+    """Diagnose equivalent cell states with the canonical analytical reference."""
+    return case.reference.fields_from_state(W, mesh.r_center)
 
 
 def fingerprints():

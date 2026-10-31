@@ -4,7 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import jaxprop as jxp
 
-from development.roberto.backpressure_sensitivity.scripts.reference import PerfectGasReference
+from nozzle_hyperbolic.models.euler_nozzle.analytical.perfect_gas import PerfectGasReference
 
 
 def render(report, output):

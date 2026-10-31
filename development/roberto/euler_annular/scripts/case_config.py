@@ -11,12 +11,12 @@ from hashlib import sha256
 from pathlib import Path
 
 import numpy as np
-from scipy.optimize import brentq
 import yaml
 
 from nozzle_hyperbolic.geometry.annular import (
     circular_arc_channel, conical_channel, radial_channel)
 from nozzle_hyperbolic.models.euler_annular.analytical import PerfectGasReference
+from nozzle_hyperbolic.models.euler_nozzle.analytical.perfect_gas import mach_from_area_ratio
 
 
 STUDY = Path(__file__).resolve().parents[1]
@@ -164,8 +164,11 @@ def validate_config(config):
         raise ValueError("mesh.refinement must contain increasing distinct cell counts >= 2")
     _keys(config["numerical"], ("reconstruction", "flux_method", "delta_factor", "newton_iterations",
           "newton_tolerance", "newton_residual_tolerance", "max_backtracks", "linear_solver", "jacobian_mode"), "numerical")
-    from nozzle_hyperbolic.models.euler_annular.fvm import AnnularOptions
-    AnnularOptions(**config["numerical"])
+    from nozzle_hyperbolic.solvers.fvm import Scheme
+    numerical = dict(config["numerical"])
+    numerical["flux"] = numerical.pop("flux_method", "characteristic")
+    numerical["newton_update_tolerance"] = numerical.pop("newton_tolerance", 1.e-10)
+    Scheme(**numerical)
     _keys(config["walls"], ("shear_stress", "heat_flux"), "walls", ("shear_stress", "heat_flux"))
     _positive(config["walls"]["shear_stress"], "walls.shear_stress", zero=True)
     if (isinstance(config["walls"]["heat_flux"], bool)
@@ -277,9 +280,7 @@ def build_case(name, fluid, *, config_path=DEFAULT_CONFIG):
             raise ValueError("sonic_exit reference selection requires zero swirl and a subsonic inlet")
         ratio = float(geometry.evaluate(0.0).A / geometry.evaluate(geometry.length).A)
         gamma = float(fluid.constants.gamma)
-        def area_mach(value):
-            return (2 / (gamma + 1) * (1 + (gamma - 1) * value**2 / 2))**((gamma + 1) / (2 * (gamma - 1))) / value
-        mach = brentq(lambda value: area_mach(value) - ratio, 1e-9, 1.0)
+        mach = mach_from_area_ratio(ratio, gamma, branch="sub")
     shock_fraction = config["reference"]["shock_fraction"]
     shock_m = None if shock_fraction is None else shock_fraction * geometry.length
     reference = PerfectGasReference.from_inlet(fluid, geometry, p0=inlet["p0"], T0=inlet["T0"], M_m=mach, alpha=alpha)

@@ -22,7 +22,7 @@ import numpy as np
 
 from .baseline_common import STUDY, config, provenance, save, source_hashes, steady_cases, validate_saved_campaign
 from development.roberto.backpressure_sensitivity.scripts.run_sweep import ImplicitNozzle, RMS_TOL
-from development.roberto.backpressure_sensitivity.scripts.reference import PerfectGasReference
+from nozzle_hyperbolic.models.euler_nozzle.analytical.perfect_gas import PerfectGasReference
 from development.roberto.euler_nozzle import verify_euler_nozzle_steady as steady_setup
 from development.roberto.euler_nozzle import verify_euler_nozzle_sod as sod_setup
 from nozzle_hyperbolic.models.euler_nozzle.analytical.shock_tube import sod_exact

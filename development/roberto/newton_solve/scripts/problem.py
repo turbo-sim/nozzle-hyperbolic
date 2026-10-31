@@ -10,7 +10,7 @@ import pysolver_view as psv
 
 from development.roberto.euler_nozzle import verify_euler_nozzle_steady as baseline
 from nozzle_hyperbolic.geometry.duct import get_symmetric_nozzle
-from nozzle_hyperbolic.models.euler_nozzle.analytical.nozzle_exact_real_gas import (
+from nozzle_hyperbolic.models.euler_nozzle.analytical.general_eos import (
     nozzle_exact_real_gas,
 )
 from nozzle_hyperbolic.models.euler_nozzle.fvm import make_jax_stadtke_step

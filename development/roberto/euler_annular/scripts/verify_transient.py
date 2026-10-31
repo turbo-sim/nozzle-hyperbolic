@@ -24,67 +24,17 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from nozzle_hyperbolic.geometry.annular import conical_channel
+from nozzle_hyperbolic.models.euler_annular.analytical.transient import (
+    density_pulse, cell_reference,
+)
 from nozzle_hyperbolic.models.euler_annular import make_annular_solver
 from nozzle_hyperbolic.models.euler_annular.state import primitive_to_conservative
 
 from .verify_annular import LABELS, RECONSTRUCTIONS, REPOSITORY, STUDY, fingerprints, write_json
 
 
-def density_pulse(m, time, density_base, settings):
-    """Exact compact C-infinity density contact, translated at prescribed v_m."""
-    coordinate = ((np.asarray(m)-settings["center"]-settings["v_m"]*time)
-                  /settings["half_width"])
-    bump = np.zeros_like(coordinate)
-    active = np.abs(coordinate) < 1.0
-    bump[active] = np.exp(1.0-1.0/(1.0-coordinate[active]**2))
-    return density_base*(1.0+settings["density_amplitude"]*bump)
 
 
-def cell_reference(fluid, mesh, time, density_base, settings, order=32):
-    """Independent physical-volume quadrature; no numerical flux/state-map use."""
-    nodes, weights = np.polynomial.legendre.leggauss(order)
-    center = settings["center"]+settings["v_m"]*time
-    edges = (center-settings["half_width"], center+settings["half_width"])
-    coordinates, quadrature_weights, owners = [], [], []
-    area = 2.0*np.pi*settings["radius"]*settings["width"]
-    for index, (lower, upper) in enumerate(zip(mesh.m_faces[:-1], mesh.m_faces[1:])):
-        splits = [lower, *(edge for edge in edges if lower < edge < upper), upper]
-        for a, b in zip(splits[:-1], splits[1:]):
-            coordinates.extend(0.5*(a+b)+0.5*(b-a)*nodes)
-            quadrature_weights.extend(area*0.5*(b-a)*weights)
-            owners.extend([index]*order)
-    coordinates, quadrature_weights = map(np.asarray, (coordinates, quadrature_weights))
-    owners = np.asarray(owners, dtype=int)
-    density = density_pulse(coordinates, time, density_base, settings)
-    pressure = np.full_like(density, settings["pressure"])
-    state = fluid.get_state(jxp.DmassP_INPUTS, density, pressure)
-    enthalpy = np.asarray(state["h"])
-    v_m, v_theta = settings["v_m"], settings["v_theta"]
-    ell = settings["radius"]*v_theta
-    kinetic = 0.5*(v_m**2+v_theta**2)
-    values = np.stack((density, density*v_m, density*ell,
-                       density*(enthalpy+kinetic)-pressure), axis=-1)
-    integrated = np.zeros((mesh.n_cells, 4))
-    np.add.at(integrated, owners, quadrature_weights[:, None]*values)
-    conservative = integrated/mesh.volumes[:, None]
-    density_average = conservative[:, 0]
-    # For this perfect-gas constant-pressure contact, the conservative cell
-    # projection preserves p, v_m and ell. Recover h through the backend's
-    # density/pressure input pair, independently of the numerical state map.
-    projected = fluid.get_state(jxp.DmassP_INPUTS, density_average,
-                                np.full(mesh.n_cells, settings["pressure"]))
-    enthalpy_average = np.asarray(projected["h"])
-    energy_check = density_average*(enthalpy_average+kinetic)-settings["pressure"]
-    np.testing.assert_allclose(energy_check, conservative[:, 3], rtol=2e-12, atol=2e-9)
-    W = np.column_stack((np.full(mesh.n_cells, settings["pressure"]),
-                         np.full(mesh.n_cells, v_m), np.full(mesh.n_cells, ell),
-                         enthalpy_average))
-    fields = dict(p=W[:, 0], v_m=W[:, 1], ell=W[:, 2], h=W[:, 3],
-                  v_theta=np.full(mesh.n_cells, v_theta), rho=density_average,
-                  T=np.asarray(projected["T"]), s=np.asarray(projected["s"]),
-                  h0=enthalpy_average+kinetic)
-    return dict(W=W, q=conservative, integrated=integrated, fields=fields,
-                quadrature_order=order, quadrature_split_at_pulse_edges=True)
 
 
 def centroid(density, mesh, density_base):
