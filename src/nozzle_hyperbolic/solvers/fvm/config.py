@@ -13,6 +13,7 @@ class Scheme:
     flux: str = "characteristic"
     delta_factor: float = 0.1
     newton_iterations: int = 10
+    newton_backtracking: bool = False
     newton_update_tolerance: float = 1e-10
     newton_residual_tolerance: float = 1e-12
     max_backtracks: int = 20
@@ -24,6 +25,8 @@ class Scheme:
     smooth_limiter_coefficient: float = 1.0
 
     def __post_init__(self):
+        if not isinstance(self.newton_backtracking, bool):
+            raise ValueError("newton_backtracking must be a boolean")
         if self.reconstruction not in (
             "constant",
             "muscl_van_leer",

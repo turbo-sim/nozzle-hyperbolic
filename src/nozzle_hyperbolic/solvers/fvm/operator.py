@@ -374,7 +374,7 @@ class Operator:
             tolerance=scheme.newton_update_tolerance,
             residual_tolerance=scheme.newton_residual_tolerance,
             admissible=valid,
-            backtracking=True,
+            backtracking=scheme.newton_backtracking,
             max_backtracks=scheme.max_backtracks,
         )
 

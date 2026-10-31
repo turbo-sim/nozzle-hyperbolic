@@ -74,7 +74,7 @@ def make_eliminated_implicit_step(
             admissible=lambda flat: admissible(
                 full_state(flat, old_flat, time).ravel()
             ),
-            backtracking=True,
+            backtracking=scheme.newton_backtracking,
             max_backtracks=scheme.max_backtracks,
         )
         physical, outer = solve(old[1:-1].ravel(), old_flat, dt, time)
