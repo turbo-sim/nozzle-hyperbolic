@@ -10,6 +10,10 @@
 - [tests/](tests/): production tests.
 - [docs/](docs/): architecture, derivations and numerical findings.
 
+Explore the [interactive architecture map](docs/architecture/ARCHITECTURE.html),
+[vector diagram](docs/architecture/ARCHITECTURE.svg), and
+[detailed architecture guide](docs/architecture/ARCHITECTURE.md).
+
 
 ## Cloning git repository and installing dependencies
 
