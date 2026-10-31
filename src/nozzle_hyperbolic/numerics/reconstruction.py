@@ -1,15 +1,55 @@
 """Unchanged definitions relocated from fvm_solver.fvm."""
+
 import numpy as np
 import jax.numpy as jnp
+
+
+def reconstruct_faces(
+    full,
+    points,
+    faces,
+    method="muscl_van_leer",
+    *,
+    variable_scales=None,
+    smooth_coefficient=1.0
+):
+    """Coordinate-based MUSCL on physical cells and independent endpoint traces.
+
+    full/points have N+2 rows, faces has N+1 positions. End traces lie exactly at
+    endpoints and have zero slope. Component reconstruction is model agnostic.
+    Optional C2 limiter smoothing uses dimensionless gradients with a fixed
+    reference length; its width vanishes quadratically with mean mesh spacing.
+    """
+    if method == "constant":
+        return full[:-1], full[1:]
+    gradients = (full[1:] - full[:-1]) / (points[1:] - points[:-1])[:, None]
+    if method == "muscl_van_leer":
+        interior = _van_leer_jax_safe(gradients[:-1], gradients[1:])
+    elif method == "muscl_van_leer_smooth":
+        length = faces[-1] - faces[0]
+        gradient_scale = jnp.asarray(variable_scales) / length
+        epsilon = smooth_coefficient / (faces.shape[0] - 1) ** 2
+        interior = gradient_scale * _van_leer_jax_regularized(
+            gradients[:-1] / gradient_scale, gradients[1:] / gradient_scale, epsilon
+        )
+    else:
+        raise ValueError("Unsupported reconstruction")
+    slopes = jnp.zeros_like(full).at[1:-1].set(interior)
+    return (
+        full[:-1] + slopes[:-1] * (faces - points[:-1])[:, None],
+        full[1:] + slopes[1:] * (faces - points[1:])[:, None],
+    )
 
 
 # ---------------------------------------------------------------------------
 # MUSCL reconstruction  (2nd-order spatial accuracy)
 # ---------------------------------------------------------------------------
 
+
 def _minmod(a, b):
-    return np.where(np.sign(a) == np.sign(b),
-                    np.sign(a) * np.minimum(np.abs(a), np.abs(b)), 0.0)
+    return np.where(
+        np.sign(a) == np.sign(b), np.sign(a) * np.minimum(np.abs(a), np.abs(b)), 0.0
+    )
 
 
 def _van_leer(a, b):
@@ -67,16 +107,20 @@ def _van_leer_jax_regularized(a, b, epsilon):
     product_weight = product_squared / (
         product_squared + epsilon_squared * epsilon_squared
     )
-    return (
-        2.0 * product * total / (total * total + epsilon_squared)
-    ) * product_weight
+    return (2.0 * product * total / (total * total + epsilon_squared)) * product_weight
 
 
 def _superbee(a, b):
-    s1 = np.where(np.sign(a) == np.sign(b),
-                  np.sign(a) * np.minimum(2.0 * np.abs(a), np.abs(b)), 0.0)
-    s2 = np.where(np.sign(a) == np.sign(b),
-                  np.sign(a) * np.minimum(np.abs(a), 2.0 * np.abs(b)), 0.0)
+    s1 = np.where(
+        np.sign(a) == np.sign(b),
+        np.sign(a) * np.minimum(2.0 * np.abs(a), np.abs(b)),
+        0.0,
+    )
+    s2 = np.where(
+        np.sign(a) == np.sign(b),
+        np.sign(a) * np.minimum(np.abs(a), 2.0 * np.abs(b)),
+        0.0,
+    )
     return np.where(np.abs(s1) > np.abs(s2), s1, s2)
 
 
@@ -97,17 +141,17 @@ def _mc(a, b):
     More compressive than minmod, less than superbee; TVD for all smooth flows."""
     same_sign = np.sign(a) == np.sign(b)
     mag = np.sign(a) * np.minimum(
-        np.minimum(2.0 * np.abs(a), 2.0 * np.abs(b)),
-        0.5 * np.abs(a + b))
+        np.minimum(2.0 * np.abs(a), 2.0 * np.abs(b)), 0.5 * np.abs(a + b)
+    )
     return np.where(same_sign, mag, 0.0)
 
 
 _LIMITERS = {
-    'muscl_minmod':      _minmod,
-    'muscl_van_leer':    _van_leer,
-    'muscl_superbee':    _superbee,
-    'muscl_van_albada':  _van_albada,
-    'muscl_mc':          _mc,
+    "muscl_minmod": _minmod,
+    "muscl_van_leer": _van_leer,
+    "muscl_superbee": _superbee,
+    "muscl_van_albada": _van_albada,
+    "muscl_mc": _mc,
 }
 
 
@@ -119,11 +163,11 @@ def muscl_van_leer_ph(U):
     Boundary cells (index 0 and N-1) are assigned zero slope, so the
     face adjacent to a ghost cell uses a 1st-order (cell-centred) value.
     """
-    dU    = U[1:] - U[:-1]                                              # (N-1, 3)
-    vl    = _van_leer_jax_safe
-    sigma = jnp.zeros_like(U).at[1:-1].set(vl(dU[:-1], dU[1:]))        # (N, 3)
-    U_L   = U[:-1] + 0.5 * sigma[:-1]
-    U_R   = U[1:]  - 0.5 * sigma[1:]
+    dU = U[1:] - U[:-1]  # (N-1, 3)
+    vl = _van_leer_jax_safe
+    sigma = jnp.zeros_like(U).at[1:-1].set(vl(dU[:-1], dU[1:]))  # (N, 3)
+    U_L = U[:-1] + 0.5 * sigma[:-1]
+    U_R = U[1:] - 0.5 * sigma[1:]
     return U_L, U_R
 
 
@@ -137,12 +181,12 @@ def _muscl_reconstruct(Q, method):
     """
     limiter = _LIMITERS[method]
 
-    dQ = Q[:, 1:] - Q[:, :-1]          # (3, Nj-1): dQ[:, i] = Q_{i+1} - Q_i
+    dQ = Q[:, 1:] - Q[:, :-1]  # (3, Nj-1): dQ[:, i] = Q_{i+1} - Q_i
 
     # Slopes for interior cells 1 … Nj-2; zero at ghost cells
-    sigma = np.zeros_like(Q)            # (3, Nj)
-    sigma[:, 1:-1] = limiter(dQ[:, :-1], dQ[:, 1:])   # (3, Nj-2)
+    sigma = np.zeros_like(Q)  # (3, Nj)
+    sigma[:, 1:-1] = limiter(dQ[:, :-1], dQ[:, 1:])  # (3, Nj-2)
 
-    Q_L = Q[:, :-1] + 0.5 * sigma[:, :-1]   # left  state at each interface
-    Q_R = Q[:, 1:]  - 0.5 * sigma[:, 1:]    # right state at each interface
+    Q_L = Q[:, :-1] + 0.5 * sigma[:, :-1]  # left  state at each interface
+    Q_R = Q[:, 1:] - 0.5 * sigma[:, 1:]  # right state at each interface
     return Q_L, Q_R

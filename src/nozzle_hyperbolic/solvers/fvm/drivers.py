@@ -1,0 +1,536 @@
+"""Common single-grid, coarse-to-fine and physical-time solution drivers."""
+
+from .config import SteadySettings, Solution
+from time import perf_counter
+
+import jax
+import jax.numpy as jnp
+import numpy as np
+
+from nozzle_hyperbolic.solvers.residuals import reduce_residuals
+from nozzle_hyperbolic.solvers.monitoring import MonitorTracker
+
+from .operator import Operator, Scheme
+from ..residuals import ResidualPolicy, assess_residuals
+
+
+def sampler(operator, policy):
+    if not isinstance(policy, ResidualPolicy):
+        raise ValueError("policy must be a ResidualPolicy")
+    model = operator.model
+
+    @jax.jit
+    def reduce(raw, bc):
+        reductions = reduce_residuals(
+            raw,
+            jnp.asarray(operator.mesh.volumes),
+            jnp.asarray(model.conservative_scales),
+            model.reference_time,
+            weighting=policy.weighting,
+        )
+        return (
+            reductions,
+            jnp.max(jnp.abs(bc)),
+            jnp.abs(jnp.sum(raw, axis=0) / jnp.asarray(model.global_flux_scales)),
+        )
+
+    def sample(state, initial=None, time=0.0):
+        # Keep the original spatial graph separate from reductions: recompiling
+        # it inside a large fused monitor changes roundoff near strict targets.
+        raw = operator.spatial_residual(state)
+        bc = operator.boundary_residual(state, time)
+        reductions, boundary, global_defect = jax.device_get(reduce(raw, bc))
+        norms = reductions[policy.norm]
+        initial = norms if initial is None else initial
+        assessment = jax.device_get(assess_residuals(norms, initial, policy))
+        relative = np.asarray(assessment["equation_relative"])
+        active = np.asarray(assessment["relative_active"])
+        valid = bool(operator.is_admissible(state))
+        return dict(
+            equation_norm=np.asarray(norms),
+            equation_relative=relative,
+            equation_l1=np.asarray(reductions["l1"]),
+            equation_l2=np.asarray(reductions["l2"]),
+            equation_linf=np.asarray(reductions["linf"]),
+            worst_cell=np.asarray(reductions["worst_cell"]),
+            equation_max_ratio=float(assessment["equation_max_ratio"]),
+            criterion=policy.criterion,
+            overall_relative=float(np.max(np.where(active, relative, 0.0))),
+            global_defect=np.asarray(global_defect),
+            boundary_max=float(boundary),
+            finite=bool(assessment["finite"])
+            and np.isfinite(boundary)
+            and np.isfinite(global_defect).all(),
+            admissible=valid,
+            all_equations_passed=bool(assessment["all_equations_passed"]),
+            absolute_satisfied=np.asarray(assessment["absolute_satisfied"]),
+            relative_satisfied=np.asarray(assessment["relative_satisfied"]),
+            boundary_passed=bool(boundary <= policy.boundary_tolerance),
+            global_passed=bool(np.max(global_defect) <= policy.global_tolerance),
+            relative_active=np.asarray(assessment["relative_active"]),
+        )
+
+    return sample
+
+
+def solve_single_grid(
+    model,
+    scheme=Scheme(),
+    settings=SteadySettings(),
+    *,
+    initial_state=None,
+    monitor_specs=(),
+    quantity_evaluator=None,
+    callback=None,
+):
+    """Solve the original coupled steady equations on exactly one physical grid.
+
+    All models use identical Newton/CFL/acceptance and convergence semantics.
+    Model-specific scalar quantities enter only through the supplied evaluator.
+    """
+    monitor_specs = tuple(monitor_specs)
+    if monitor_specs and not callable(quantity_evaluator):
+        raise ValueError("Configured monitors require a quantity_evaluator callback")
+    audit = getattr(model, "solution_audit", None)
+    if audit is not None and not callable(audit):
+        raise ValueError("solution_audit must be a callback when supplied")
+    operator = Operator(model, scheme)
+    state = jnp.asarray(
+        model.initial_state() if initial_state is None else initial_state,
+        dtype=jnp.float64,
+    )
+    if state.shape != operator.shape:
+        raise ValueError(f"Expected full physical/boundary state {operator.shape}")
+    explicit = scheme.time_integrator != "euler-implicit"
+    cfl_cap = min(settings.cfl_max, 0.45) if explicit else settings.cfl_max
+    history = []
+    start = perf_counter()
+    cfl = min(settings.cfl, cfl_cap)
+    tracker = MonitorTracker(monitor_specs)
+    if not bool(operator.is_admissible(state)):
+        return Solution(
+            np.asarray(state),
+            False,
+            "invalid_initial_state",
+            [],
+            {},
+            elapsed_s=perf_counter() - start,
+            operator=operator,
+        )
+    sample = sampler(operator, settings.residual)
+    current = sample(state)
+    initial = np.asarray(current["equation_norm"])
+
+    def update_monitors(point):
+        values = (
+            {}
+            if quantity_evaluator is None
+            else quantity_evaluator(point, operator.face_flux(point))
+        )
+        return tracker.update(
+            {
+                spec.name: (
+                    values[spec.name] if spec.name in values else values[spec.quantity]
+                )
+                for spec in monitor_specs
+            }
+        )
+
+    current["monitors"] = update_monitors(state)
+
+    def done(metrics):
+        return bool(
+            metrics["finite"]
+            and metrics["admissible"]
+            and metrics["all_equations_passed"]
+            and metrics["boundary_passed"]
+            and metrics["global_passed"]
+            and tracker.passed
+        )
+
+    def emit(row):
+        history.append(row)
+        if callback is not None:
+            callback(row)
+
+    emit(dict(step=0, phase="initial", accepted=True, cfl=cfl, dt=0.0, **current))
+    reason = "max_steps"
+    accepted = 0
+    unchanged = 0
+    while accepted < settings.max_steps and not done(current):
+        okay = False
+        for retry in range(settings.max_retries + 1):
+            limits = jax.device_get(operator.timestep(state, cfl))
+            dt = float(limits.dt)
+            if not np.isfinite(dt) or dt <= 0:
+                reason = "invalid_timestep"
+                break
+            candidate, info = operator.step(state, jnp.float64(dt), jnp.float64(0.0))
+            info = jax.device_get(info)
+            okay = bool(info.converged and info.admissible)
+            trial = None
+            if okay:
+                trial = sample(candidate, initial)
+                okay = bool(trial["finite"] and trial["admissible"])
+            row = dict(
+                step=accepted + 1,
+                retry=retry,
+                phase="accepted" if okay else "rejected",
+                accepted=okay,
+                cfl=dt / float(limits.wave_dt),
+                requested_cfl=cfl,
+                dt=dt,
+                inner_iterations=int(info.iterations),
+                inner_status=int(info.status),
+                inner_residual=float(info.residual_norm),
+                rejected_newton_trials=int(info.rejected_trials),
+            )
+            if okay:
+                unchanged = (
+                    unchanged + 1
+                    if np.array_equal(np.asarray(candidate), np.asarray(state))
+                    else 0
+                )
+                state = candidate
+                accepted += 1
+                current = trial
+                current["monitors"] = update_monitors(state)
+                emit(dict(**row, **current))
+                cfl = min(cfl_cap, cfl * settings.cfl_growth)
+                break
+            emit(row)
+            cfl *= settings.cfl_shrink
+        if not okay:
+            if reason != "invalid_timestep":
+                reason = "retry_limit"
+            break
+        if (
+            settings.stagnation_steps > 0
+            and unchanged >= settings.stagnation_steps
+            and not done(current)
+        ):
+            reason = "stagnation"
+            break
+        if accepted % 250 == 0:
+            print(
+                f'  {accepted:5d} R={current["overall_relative"]:.3e} CFL={cfl:.2e}',
+                flush=True,
+            )
+    final = sample(state, initial)
+    final["monitors"] = current["monitors"]
+    success = done(final)
+    if success and audit is not None and not audit(state):
+        success = False
+        reason = "solution_audit_failed"
+    if success:
+        reason = "converged"
+    return Solution(
+        np.asarray(state),
+        success,
+        reason,
+        history,
+        final,
+        elapsed_s=perf_counter() - start,
+        operator=operator,
+    )
+
+
+def solve_grid_sequence(
+    model_factory,
+    cells=(50, 100, 200, 400),
+    scheme=Scheme(),
+    settings=SteadySettings(),
+    *,
+    on_stage=None,
+    monitor_specs=(),
+    initial_solution=None,
+    quantity_evaluator_factory=None,
+):
+    """Nested-grid initialization, not a defect-correction/FAS multigrid cycle.
+
+    Every grid solves its own original equations and starts its own residual
+    normalization. Only successful numerical states are prolonged. A failed
+    stage is retained and the next stage starts cold. Prolongation is bounded
+    componentwise linear interpolation of the model's declared state variables;
+    it assumes identical variable meanings and domain endpoints on every grid.
+    Model admissibility is checked before solving, with a cold retry on failure.
+    """
+    cells = tuple(cells)
+    monitor_specs = tuple(monitor_specs)
+    if (
+        not cells
+        or any(
+            isinstance(n, (bool, np.bool_))
+            or not isinstance(n, (int, np.integer))
+            or n < 2
+            for n in cells
+        )
+        or list(cells) != sorted(set(cells))
+    ):
+        raise ValueError("Use a strictly increasing grid hierarchy")
+    previous = initial_solution
+    stages = []
+    if previous is not None and cells[0] <= previous.operator.mesh.n_cells:
+        raise ValueError("Extended grids must be finer than the supplied solved grid")
+    for count in cells:
+        model = model_factory(count)
+        if model.mesh.n_cells != count:
+            raise ValueError(
+                "model_factory must return the requested physical cell count"
+            )
+        initial = None
+        if previous is not None and previous.success:
+            old = previous.operator.mesh.points
+            new = model.mesh.points
+            if previous.state.shape != (len(old), model.nvar) or not np.array_equal(
+                old[[0, -1]], new[[0, -1]]
+            ):
+                raise ValueError(
+                    "Prolongation requires matching state dimensions and domain endpoints"
+                )
+            initial = np.column_stack(
+                [np.interp(new, old, previous.state[:, j]) for j in range(model.nvar)]
+            )
+        evaluator = (
+            getattr(model, "quantities", None)
+            if quantity_evaluator_factory is None
+            else quantity_evaluator_factory(model)
+        )
+        solution = solve_single_grid(
+            model,
+            scheme,
+            settings,
+            initial_state=initial,
+            monitor_specs=monitor_specs,
+            quantity_evaluator=evaluator,
+        )
+        attempts = []
+        if initial is not None and not solution.success:
+            # Prolongation can make a nine-order target smaller than available
+            # floating-point resolution. Preserve that failed solve in full;
+            # an independent cold restart must satisfy its own original tests.
+            attempts.append(
+                dict(
+                    initialization="componentwise linear prolongation",
+                    success=solution.success,
+                    reason=solution.reason,
+                    state=solution.state,
+                    metrics=solution.metrics,
+                    history=solution.history,
+                    elapsed_s=solution.elapsed_s,
+                )
+            )
+            print(
+                f"  N={count}: retained failed warm attempt ({solution.reason}); restarting cold",
+                flush=True,
+            )
+            solution = solve_single_grid(
+                model,
+                scheme,
+                settings,
+                monitor_specs=monitor_specs,
+                quantity_evaluator=evaluator,
+            )
+        metadata = dict(
+            cells=count,
+            success=solution.success,
+            reason=solution.reason,
+            initialization=(
+                "cold restart after retained warm failure"
+                if attempts
+                else (
+                    "componentwise linear prolongation"
+                    if initial is not None
+                    else "cold physical guess"
+                )
+            ),
+            attempts=attempts,
+            residual_normalization="fresh per-equation initial norm on this grid",
+        )
+        stages.append(metadata)
+        if on_stage is not None:
+            on_stage(model, solution, list(stages))
+        previous = solution
+    return previous, stages
+
+
+def solve_transient(
+    model,
+    output_times,
+    scheme=Scheme(flux="hll"),
+    *,
+    cfl=0.45,
+    initial_state=None,
+    max_steps=100000,
+):
+    """Conservative physical-time integration, starting at time zero.
+
+    ``max_steps`` counts accepted physical steps across all requested outputs.
+    History retains rejected attempts without advancing time or conservation
+    budgets. Steady spatial/global convergence is not a transient stopping rule;
+    algebraic boundary defects must nevertheless meet their independent target.
+    The optional model transient_solution_audit applies to each output; when
+    absent, solution_audit provides the backward-compatible fallback. A final
+    steady branch constraint need not describe every transient intermediate.
+    """
+    targets = np.asarray(tuple(output_times), dtype=float)
+    if (
+        targets.ndim != 1
+        or not targets.size
+        or not np.all(np.isfinite(targets))
+        or np.any(targets < 0)
+        or np.any(np.diff(targets) <= 0)
+    ):
+        raise ValueError("Use nonnegative, finite, strictly increasing output times")
+    if isinstance(cfl, (bool, np.bool_)) or not np.isfinite(cfl) or cfl <= 0:
+        raise ValueError("cfl must be positive and finite")
+    if (
+        isinstance(max_steps, (bool, np.bool_))
+        or not isinstance(max_steps, (int, np.integer))
+        or max_steps < 0
+    ):
+        raise ValueError("max_steps must be a nonnegative integer")
+    audit = getattr(
+        model, "transient_solution_audit", getattr(model, "solution_audit", None)
+    )
+    if audit is not None and not callable(audit):
+        raise ValueError(
+            "The transient solution audit must be a callback when supplied"
+        )
+    operator = Operator(model, scheme)
+    state = jnp.asarray(
+        model.initial_state() if initial_state is None else initial_state,
+        dtype=jnp.float64,
+    )
+    if state.shape != operator.shape:
+        raise ValueError(f"Expected full physical/boundary state {operator.shape}")
+    if not bool(operator.is_admissible(state)):
+        raise ValueError("Transient initial state must be admissible")
+    sample = sampler(operator, ResidualPolicy())
+    initial_totals = np.asarray(operator.storage(state[1:-1])).sum(axis=0)
+    influx = np.zeros(model.nvar)
+    time = 0.0
+    history = []
+    snapshots = []
+    start = perf_counter()
+    budget = np.zeros(model.nvar)
+    accepted = 0
+    for target in targets:
+        target = float(target)
+        reason = "time_reached"
+        while time < target and accepted < max_steps:
+            limits = jax.device_get(operator.timestep(state, cfl, time))
+            base_dt = float(limits.wave_dt)
+            if not bool(limits.valid) or not np.isfinite(limits.dt) or limits.dt <= 0:
+                reason = "invalid_timestep"
+                break
+            dt = min(float(limits.dt), float(target - time))
+            okay = False
+            for retry in range(16):
+                if not np.isfinite(dt) or dt <= 0 or time + dt <= time:
+                    reason = "invalid_timestep"
+                    break
+                if scheme.time_integrator == "euler-implicit":
+                    candidate, info = operator.step(
+                        state, jnp.float64(dt), jnp.float64(time + dt)
+                    )
+                else:
+                    candidate, info, step_balance = operator.step_with_balance(
+                        state, jnp.float64(dt), jnp.float64(time + dt)
+                    )
+                info = jax.device_get(info)
+                if bool(info.converged and info.admissible):
+                    okay = True
+                    break
+                history.append(
+                    dict(
+                        step=accepted + 1,
+                        phase="rejected",
+                        accepted=False,
+                        time=time,
+                        time_s=time,
+                        trial_time=time + dt,
+                        dt=dt,
+                        cfl=dt / base_dt,
+                        retry=retry,
+                        inner_iterations=int(info.iterations),
+                        inner_status=int(info.status),
+                        inner_residual=float(info.residual_norm),
+                        rejected_newton_trials=int(info.rejected_trials),
+                    )
+                )
+                dt *= 0.5
+            if not okay:
+                if reason != "invalid_timestep":
+                    reason = "retry_limit"
+                break
+            flux = np.asarray(operator.face_flux(candidate))
+            source = np.asarray(operator.source(candidate)).sum(axis=0)
+            transfer = (
+                dt * (flux[0] - flux[-1] + source)
+                if scheme.time_integrator == "euler-implicit"
+                else np.asarray(step_balance)
+            )
+            influx += transfer
+            state = candidate
+            time = min(target, time + dt)
+            accepted += 1
+            totals = np.asarray(operator.storage(state[1:-1])).sum(axis=0)
+            budget = (totals - initial_totals - influx) / (
+                np.sum(model.mesh.volumes) * np.asarray(model.conservative_scales)
+            )
+            history.append(
+                dict(
+                    step=accepted,
+                    phase="accepted",
+                    accepted=True,
+                    time=time,
+                    time_s=time,
+                    dt=dt,
+                    cfl=dt / base_dt,
+                    retry=retry,
+                    budget=budget,
+                    integrated_transfer=transfer,
+                    conserved_totals=totals,
+                    inner_iterations=int(info.iterations),
+                    inner_status=int(info.status),
+                    inner_residual=float(info.residual_norm),
+                    rejected_newton_trials=int(info.rejected_trials),
+                )
+            )
+        if accepted >= max_steps and time < target:
+            reason = "max_steps"
+        metrics = sample(state, time=time)
+        metrics["conservation_budget"] = budget
+        metrics["accepted_steps"] = accepted
+        metrics["rejected_steps"] = sum(not row["accepted"] for row in history)
+        success = bool(
+            time == target
+            and metrics["admissible"]
+            and metrics["finite"]
+            and metrics["boundary_passed"]
+        )
+        if time == target and not success:
+            reason = (
+                "invalid_final_state"
+                if not metrics["admissible"] or not metrics["finite"]
+                else "boundary_defect"
+            )
+        if success and audit is not None and not audit(state):
+            success = False
+            reason = "solution_audit_failed"
+        snapshots.append(
+            Solution(
+                np.asarray(state),
+                success,
+                reason,
+                list(history),
+                metrics,
+                time=time,
+                elapsed_s=perf_counter() - start,
+                operator=operator,
+            )
+        )
+        if not success:
+            break
+    return snapshots

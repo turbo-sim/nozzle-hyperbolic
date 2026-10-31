@@ -2,10 +2,10 @@
 Geometry definitions for the 1D FVM solver.
 
 Each function returns a Geometry object containing:
-  A       — cell-centre cross-sectional areas  (N,)  [m²]
-  dAdx    — analytical dA/dx                   (N,)  [m]
-  D_h     — hydraulic diameter                 (N,)  [m]
-  roughness — wall roughness                   scalar [m]
+  A       â€” cell-centre cross-sectional areas  (N,)  [mÂ²]
+  dAdx    â€” analytical dA/dx                   (N,)  [m]
+  D_h     â€” hydraulic diameter                 (N,)  [m]
+  roughness â€” wall roughness                   scalar [m]
 
 All functions accept (x, roughness=0.0, **kwargs) and return Geometry.
 x must be a 1-D NumPy array of cell-centre positions.
@@ -19,7 +19,7 @@ from typing import NamedTuple
 
 
 class Geometry(NamedTuple):
-    A:         np.ndarray  # cell-centre areas  (N,)  [m²]
+    A:         np.ndarray  # cell-centre areas  (N,)  [mÂ²]
     dAdx:      np.ndarray  # dA/dx              (N,)  [m]
     D_h:       np.ndarray  # hydraulic diameter (N,)  [m]
     roughness: float       # wall roughness           [m]
@@ -69,10 +69,10 @@ def get_lettieri_nozzle(x, roughness=0.0, file_path="Lettieri_nozzle.xlsx",
     nozzle_type : 'axisymmetric' or 'planar'
     width       : channel depth [m] (planar only)
     """
-    import nozzle_hyperbolic as hyp
+    from ..fit_nozzle_shape import fit_nozzle_shape
     x = np.asarray(x, dtype=float)
 
-    _, _, spline = hyp.fit_nozzle_shape(file_path, sheet_name, degree=10)
+    _, _, spline = fit_nozzle_shape(file_path, sheet_name, degree=10)
 
     x_min = -0.03201
     r = np.array([spline(xi) if xi >= x_min else 0.006365 for xi in x])
@@ -139,7 +139,7 @@ def get_nozzle_nakagawa(
     theta=0.48,
 ):
     """
-    JAX-safe linear convergent–divergent nozzle (planar geometry).
+    JAX-safe linear convergentâ€“divergent nozzle (planar geometry).
     Uses jax.lax.cond (JAX's version of 'if') so only the active branch runs.
     Returns (A, dAdx, perimeter, height).
     """
@@ -251,7 +251,7 @@ def get_nozzle_elliot(
 
     funcs = [region_convergent, region_throat_1, region_throat_2, region_divergent]
 
-    # Select the correct region via lax.switch, which needs a scalar index →
+    # Select the correct region via lax.switch, which needs a scalar index â†’
     # build the scalar core and vmap it over the position array.
     def _scalar(length):
         conds = [
@@ -259,7 +259,7 @@ def get_nozzle_elliot(
             length >= convergent_length + throat_first_length,
             length >= convergent_length + throat_first_length + throat_second_length,
         ]
-        idx = jnp.sum(jnp.array(conds))  # 0→convergent, 1→throat_1, 2→throat_2, 3→divergent
+        idx = jnp.sum(jnp.array(conds))  # 0â†’convergent, 1â†’throat_1, 2â†’throat_2, 3â†’divergent
         area, area_slope, perimeter, radius = jax.lax.switch(idx, funcs, length)
         return area, area_slope, radius
 
@@ -354,7 +354,7 @@ def get_nozzle_smd_divergent_smooth(
         area_slope = 2.0 * jnp.pi * radius * drdx_div
         return area, area_slope, perimeter, radius
 
-    # lax.switch needs a scalar index → build the scalar core and vmap it over the array.
+    # lax.switch needs a scalar index â†’ build the scalar core and vmap it over the array.
     def _scalar(length):
         conds = jnp.array([
             length >= z_transition,
@@ -409,12 +409,12 @@ def get_nozzle_simoneau(
     m0 = (radius_throat - radius_in) / convergent_length          # < 0  (converging)
     r_blend = radius_in + m0 * x_blend_start                      # r at x_blend_start
 
-    # B-spline span in local coordinates (0 → delta_x)
+    # B-spline span in local coordinates (0 â†’ delta_x)
     delta_x = x_throat_exit - x_blend_start
 
-    # Cubic Bézier control-point radii for C1 continuity at both ends:
-    #   At P0: tangent matches convergent slope  → P1 = P0 + (delta_x/3) * (1, m0)
-    #   At P3: tangent is horizontal (slope = 0) → P2 has same r as P3
+    # Cubic BÃ©zier control-point radii for C1 continuity at both ends:
+    #   At P0: tangent matches convergent slope  â†’ P1 = P0 + (delta_x/3) * (1, m0)
+    #   At P3: tangent is horizontal (slope = 0) â†’ P2 has same r as P3
     r_P1 = r_blend + m0 * (delta_x / 3.0)   # always > radius_throat when bspline_in_convergent_length is large enough
     r_P2 = radius_throat                     # horizontal tangent into P3
 
@@ -453,13 +453,13 @@ def get_nozzle_simoneau(
 
     funcs = [region_convergent, region_bspline, region_divergent]
 
-    # lax.switch needs a scalar index → build the scalar core and vmap it over the array.
+    # lax.switch needs a scalar index â†’ build the scalar core and vmap it over the array.
     def _scalar(length):
         conds = [
             length >= x_blend_start,
             length >= x_throat_exit,
         ]
-        idx = jnp.sum(jnp.array(conds))   # 0 → convergent, 1 → bspline, 2 → divergent
+        idx = jnp.sum(jnp.array(conds))   # 0 â†’ convergent, 1 â†’ bspline, 2 â†’ divergent
         area, area_slope, perimeter, radius = jax.lax.switch(idx, funcs, length)
         return area, area_slope, radius
 
@@ -486,9 +486,9 @@ def get_nozzle_simoneau_sharp(
 
     Optional ROUNDED corners: entry_blend_length / exit_blend_length [m] replace
     the corner at the throat entry / exit by a parabolic blend of that length,
-    centred on the corner and tangent to both straight walls (C¹ radius, constant
-    curvature ≈ a circular fillet of radius ≈ blend_length / Δslope, with
-    Δslope = 0.119 at the entry and 0.066 at the exit).  0.0 (default) → the
+    centred on the corner and tangent to both straight walls (CÂ¹ radius, constant
+    curvature â‰ˆ a circular fillet of radius â‰ˆ blend_length / Î”slope, with
+    Î”slope = 0.119 at the entry and 0.066 at the exit).  0.0 (default) â†’ the
     sharp corner, bit-for-bit.  The blend never goes below radius_throat.
 
     Sections (blend sections have zero length when the blend length is 0):
@@ -545,7 +545,7 @@ def get_nozzle_simoneau_sharp(
     funcs = [region_convergent, region_entry_blend, region_throat,
              region_exit_blend, region_divergent]
 
-    # lax.switch needs a scalar index → build the scalar core and vmap it over the array.
+    # lax.switch needs a scalar index â†’ build the scalar core and vmap it over the array.
     def _scalar(length):
         conds = [
             length >= x_entry - 0.5 * entry_blend_length,
@@ -636,14 +636,14 @@ def get_southwest_nozzle(
  
     funcs = [region_convergent, region_throat, region_divergent]
  
-    # lax.switch needs a scalar index → build the scalar core and vmap it over
+    # lax.switch needs a scalar index â†’ build the scalar core and vmap it over
     # the position array.
     def _scalar(length):
         conds = [
             length >= x_throat_in,
             length >= x_throat_out,
         ]
-        idx = jnp.sum(jnp.array(conds))  # 0 → convergent, 1 → throat, 2 → divergent
+        idx = jnp.sum(jnp.array(conds))  # 0 â†’ convergent, 1 â†’ throat, 2 â†’ divergent
         area, area_slope, perimeter, radius = jax.lax.switch(idx, funcs, length)
         return area, area_slope, radius
  

@@ -1,0 +1,69 @@
+"""Structural interface for user-programmed conservative physical models.
+
+No base-class inheritance, fixed equation identities, thermodynamic library or
+fixed variable count is required by numerical assembly. Models declare their
+own equation names and variable count. The supported system is square,
+cell-local storage on a fixed one-dimensional mesh with two endpoint traces.
+Nonconservative/rectangular systems require a later, explicit contract extension.
+"""
+
+from typing import Protocol, Sequence, Any
+from ...numerics.mesh import Mesh
+
+
+class BalanceModel(Protocol):
+    """Required model data and callbacks; shapes use N cells and V variables.
+
+    W is both the iteration and reconstruction representation. Conserved storage
+    may be nonlinear in W. Geometry is already included in integrated_source;
+    face_conserved/face_physical_flux are unweighted and use one declared face
+    frame. Boundary rows are dimensionless and have no storage.
+
+    Instead of the independent face callbacks, face_data(W) may return
+    conserved, physical_flux, speed_bounds and opaque auxiliary data. Optional
+    characteristic information, endpoint fluxes, conservative filters,
+    cell/boundary admissibility, explicit source timestep bounds, monitoring
+    quantities and final solution checks are documented in MODEL_INTERFACE.md.
+    Operator validates the callbacks selected by Scheme before compiling.
+    """
+
+    mesh: Mesh
+    nvar: int
+    equation_names: Sequence[str]
+    variable_scales: Any
+    conservative_scales: Any
+    global_flux_scales: Any
+    reference_time: float
+    source_dependency_radius: int
+    boundary_dependency_radius: int
+    boundary_coupling: str
+
+    def cell_conserved(self, physical):
+        """(N,V) -> (N,V), cell-local densities in the transported frame."""
+        ...
+
+    def flux_to_conserved_frame(self, face_flux): ...
+    def integrated_source(self, full): ...
+    def boundary_residual(self, full, time=0.0): ...
+    def admissible(self, full, left_faces, right_faces): ...
+    def wave_speed(self, physical): ...
+    def initial_state(self): ...
+
+
+class ConservativeModel(BalanceModel, Protocol):
+    """Simple face callbacks, with no mandatory eigensystem or EOS."""
+
+    def face_conserved(self, face_states):
+        """(N+1,V) -> (N+1,V), densities in the model's face frame."""
+        ...
+
+    def face_physical_flux(self, face_states): ...
+    def face_speed_bounds(self, face_states): ...
+
+
+class FusedConservativeModel(BalanceModel, Protocol):
+    """Alternative bundled interface for reusing expensive physical data."""
+
+    def face_data(self, face_states):
+        """Return conserved,physical_flux,speed_bounds,auxiliary in one dict."""
+        ...

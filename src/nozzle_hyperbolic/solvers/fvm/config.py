@@ -1,0 +1,148 @@
+"""Validated numerical settings and shared solve results."""
+
+from dataclasses import dataclass, field
+import operator as index_operator
+from typing import NamedTuple, Any
+import numpy as np
+from ..residuals import ResidualPolicy
+
+
+@dataclass(frozen=True)
+class Scheme:
+    reconstruction: str = "constant"
+    flux: str = "characteristic"
+    delta_factor: float = 0.1
+    newton_iterations: int = 10
+    newton_update_tolerance: float = 1e-10
+    newton_residual_tolerance: float = 1e-12
+    max_backtracks: int = 20
+    jacobian_mode: str = "colored"
+    linear_solver: str = "banded"
+    time_integrator: str = "euler-implicit"
+    boundary_treatment: str = "auto"
+    filter_strength: float = 0.0
+    smooth_limiter_coefficient: float = 1.0
+
+    def __post_init__(self):
+        if self.reconstruction not in (
+            "constant",
+            "muscl_van_leer",
+            "muscl_van_leer_smooth",
+        ):
+            raise ValueError("Unsupported reconstruction")
+        if self.flux not in ("characteristic", "rusanov", "hll"):
+            raise ValueError("Unsupported numerical flux")
+        if self.time_integrator not in (
+            "euler-implicit",
+            "euler-explicit",
+            "runge-kutta-3",
+        ):
+            raise ValueError("Unsupported time integrator")
+        if self.boundary_treatment not in ("auto", "coupled", "segregated"):
+            raise ValueError("boundary_treatment must be auto, coupled or segregated")
+        if (
+            self.boundary_treatment == "coupled"
+            and self.time_integrator != "euler-implicit"
+        ):
+            raise ValueError(
+                "Explicit time integrators require segregated boundary treatment"
+            )
+        if not np.isfinite(self.delta_factor) or self.delta_factor <= 0:
+            raise ValueError("Positive characteristic width required")
+        if self.jacobian_mode not in ("dense", "colored") or self.linear_solver not in (
+            "dense",
+            "banded",
+        ):
+            raise ValueError("Unsupported Jacobian or linear solver")
+        if self.jacobian_mode == "dense" and self.linear_solver == "banded":
+            raise ValueError(
+                "The banded backend uses colored AD; select colored/banded or dense/dense"
+            )
+        for name in ("newton_iterations", "max_backtracks"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or index_operator.index(value) < 0:
+                raise ValueError(f"{name} must be a nonnegative integer")
+        for name in ("newton_update_tolerance", "newton_residual_tolerance"):
+            value = getattr(self, name)
+            if not np.isfinite(value) or value < 0:
+                raise ValueError(f"{name} must be finite and nonnegative")
+        if self.newton_update_tolerance == 0 and self.newton_residual_tolerance == 0:
+            raise ValueError("At least one Newton convergence criterion is required")
+        if not np.isfinite(self.filter_strength) or self.filter_strength < 0:
+            raise ValueError("filter_strength must be finite and nonnegative")
+        if (
+            not np.isfinite(self.smooth_limiter_coefficient)
+            or self.smooth_limiter_coefficient <= 0
+        ):
+            raise ValueError("smooth_limiter_coefficient must be positive and finite")
+
+    @property
+    def effective_boundary_treatment(self):
+        """Resolve auto without changing the historical integrator defaults."""
+        if self.boundary_treatment == "auto":
+            return (
+                "coupled" if self.time_integrator == "euler-implicit" else "segregated"
+            )
+        return self.boundary_treatment
+
+
+@dataclass(frozen=True)
+class SteadySettings:
+    residual: ResidualPolicy = field(default_factory=ResidualPolicy)
+    cfl: float = 0.2
+    cfl_growth: float = 1.4
+    cfl_shrink: float = 0.5
+    cfl_max: float = 1e7
+    max_steps: int = 4000
+    max_retries: int = 14
+    stagnation_steps: int = 12
+
+    def __post_init__(self):
+        if not isinstance(self.residual, ResidualPolicy):
+            raise ValueError("residual must be a ResidualPolicy")
+        for name in ("cfl", "cfl_max", "cfl_growth", "cfl_shrink"):
+            value = getattr(self, name)
+            if (
+                isinstance(value, (bool, np.bool_))
+                or not np.isfinite(value)
+                or value <= 0
+            ):
+                raise ValueError(f"{name} must be positive and finite")
+        if (
+            self.cfl > self.cfl_max
+            or self.cfl_growth < 1
+            or not 0 < self.cfl_shrink < 1
+        ):
+            raise ValueError(
+                "Require cfl <= cfl_max, cfl_growth >= 1 and 0 < cfl_shrink < 1"
+            )
+        for name in ("max_steps", "max_retries", "stagnation_steps"):
+            value = getattr(self, name)
+            if (
+                isinstance(value, (bool, np.bool_))
+                or not isinstance(value, (int, np.integer))
+                or value < 0
+            ):
+                raise ValueError(f"{name} must be a nonnegative integer")
+
+
+@dataclass
+class Solution:
+    state: np.ndarray
+    success: bool
+    reason: str
+    history: list
+    metrics: dict
+    time: float = 0.0
+    elapsed_s: float = 0.0
+    operator: object = None
+
+
+class TimestepInfo(NamedTuple):
+    """Actual dt and independent wave/source/filter limits, all in time units."""
+
+    dt: Any
+    wave_dt: Any
+    source_dt: Any
+    filter_dt: Any
+    valid: Any

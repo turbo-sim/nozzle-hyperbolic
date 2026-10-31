@@ -1,1 +1,1 @@
-"""Existing thermodynamic recovery helpers and perfect-gas property routines."""
+"""Shared general-EOS thermodynamic utilities; model properties come from JAXProp."""
