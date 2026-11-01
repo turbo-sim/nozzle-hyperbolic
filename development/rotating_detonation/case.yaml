@@ -1,0 +1,34 @@
+geometry:
+  tip_radius_m: 0.10
+  constant_length_m: 0.10
+  expansion_length_m: 0.20
+  junction_blend_m: 0.02
+  inlet_hub_tip: 0.8
+  outlet_hub_tip: 0.7
+fluid: Air # calorically perfect gas, frozen composition, adiabatic inviscid walls
+inlet:
+  stagnation_temperature_K: 1000.0
+  stagnation_pressure_Pa: 2000000.0
+  mach: 1.2 # total speed / sound speed
+  angle_deg: 30.0 # measured from the meridional direction
+outlet:
+  pressure_Pa: 10000.0
+  regime: auto
+forcing:
+  frequency_Hz: 3500.0
+  mach_amplitude: 0.3
+  angle_amplitude_deg: 10.0
+  cycles: 8
+  frames_per_cycle: 24
+numerics:
+  flux: hll
+  reconstruction: muscl_van_leer
+  steady_grids: [50, 100, 200]
+  transient_cells: 200
+  explicit_cfl: 0.4
+  implicit_transient_cfl: 2.0
+  max_steady_steps: 20000
+  max_transient_steps: 100000
+benchmark:
+  excluded_complete_solves: 1
+  measured_repeats: 10
