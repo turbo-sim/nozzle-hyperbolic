@@ -1,0 +1,86 @@
+{
+  "study": "osher",
+  "title": "Osher path-flux configuration study",
+  "public_flux": "osher",
+  "row_configuration_key": "variant",
+  "require_method_is_flux": true,
+  "configurations": [
+    {
+      "id": "gauss_3",
+      "label": "Osher · Gauss 3",
+      "color": "#6a00a8",
+      "parameters": {
+        "quadrature_points": 3,
+        "integration": "gauss"
+      }
+    },
+    {
+      "id": "gauss_5",
+      "label": "Osher · Gauss 5",
+      "color": "#9c179e",
+      "parameters": {
+        "quadrature_points": 5,
+        "integration": "gauss"
+      }
+    },
+    {
+      "id": "gauss_9",
+      "label": "Osher · Gauss 9",
+      "color": "#cc4778",
+      "parameters": {
+        "quadrature_points": 9,
+        "integration": "gauss"
+      }
+    },
+    {
+      "id": "sonic_partitioned_5",
+      "label": "Osher · sonic-partitioned 5",
+      "color": "#ed7953",
+      "parameters": {
+        "quadrature_points": 5,
+        "integration": "sonic_partitioned"
+      }
+    }
+  ],
+  "parameter_heading": "Osher parameters",
+  "audit_required_true": [
+    "evaluation_source_hashes_match",
+    "evaluation_clients_hashes_match",
+    "case_hashes_match",
+    "initial_state_matches_model_cold",
+    "all_checks_passed"
+  ],
+  "audit_required_by_record_type": {
+    "api_migration_view": [
+      "recorded_source_matches_origin",
+      "numeric_payload_matches_origin",
+      "configuration_matches_origin",
+      "operator_equivalent_at_saved_state"
+    ],
+    "native_solve": ["source_hashes_match", "numerical_clients_match"]
+  },
+  "snapshot_flags": [
+    "snapshot_source_match",
+    "snapshot_client_match",
+    "snapshot_case_match"
+  ],
+  "notes_module": "report_notes",
+  "public_evidence_only": true,
+  "lead": "One flux family with explicit quadrature-point and integration parameters. Configuration IDs identify experiments, not additional flux methods.",
+  "theory_heading": "One path viscosity, configurable integration",
+  "theory_lead": "Scheme(flux='osher', quadrature_points=5, integration='gauss') is the default Osher configuration. The point count applies to the whole path for Gauss integration or to each captured panel for sonic-partitioned integration. It is not a spatial reconstruction order.",
+  "equation_html": "F̂ = ½(F<sub>L</sub> + F<sub>R</sub>) − ½∫₀¹ [Σ φ<sub>k</sub>(W(s))P<sub>k</sub>(W(s))] dU(W(s))/ds ds",
+  "labels": {
+    "gauss_3": "Osher · Gauss 3",
+    "gauss_5": "Osher · Gauss 5",
+    "gauss_9": "Osher · Gauss 9",
+    "sonic_partitioned_5": "Osher · sonic-partitioned 5"
+  },
+  "evidence_scope": "Preserved historical solves and clean derived configuration metadata, with separate current unified-API Operator audits; not a new cold-solve campaign.",
+  "rendering_note": "Browser rendering remains unverified. Installed Chrome static rendering was blocked by Windows IPC permissions and no image exporter was installed; no bypass was attempted.",
+  "completion_note": "The derived configuration population is complete. Recorded solve success, current evaluation checks and analytical accuracy remain separate.",
+  "native_overrides": {
+    "evidence_scope": "Native cold-solve records retain their own execution source, client and case hashes; saved-state Operator evaluations and analytical accuracy are separate checks.",
+    "completion_note": "The requested native-solve population is complete. Native success, saved-state evaluation checks and analytical accuracy remain separate."
+  }
+}
