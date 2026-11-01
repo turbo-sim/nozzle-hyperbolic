@@ -1,0 +1,40 @@
+{
+  "geometry": {
+    "x_in": -0.03201,
+    "x_out": 0.06636,
+    "throat_radius": 0.0015,
+    "inlet_ratio": 17.1,
+    "exit_ratio": 1.69
+  },
+  "cases": [
+    {
+      "id": "supercritical",
+      "label": "Strong real-gas, supercritical CO2",
+      "p0": 30000000.0,
+      "T0": 400.0,
+      "geometry_override": {"exit_ratio": 1.15},
+      "backpressure": 20400000.0,
+      "table": {
+        "name": "co2_supercritical_100x100",
+        "h_min": 260000.0,
+        "h_max": 600000.0,
+        "p_min": 4000000.0,
+        "p_max": 32000000.0
+      }
+    },
+    {
+      "id": "lettieri_equilibrium",
+      "label": "Lettieri-type equilibrium condensation of CO2",
+      "p0": 8474000.0,
+      "T0": 313.88,
+      "backpressure": 7000000.0,
+      "table": {
+        "name": "co2_lettieri_equilibrium_100x100",
+        "h_min": 250000.0,
+        "h_max": 520000.0,
+        "p_min": 1000000.0,
+        "p_max": 9000000.0
+      }
+    }
+  ]
+}

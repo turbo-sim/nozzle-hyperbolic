@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>CO₂ · Real-gas nozzle verification</title>
+<!--STYLE-->
+</head>
+<body>
+<div class="topline"><span>CONTINUOUS REFERENCE / FINITE VOLUME</span><span>CO₂ · EQUILIBRIUM REAL GAS</span></div>
+<header class="hero">
+ <div class="hero-main"><div class="eyebrow"><span class="molecule">CO₂</span> NOZZLE HYPERBOLIC · VERIFICATION STUDY</div>
+  <h1>Real-gas nozzle verification<span class="title-dot">.</span></h1>
+  <p class="lead">Three numerical fluxes. Two reconstructions. Five meshes.<br>Inspect the solution, its convergence and the evidence behind it.</p>
+  <div id="campaign-flux-counts" class="hero-fluxes" aria-label="Independently verified stages by flux"></div>
+  <p class="hero-interpretation">Verified counts apply to these cases and settings; analytic accuracy is assessed separately.</p>
+ </div>
+ <div class="hero-aside"><button id="theme" class="small-button" aria-label="Switch color theme">◐ Appearance</button>
+  <div class="hero-stat"><strong id="campaign-count">—</strong><span>mesh stages in campaign</span></div>
+  <div class="subtle" id="campaign-state">Loading embedded campaign…</div>
+ </div>
+</header>
+<main>
+<section class="controls" aria-label="Plot selections">
+ <div class="control-grid">
+  <label class="control"><span>01 / Fluid regime</span><select id="physical-case"></select></label>
+  <label class="control"><span>02 / Operating case</span><select id="regime"><option value="adapted">Adapted expansion</option><option value="shock">Internal normal shock</option></select></label>
+  <label class="control"><span>03 / Mesh</span><select id="mesh"></select></label>
+  <label class="control"><span>04 / Reconstruction</span><select id="reconstruction"><option value="both">Constant + linear MUSCL</option><option value="constant">Constant</option><option value="muscl_van_leer">Linear MUSCL · van Leer</option></select></label>
+ </div>
+ <div class="control-footer"><div id="methods" class="method-toggle" role="group" aria-label="Numerical flux selection"></div>
+  <div class="line-key"><span class="key-solid"></span> Linear MUSCL <span class="key-dash"></span> Constant <span class="key-reference"></span> Reference</div>
+ </div>
+</section>
+<section class="kpis" aria-label="Selected run summary"><article><span>Verified steady solves</span><strong id="kpi-success">—</strong><small id="kpi-native">—</small></article><article><span>Largest spatial RMS</span><strong id="kpi-residual">—</strong><small>Fixed scales · maximum over equations</small></article><article><span>Mass-flow error</span><strong id="kpi-error">—</strong><small>Largest numerical face-flux error vs reference</small></article><article><span>Initialization</span><strong id="kpi-multigrid">Coarse → fine</strong><small id="kpi-sequence">50 → 100 → 200 → 400 → 800</small></article></section>
+<div id="selection-notice" class="notice" role="status"></div>
+<nav class="tabs" aria-label="Report pages"><button data-page="solution" class="active">Solution fields</button><button data-page="convergence">Convergence</button><button data-page="refinement">Mesh refinement</button><button data-page="methodology">Evidence &amp; method</button></nav>
+<section id="solution" class="page active">
+ <div class="section-heading"><div><div class="eyebrow">01 / CONTINUOUS VS DISCRETE</div><h2>Expected flow, computed flow</h2><p id="solution-context">—</p></div><button id="download-fields" class="small-button">↓ Selected fields CSV</button></div>
+ <div class="plot-grid" id="field-plots"><div id="field-p" class="chart"></div><div id="field-rho" class="chart"></div><div id="field-u" class="chart"></div><div id="field-T" class="chart"></div><div id="field-M_euler" class="chart"></div><div id="field-Q" class="chart"></div></div>
+ <div class="section-heading compact"><div><h3>Selected solve evidence</h3><p>Native convergence, independent audits and analytic accuracy are reported separately.</p></div></div>
+ <div class="table-wrap"><table><thead><tr><th>Flux / reconstruction</th><th>State</th><th>Warm retries</th><th>Pressure L₁</th><th>Velocity L₁</th><th>Mass-flow error</th><th>Spatial RMS</th><th>Steps / rejected</th><th>Stage wall time</th><th>Initialization</th></tr></thead><tbody id="run-table"></tbody></table></div>
+ <p class="caption">Mass-flow error is |mean numerical face ṁ / reference ṁ − 1|, distinct from physical cell-state mass-flow error or face-to-face conservation spread. Mesh fields are plotted at the saved physical stations; the reference retains both shock traces. Raw quality is not clipped and has a mixture interpretation only in equilibrium two-phase states. Step counts and plotted histories describe the final retained attempt; stage wall time includes all retained warm/cold attempt solve and JIT times, excluding the post-solve audit.</p>
+</section>
+<section id="convergence" class="page">
+ <div class="section-heading"><div><div class="eyebrow">02 / ORIGINAL SPATIAL EQUATIONS</div><h2>Convergence on the selected mesh</h2><p>Curves show the final retained attempt; labels identify cold restarts after warm failure. Each attempt resets its step counter.</p></div><button id="download-history" class="small-button">↓ Selected history CSV</button></div>
+ <div class="inline-controls"><label>Residual view <select id="residual-mode"><option value="absolute">Fixed-scale spatial RMS</option><option value="relative">Relative to this stage’s initial RMS</option><option value="ratio">Stopping criterion ratio</option></select></label><span class="caption">Markers on the CFL panel identify rejected timestep trials.</span></div>
+ <div class="plot-grid"><div id="history-residual" class="chart tall"></div><div id="history-boundary" class="chart tall"></div><div id="history-cfl" class="chart"></div><div id="history-inner" class="chart"></div></div>
+ <div class="explainer"><strong>Read the stopping test correctly.</strong><p>Each conservation equation uses a fixed-scale, volume-weighted norm. The default criterion accepts an equation when its absolute target or its relative target is reached; separate boundary and global conservation checks must also pass. A small update or a large CFL alone does not establish a steady solution. No per-step wall-clock axis is invented: only stage wall times were measured.</p></div>
+</section>
+<section id="refinement" class="page">
+ <div class="section-heading"><div><div class="eyebrow">03 / 50 → 800 CELLS</div><h2>Grid sequence and analytic error</h2><p>All five meshes for the selected fluid, operating case, methods and reconstruction.</p></div><label class="field-picker">Error field <select id="error-field"><option value="p">Pressure</option><option value="mass_flow">Numerical face mass flow</option><option value="shock_position">Shock position</option><option value="u">Velocity</option><option value="rho">Density</option><option value="T">Temperature</option><option value="h">Enthalpy</option><option value="M_euler">Euler Mach number</option><option value="Q">Vapor mass quality</option><option value="s">Table entropy</option></select></label></div>
+ <div class="plot-grid"><div id="grid-error" class="chart tall"></div><div id="grid-iterations" class="chart tall"></div><div id="grid-time" class="chart"></div><div id="grid-residual" class="chart"></div></div>
+ <div class="explainer"><strong>Acceleration is coarse-to-fine initialization.</strong><p>The 50-cell stage establishes the initial flow. When the preceding mesh converged, the next stage first attempts its transferred state through the package’s grid-sequence driver. Failed warm attempts are retained and retried cold; diamond markers identify verified cold rescues. If no successful preceding state is available, the next stage starts cold. This is grid sequencing, not a multilevel residual-correction V-cycle. Stage wall time includes all retained warm/cold attempt solve and JIT times, excluding the post-solve audit; plotted iteration counts describe only the final retained attempt. These single-run timings are diagnostics, not a repeated performance benchmark.</p><p id="error-definition">Field errors use their declared normalization scales.</p></div>
+ <div class="table-wrap"><table><thead><tr><th>Cells</th><th>Flux / reconstruction</th><th>State</th><th>Warm retries</th><th id="grid-error-heading">Normalized L₁</th><th id="grid-l2-heading">Normalized L₂</th><th id="grid-linf-heading">Normalized L∞</th><th>Steps</th><th>Stage time</th></tr></thead><tbody id="grid-table"></tbody></table></div>
+</section>
+<section id="methodology" class="page">
+ <div class="section-heading"><div><div class="eyebrow">04 / MODEL, NUMERICS AND PROVENANCE</div><h2>What this comparison establishes</h2><p>The report carries its own data, plotting library and downloadable evidence.</p></div><button id="download-data" class="small-button">↓ Complete report data JSON</button></div>
+ <div class="method-grid"><article class="method-card"><span class="card-number">01</span><h3>Shared physical problem</h3><p>Steady inviscid, adiabatic quasi-one-dimensional Euler flow of CO₂. All three methods use the same case-specific area law and reservoir. Adapted cases use outgoing supersonic extrapolation: the reference exit pressure is a design value, not an imposed FVM pressure. Shocked cases impose the prescribed backpressure.</p><div class="equation">ṁ = ρuA &nbsp;·&nbsp; h₀ = h + u²/2</div></article><article class="method-card"><span class="card-number">02</span><h3>Real-gas thermodynamics</h3><p>JAXProp equilibrium bicubic tables, 100 × 100 in enthalpy and logarithmic pressure. No ideal-gas replacement. The two-phase closure assumes homogeneous phase velocity and instantaneous mechanical, thermal and phase equilibrium.</p><div class="equation">ρ = ρ<sub>bicubic</sub>(p,h)</div></article><article class="method-card"><span class="card-number">03</span><h3>Independent continuous reference</h3><p>The established reference integrates dh/dp = 1/ρ, locates the choked mass flux, solves the Rankine–Hugoniot conditions, and iterates shock position to match backpressure. It contains ODE/root tolerances and tabulation effects; it is not an FVM solution.</p><div class="equation">[ρu] = [p + ρu²] = [h + u²/2] = 0</div></article><article class="method-card accent"><span class="card-number">04</span><h3>Acoustic consistency matters</h3><p id="acoustic-note">Density, entropy and sound speed are independently interpolated. The selected matched reference’s consistency diagnostics appear here after loading.</p><div class="equation">a²<sub>Euler</sub> = [ρ<sub>p</sub> + ρ<sub>h</sub>/ρ]⁻¹</div></article></div>
+ <div class="method-grid two"><article class="method-card"><h3>How errors should be interpreted</h3><p>Normalized field errors use the saved reference comparison and declared scales. A shock creates a position-dependent integral error and lowers global convergence order; smooth-region and shock-location evidence should be read separately. Numerical convergence does not imply thermodynamic-table convergence. The Lettieri-type equilibrium case does not reproduce delayed nucleation or the experimental Wilson line.</p></article><article class="method-card"><h3>Failures remain part of the evidence</h3><p>Unsuccessful solves, audit failures and blocked stages stay in the selector and tables. Their final available fields and histories are shown with explicit status. Error trends distinguish verified solves from unsuccessful or unaudited states. No failed trajectory is relabeled as a successful run.</p></article></div>
+ <div id="setup-note" class="explainer"></div>
+ <div id="profile-note" class="explainer"></div>
+ <div id="execution-note" class="explainer"></div>
+ <div class="method-grid two"><article class="method-card"><h3>Cold state and grid transfer</h3><p id="cold-start-note">The 50-cell stage uses the declared cold initialization. Finer grids receive the preceding successful mesh state through the production grid-sequence driver. The analytic solution is assessment data, not an initial field or a prescribed shock location.</p></article><article class="method-card"><h3>Preliminary startup diagnostics</h3><p>Original-table and alternative cold-start trials are retained separately from the active comparison. They establish setup limitations; they are not silently mixed into the five-mesh error trends.</p><div id="diagnostic-summary" class="caption"></div><button id="download-diagnostics" class="small-button">↓ Startup diagnostic records JSON</button></article></div>
+ <div class="section-heading compact"><div><h3>Physical setup and solver settings</h3><p>Machine-readable values are embedded without numerical reruns.</p></div></div><div id="case-settings" class="settings-grid"></div>
+ <details><summary>Campaign settings and provenance</summary><pre id="provenance"></pre></details><details><summary>Selected result audits and retained attempts</summary><pre id="selected-audits"></pre></details>
+</section>
+<footer><span>NOZZLE HYPERBOLIC / REAL-GAS FVM</span><span>Offline report · embedded Plotly 2.35.2 · all values from saved runs</span></footer>
+</main>
+<!--PLOTLY-->
+<!--DATA-->
+<!--APP-->
+</body></html>
