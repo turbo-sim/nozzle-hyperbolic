@@ -1,5 +1,13 @@
 # JAX, JIT, and automatic differentiation audit
 
+> Historical record of the original branch/structural-refactor review. The
+> descriptions of "current" files, pending changes and proposed organization
+> below refer to that inspection, not the present package. Use the
+> [current architecture](../architecture/ARCHITECTURE.md) and
+> [model interface](../model_interface.md) for supported APIs. These findings
+> have not all been revalidated or resolved, especially for the deferred
+> two-fluid implementation; see the [research backlog](../proposals/research_backlog.md).
+
 Date: 2026-10-26. Baseline: `alberto-branch` at `6fe085c`.
 
 This audit records inherited implementation issues and limitations. No numerical implementation was repaired as part of the file-organization refactor. Source line references below identify the original Alberto files at the recorded commit; function names remain the lookup key after relocation.

@@ -1,11 +1,19 @@
 # Code organization on roberto-branch
 
+> Historical record of the original branch/structural-refactor review. The
+> descriptions of "current" files, pending changes and proposed organization
+> below refer to that inspection, not the present package. Use the
+> [current architecture](../architecture/ARCHITECTURE.md) and
+> [model interface](../model_interface.md) for supported APIs. These findings
+> have not all been revalidated or resolved, especially for the deferred
+> two-fluid implementation; see the [research backlog](../proposals/research_backlog.md).
+
 Date: 2026-10-26.
 
 This step reorganizes **nozzle_hyperbolic only**. It does not integrate NozzleX,
 port code from Andrea, implement EulerAnnular, change numerical algorithms,
-or repair the issues recorded in [the repository audit](ALBERTO_REPOSITORY_AUDIT.md)
-and [the JAX audit](JAX_IMPLEMENTATION_AUDIT.md).
+or repair the issues recorded in [the repository audit](alberto_repository_audit.md)
+and [the JAX audit](jax_implementation_audit.md).
 
 ## Baseline and preservation
 
@@ -34,7 +42,7 @@ layout and can later be transplanted beneath `nozzlex`.
 
 The structural commit preserves the pre-experiment numerical implementations.
 Later flux, reconstruction, and root-solver changes remain uncommitted; see
-[the numerical changes review](NUMERICAL_CHANGES_REVIEW.md) before approving them.
+the historical numerical staging review (`git show 677ab44:docs/old/NUMERICAL_CHANGES_REVIEW.md`) before approving them.
 
 ## Current implemented layout
 
@@ -309,7 +317,7 @@ still byte-for-byte unchanged after the subsequent extraction.
 - The **305 pre-existing non-package files** captured in that snapshot remain
   byte-for-byte unchanged, including the initial local edits and Roberto files.
 - Package source compilation succeeds. Legacy-import and representative numerical
-  checks are recorded in the workspace [compatibility inventory](../../files_that_should_still_run.md).
+  checks are recorded in the workspace compatibility inventory (retired historical checklist).
 - All **32 finite numerical outputs** in focused before/after probes match
   exactly (maximum absolute difference 0.0), including five FDS flux/residual
   choices and six-cell JIT EulerNozzle/TwoFluid Newton steps with analytical

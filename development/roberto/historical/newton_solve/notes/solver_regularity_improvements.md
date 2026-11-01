@@ -1,12 +1,11 @@
 # LM/HYBR tests and Euler flux/MUSCL corrections
 
-> Historical analysis. The one-off drivers and old generated outputs referenced
-> below were removed during experiment cleanup. Their commands and output paths
-> are historical, not currently supported reproduction instructions. See the
-> [consolidated overview](../development/roberto/newton_solve/README.md) and
-> [convergence explanation](../development/roberto/newton_solve/REPORT.html#theory)
-> for the retained comparison. Flux/limiter verification is now in
-> [numerical_fixes](../development/roberto/numerical_fixes/README.md).
+> Historical analysis of the pre-shared-solver equations and recorded experiments.
+> Removed one-off drivers and their original commands are not current
+> reproduction instructions. Read the [retained study](../README.md) and
+> [offline report](../REPORT.html) for the preserved comparison. Current
+> production flux variants are documented in the
+> [flux studies](../../../../../development/flux_methods/README.md).
 
 The flux and limiter defects are corrected, but the tested changes do **not**
 make direct cold-start solves converge on the two shocked cases. Constant

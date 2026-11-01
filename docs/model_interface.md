@@ -6,7 +6,8 @@ is a Python object satisfying the structural protocols in
 is unnecessary. The solver has no Euler-variable, equation-count or EOS branch.
 The supported problem is a **square conservative balance system**, with
 cell-local storage, fixed one-dimensional geometry and two endpoint traces.
-Periodic boundaries and nonconservative products need a future contract extension.
+Nonconservative products and rectangular systems need a future contract extension.
+The package supports two physical endpoints; periodic problems are outside its scope.
 Interior flux/source callbacks are autonomous functions of state and fixed model
 data; boundary equations additionally receive physical time. Explicitly
 time-forced interior laws would require extending the callback contract.
@@ -16,8 +17,10 @@ eigenstructure, constitutive laws, admissible domain, boundary equations and
 physical dependency stencils. The numerical engine owns reconstruction,
 numerical flux contraction, conservative assembly, differentiation, Newton and
 linear solves, time integration, timestep control and convergence assessment.
-Geometry preprocessing constructs fixed mesh measures. Case files and reference
-solutions belong outside these layers.
+Geometry preprocessing constructs fixed mesh measures. Physical case definitions and analytical references belong beside their models;
+benchmark profiles select numerical settings and import those definitions. See
+[analytical references](analytical_references.md) and the
+[installed verification API](../src/nozzle_hyperbolic/verification/README.md).
 
 ## Array and conservation conventions
 
@@ -84,12 +87,48 @@ For expensive properties, replace the three independent face callbacks with
 `speed_bounds=(lower,upper)` and `auxiliary`. Auxiliary data is an opaque JAX
 pytree; the numerical engine never interprets its physical contents.
 
-Selecting `flux="characteristic"` additionally requires
-`face_characteristics(left,right,delta_factor)`, returning projectors of shape
-$(N+1,K,V,V)$, eigenvalues $(N+1,K)$ and positive regularization widths
-$(N+1,K)$. Here $K$ is the number of characteristic families. With fused face
-data, `face_characteristics_from_data(left,right,delta_factor,aux_left,aux_right)`
-can reuse property evaluations. HLL and Rusanov require no eigenvectors.
+### Flux capabilities and current options
+
+`Scheme.flux` accepts `stadtke` (default), `rusanov`, `hll`, `roe` and `osher`.
+The previous `characteristic` selector has been removed; mathematical callback
+names such as `face_characteristics` retain their meaning.
+
+Stadtke and Osher require `face_characteristics(left,right,delta_factor)`,
+returning projectors $(N+1,K,V,V)$, eigenvalues $(N+1,K)$ and widths $(N+1,K)$.
+The wave-group count $K$ is independent of $V$. Widths must be positive for
+Stadtke; Osher also permits zero. With fused face data,
+`face_characteristics_from_data(left,right,delta_factor,aux_left,aux_right)`
+reuses opaque property payloads. HLL and Rusanov require no eigenvectors.
+
+Stadtke has two independent numerical settings, both enabled by default:
+`custom_jump_correction` replaces finite physical-flux-jump dissipation with
+mean-characteristic conservative-jump viscosity; `custom_endpoint_envelope`
+adds an endpoint-family speed envelope to the mean dissipation. Disable both
+to select the original Stadtke contraction. Other flux families ignore these
+flags. They do not provide a general monotonicity theorem.
+
+Osher integrates characteristic viscosity along a state path. By default the
+path is affine in the model's reconstruction variables. A model may implement
+`face_state_path(left,right,parameter) -> (state, derivative)`; `parameter` has
+shape $(N+1,1)$ and both returned arrays have shape $(N+1,V)$. The derivative is
+with respect to that parameter. The same unweighted conservative face frame
+must be used for storage, flux and projectors throughout the path.
+
+Osher evaluates characteristic data at coincident path states and needs a
+supported JAX directional derivative of the conservative storage along the
+path. An EOS wrapper can provide traceable values while lacking that derivative;
+verify this capability separately. The physical model owns path admissibility
+and hyperbolicity. Invalid sampled states reject the candidate; no clipping or
+replacement HLL flux is applied. Finite node sampling does not certify the
+entire path or all possible sonic crossings.
+
+`quadrature_points` selects 3, 5 (default) or 9 Gauss nodes. With
+`integration="gauss"` (default), one unsplit rule is used. With
+`integration="sonic_partitioned"`, the selected rule is applied to panels split
+at captured sonic/regularization crossings. These options describe path
+integration, not spatial order or physical time integration; other fluxes
+ignore them. See the [flux studies](../development/flux_methods/README.md) for
+the selected variants, evidence and limitations.
 
 ### Optional Roe capability
 
@@ -203,7 +242,7 @@ bound is not multiplied by CFL. An implicit step does not use the explicit
 source/filter restrictions. A model must
 supply a suitable bound for a stiff source; a generic wave CFL cannot infer it.
 The Haaland policy supplies a local drag estimate, whose limits are documented
-in [PHYSICAL_CLOSURES.md](PHYSICAL_CLOSURES.md).
+in [physical closures](physical_closures.md).
 
 The optional filter adds an internal conservative face correction in transported
 densities. Its strength is numerical; velocity gates or other physical sensors
@@ -307,14 +346,16 @@ perfect-gas exception is the selectable finite-wave pressure outlet in
 [`models/euler_outlet.py`](../src/nozzle_hyperbolic/models/euler_outlet.py), which
 is explicitly restricted to a perfect-gas backend and carries a TODO for general
 EOS extension. The default acoustic outlet uses general-EOS properties. Sod
-uses transmissive traces at both ends, with no pressure/reservoir condition;
-benchmark comparisons stop before waves reach those ends.
+uses transmissive traces at both ends, with no pressure/reservoir condition.
+Exact waves should remain away from the endpoints during reference comparisons;
+finite-grid diffusive tails can still affect numerical boundary transfer. Use
+the actual integrator-consistent numerical flux budget for conservation checks.
 
 `outlet_regime="auto"` opts a nozzle or annular model into pressure-controlled,
 sonic and fully outgoing traces during a transient. Acoustic auto treatment
 uses EOS-based entropy/compatibility and a pressure/sonic complementarity
 constraint. A 100:1 initial pressure release is a large finite wave; the
-new [transient study](../development/roberto/transient_problems/boundary_treatment/README.md)
+new [transient study](../development/roberto/transient_problems/README.md)
 uses the permitted perfect-gas finite-wave outlet for that case. The physical
 outlet law is held fixed while comparing numerical boundary treatments.
 

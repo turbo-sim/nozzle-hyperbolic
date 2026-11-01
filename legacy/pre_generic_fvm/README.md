@@ -9,7 +9,7 @@ The current implementations live in
 [`src/nozzle_hyperbolic`](../../src/nozzle_hyperbolic/). Current verification
 uses [`tests/`](../../tests/) and the
 [transient study](../../development/roberto/transient_problems/README.md).
-The [native benchmark](../../development/roberto/nozzle_native_performance/README.md)
+The [native benchmark](../../development/roberto/benchmarking/README.md)
 loads this frozen source explicitly; see the [baseline policy](../README.md).
-The [archived migration guide](../../docs/old/MIGRATION.md) records the API
+The [migration guide](../../docs/migration.md) records the API
 changes and deliberately deferred two-fluid migration.

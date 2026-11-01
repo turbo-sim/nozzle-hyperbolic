@@ -8,7 +8,7 @@
 - [development/](development/README.md): Alberto's legacy research scripts and
   Roberto's controlled verification and numerical studies.
 - [tests/](tests/): production tests.
-- [docs/](docs/): architecture, derivations and numerical findings.
+- [docs/](docs/README.md): current guides, proposals, physical derivations and historical audits.
 
 Explore the [interactive architecture map](docs/architecture/ARCHITECTURE.html),
 [vector diagram](docs/architecture/ARCHITECTURE.svg), and

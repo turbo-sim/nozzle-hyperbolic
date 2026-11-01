@@ -1,17 +1,16 @@
 # Mathematical analysis of the shocked-nozzle stagnation
 
-> Historical analysis. The one-off drivers and old generated outputs referenced
-> below were removed during experiment cleanup. Their commands and output paths
-> are historical, not currently supported reproduction instructions. See the
-> [consolidated overview](../development/roberto/newton_solve/README.md) and
-> [convergence explanation](../development/roberto/newton_solve/REPORT.html#theory)
-> for the retained comparison. Flux/limiter verification is now in
-> [numerical_fixes](../development/roberto/numerical_fixes/README.md).
+> Historical analysis of the pre-shared-solver equations and recorded experiments.
+> Removed one-off drivers and their original commands are not current
+> reproduction instructions. Read the [retained study](../README.md) and
+> [offline report](../REPORT.html) for the preserved comparison. Current
+> production flux variants are documented in the
+> [flux studies](../../../../../development/flux_methods/README.md).
 
 This analysis describes the historical flux, retained as
 `_jax_F_fvs_stadtke_legacy`. The subsequent implementation and controlled
 LM/HYBR/reconstruction tests are documented in
-[SOLVER_REGULARITY_IMPROVEMENTS.md](SOLVER_REGULARITY_IMPROVEMENTS.md).
+[SOLVER_REGULARITY_IMPROVEMENTS.md](solver_regularity_improvements.md).
 
 Newton can solve discretized flows containing shocks. These failures concern
 the particular residual, initialization, and globalization used here. The
@@ -163,7 +162,7 @@ away from the starting field it is a different function.
 
 ## 3. The entropy-fix activation creates a finite flux jump
 
-In [flux_jax.py](../src/nozzle_hyperbolic/models/euler_nozzle/flux_jax.py), the acoustic
+In [flux_jax.py](../../../../../src/nozzle_hyperbolic/models/euler_nozzle/flux_jax.py), the acoustic
 projector is multiplied by $c=|\bar\lambda|/\lambda_{\rm safe}$. The strict
 expansion condition is $\lambda_L<0<\lambda_R$. When active,
 

@@ -1,8 +1,8 @@
 # Package architecture
 
-Status checked against `src/nozzle_hyperbolic/` on **31 October 2026**. This guide describes the supported shared finite-volume path, rather than every historical implementation in the repository.
+Status checked against `src/nozzle_hyperbolic/` on **1 November 2026**. This guide describes the supported shared finite-volume path, rather than every historical implementation in the repository.
 
-[Open the browser map](ARCHITECTURE.html) · [Open the vector diagram](ARCHITECTURE.svg)
+[Documentation index](../README.md) | [Model interface](../model_interface.md) | [Open the browser map](ARCHITECTURE.html) | [Open the vector diagram](ARCHITECTURE.svg)
 
 The SVG is the portable, editable architecture reference. The HTML companion provides a convenient browser view; this Markdown document explains the choices and their limits. “Implemented” describes an available code path, and does not imply that every combination has been verified for every model.
 
@@ -266,7 +266,7 @@ Inspect `Solution.success`, `reason`, `metrics`, and `history`; reaching an iter
 
 ## Verification and limits
 
-Production verification is exercised by [`tests/`](../../tests/) and the [transient boundary-treatment study](../../development/roberto/transient_problems/README.md), which use the source implementations. Earlier studies are indexed in [`development/roberto/historical/`](../../development/roberto/historical/README.md). Canonical analytical references live beside their physical models in [`euler_nozzle/analytical/`](../../src/nozzle_hyperbolic/models/euler_nozzle/analytical/), [`euler_annular/analytical/`](../../src/nozzle_hyperbolic/models/euler_annular/analytical/), and [`scalar/analytical.py`](../../src/nozzle_hyperbolic/models/scalar/analytical.py), separately from evolution kernels. The [source verification guide](../../src/nozzle_hyperbolic/verification/README.md) explains the packaged physical cases and reference assumptions. Older studies and low-level regression utilities should not be mistaken for the supported driver path.
+Production verification is exercised by [`tests/`](../../tests/) and the [transient boundary-treatment study](../../development/roberto/transient_problems/README.md), which use the source implementations. Earlier studies are indexed in [`development/roberto/historical/`](../../development/roberto/historical/README.md). Canonical analytical references live beside their physical models in [`euler_nozzle/analytical/`](../../src/nozzle_hyperbolic/models/euler_nozzle/analytical/), [`euler_annular/analytical/`](../../src/nozzle_hyperbolic/models/euler_annular/analytical/), and [`scalar/analytical.py`](../../src/nozzle_hyperbolic/models/scalar/analytical.py), separately from evolution kernels. The [source verification guide](../../src/nozzle_hyperbolic/verification/README.md) explains packaged physical cases; the [analytical reference guide](../analytical_references.md) records mathematical assumptions and attribution. Older studies and low-level regression utilities should not be mistaken for the supported driver path.
 
 The architecture's important boundaries are:
 

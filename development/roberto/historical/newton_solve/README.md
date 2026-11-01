@@ -45,6 +45,15 @@ sonic-limit analytical accuracy discrepancy remains a failure even when a
 spatial root is reached. Historical notes include earlier exploratory timings;
 they are not silently merged with the authoritative plotted five-case archive.
 
+## Historical derivations
+
+The [stagnation analysis](notes/mathematical_stagnation_analysis.md) and
+[flux/limiter regularity experiments](notes/solver_regularity_improvements.md)
+are retained beside this study. They describe the historical numerical kernels,
+source revisions and measurements, not the supported production API. Removed
+one-off commands remain historical; the report commands below rebuild the
+retained comparison from saved results.
+
 ## Directory organization
 
 ```text

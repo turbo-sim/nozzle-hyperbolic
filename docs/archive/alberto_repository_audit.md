@@ -1,8 +1,16 @@
 # Alberto branch: repository and implementation audit
 
+> Historical record of the original branch/structural-refactor review. The
+> descriptions of "current" files, pending changes and proposed organization
+> below refer to that inspection, not the present package. Use the
+> [current architecture](../architecture/ARCHITECTURE.md) and
+> [model interface](../model_interface.md) for supported APIs. These findings
+> have not all been revalidated or resolved, especially for the deferred
+> two-fluid implementation; see the [research backlog](../proposals/research_backlog.md).
+
 Date: 2026-10-26.
 
-This audit records inherited findings for the structural refactor on `roberto-branch`. It does not authorize or implement numerical fixes. Function bodies, comments, docstrings, and the three expected-failure tests are to be preserved during this stage. Detailed JAX, JIT, and automatic-differentiation findings are recorded separately in [JAX_IMPLEMENTATION_AUDIT.md](JAX_IMPLEMENTATION_AUDIT.md).
+This audit records inherited findings for the structural refactor on `roberto-branch`. It does not authorize or implement numerical fixes. Function bodies, comments, docstrings, and the three expected-failure tests are to be preserved during this stage. Detailed JAX, JIT, and automatic-differentiation findings are recorded separately in [JAX_IMPLEMENTATION_AUDIT.md](jax_implementation_audit.md).
 
 ## Provenance and scope
 

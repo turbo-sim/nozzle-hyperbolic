@@ -21,10 +21,10 @@ convergence checks. Simply replacing every factor 0.5 with 0.8 is lower priority
 ## Current implementation
 
 The relevant entry points are
-[`SteadySettings` and `Scheme`](../src/nozzle_hyperbolic/solvers/fvm/config.py),
-the [steady/transient drivers](../src/nozzle_hyperbolic/solvers/fvm/drivers.py),
-the [Newton solver](../src/nozzle_hyperbolic/solvers/time_marching/implicit.py),
-and the [operator](../src/nozzle_hyperbolic/solvers/fvm/operator.py).
+[`SteadySettings` and `Scheme`](../../src/nozzle_hyperbolic/solvers/fvm/config.py),
+the [steady/transient drivers](../../src/nozzle_hyperbolic/solvers/fvm/drivers.py),
+the [Newton solver](../../src/nozzle_hyperbolic/solvers/time_marching/implicit.py),
+and the [operator](../../src/nozzle_hyperbolic/solvers/fvm/operator.py).
 
 | Setting | Inspected working-tree value |
 |---|---|
@@ -38,9 +38,9 @@ and the [operator](../src/nozzle_hyperbolic/solvers/fvm/operator.py).
 | Flow Newton backtracking | Off; full undamped corrections |
 | Retry budget | 14 retries after the first attempt |
 
-These values describe the checkout inspected for this note. Its CFL growth and
-maximum differ from the committed configuration at inspection, which had 1.4
-and $10^7$. Committing this document does not include those existing source edits.
+These values describe the working tree inspected for this proposal. Record the
+actual source revision and resolved settings when starting an experiment; this
+document does not change package defaults or activate an adaptive controller.
 
 The steady controller currently:
 
@@ -173,9 +173,12 @@ linear solves; it should not be used as an ambiguous label for cap exhaustion.
 
 ## Evidence already available
 
-The retained [Newton-cap benchmark](roberto/nozzle_native_performance/CAP_BENCHMARK.md)
-compared the new undamped solver at caps 10 and 100 with matched settings. These
-are previous measurements, not runs performed for this note.
+Earlier local Newton-cap measurements compared the undamped solver at caps
+10 and 100 with matched settings. The historical summary below was recorded
+on 31 October 2026; it is not a performance measurement of the current source.
+The original local report was `development/roberto/nozzle_native_performance/CAP_BENCHMARK.md`.
+Use the [maintained benchmark](../../development/roberto/benchmarking/README.md)
+for a new controlled comparison, rather than rerunning historical commands.
 
 | New solver case | Mean runtime, cap 10 → 100 | Accepted steps | Largest actual inner count at cap 100 |
 |---|---|---|---|

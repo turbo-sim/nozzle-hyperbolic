@@ -40,8 +40,7 @@ $$
 $$
 
 The turbulent branch retains the existing Haaland correlation, including its
-coefficient $-1.81$. Its switch at Reynolds number 2300 is sharp; this port does
-not introduce a new transition correlation. `Haaland` preserves the historical
+coefficient $-1.81$. Its switch at Reynolds number 2300 is sharp; no smoothed transition correlation is supplied. `Haaland` preserves the historical
 turbulent-only public function and its zero value at nonpositive Reynolds
 numbers. `darcy_friction_factor` is the laminar/turbulent policy and returns
 infinity at zero Reynolds number, reflecting the singular factor. Negative
@@ -95,5 +94,5 @@ inside their valid domains.
 Run the production closure checks with:
 
 ```powershell
-.venv/Scripts/python.exe -m pytest tests/test_physical_closures.py -q
+poetry run python -B -m pytest tests/test_physical_closures.py -q
 ```

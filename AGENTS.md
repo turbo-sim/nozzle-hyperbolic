@@ -66,7 +66,7 @@ a local cleanup or solver experiment. Check the branch rather than assuming
 | `cases/` | Physical applications and reference datasets; start with its README and inspect each case's imports/settings |
 | `cases/validation/` | Literature validation data and associated processing/plotting scripts |
 | `tests/` | Production pytest tests only |
-| `docs/` | Organization/audit documents, physical derivations and historical findings; verify dated claims against the current checkout |
+| `docs/` | Start at `docs/README.md`: active guides, unimplemented proposals and dated audits; annular derivation notes are retained separately |
 
 Important Euler navigation:
 
@@ -121,9 +121,8 @@ Keep the single `development/` parent; do not recreate `development_new/` or
 
 | Study | Purpose |
 |---|---|
-| [roe_method](development/roe_method/README.md) | Final general-EOS model-owned Roe formulation, PH/flow verification and reproducible four-flux benchmark |
+| [flux_methods](development/flux_methods/README.md) | Production Stadtke, Osher and general-EOS Roe formulation and verification |
 | [euler_nozzle](development/roberto/historical/euler_nozzle/README.md) | Readable steady nozzle and unsteady Sod verification against analytic solutions |
-| [numerical_fixes](development/roberto/numerical_fixes/README.md) | Flux/projector/entropy-regularization and limiter repairs; legacy/corrected comparison |
 | [newton_solve](development/roberto/historical/newton_solve/README.md) | Retained Newton/PTC/implicit comparison and consolidated explanations of earlier failures |
 | [implicit_integration](development/roberto/historical/implicit_integration/README.md) | Inner Newton work and CFL/controller sensitivities |
 | [BC_residual](development/roberto/historical/BC_residual/README.md) | Internal versus coupled BC equations with matched implicit solver machinery and repeated timings |

@@ -262,7 +262,7 @@ Mach about 0.846 instead of 1. This failure is retained: the steady script
 currently exits unsuccessfully after saving every comparison.
 
 The scripts use the installed solver implementation. Pending working-tree
-changes can affect a rerun; see the [numerical changes review](../../../../docs/NUMERICAL_CHANGES_REVIEW.md).
+changes can affect a rerun; see the [historical regularity experiments](../newton_solve/notes/solver_regularity_improvements.md).
 This commit adds examples and documentation without approving those changes.
 
 These are fixed-mesh verification baselines, not mesh/order studies or
