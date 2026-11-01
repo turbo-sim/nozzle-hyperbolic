@@ -166,6 +166,11 @@ def config_key(case_id,reconstruction,cells,cap,backend,flux=None):
 def flux_profile(config,flux):
     profile={key:deepcopy(config[key]) for key in ("scheme","steady","residual")}
     profile["scheme"]["flux"]=flux
+    if flux=="stadtke":
+        # This maintained implementation-cost comparison retains original FVS,
+        # independently of the corrected production defaults.
+        profile["scheme"].setdefault("custom_jump_correction",False)
+        profile["scheme"].setdefault("custom_endpoint_envelope",False)
     if flux=="roe" and "roe_options" in config:
         profile["roe_options"]=deepcopy(config["roe_options"])
     return profile
@@ -173,12 +178,16 @@ def flux_profile(config,flux):
 
 def resolved_fluxes(config):
     """Validate sweep identities before launching or resuming any workers."""
+    supported=("roe","rusanov","hll","stadtke")
     if "fluxes" not in config:
-        return [config["scheme"]["flux"]]
+        flux=config["scheme"]["flux"]
+        if flux not in supported:
+            raise ValueError("Select a supported flux")
+        return [flux]
     if config.get("schema_version")!=2:
         raise ValueError("A flux sweep requires schema_version: 2")
     fluxes=config["fluxes"]
-    if not fluxes or len(set(fluxes))!=len(fluxes) or any(f not in ("roe","rusanov","hll","characteristic") for f in fluxes):
+    if not fluxes or len(set(fluxes))!=len(fluxes) or any(f not in supported for f in fluxes):
         raise ValueError("Select distinct supported fluxes")
     if "flux" in config["scheme"]:
         raise ValueError("Sweep profiles select fluxes at top level; remove scheme.flux")
@@ -199,7 +208,7 @@ def main():
     parser.add_argument("--output",type=Path);parser.add_argument("--cases",nargs="+")
     parser.add_argument("--models",nargs="+",choices=("euler_nozzle","euler_annular"))
     parser.add_argument("--grids",nargs="+",type=int);parser.add_argument("--reconstructions",nargs="+")
-    parser.add_argument("--fluxes",nargs="+",choices=("roe","rusanov","hll","characteristic"))
+    parser.add_argument("--fluxes",nargs="+",choices=("roe","rusanov","hll","stadtke"))
     parser.add_argument("--backends",nargs="+",choices=("current","legacy"));parser.add_argument("--caps",nargs="+",type=int)
     parser.add_argument("--repeats",type=int);parser.add_argument("--refinement-repeats",type=int)
     parser.add_argument("--timeout",type=float);parser.add_argument("--resume",action="store_true")

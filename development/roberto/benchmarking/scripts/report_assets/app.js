@@ -17,7 +17,7 @@
   const reconLabel=name=>name==='constant'?'Constant':name==='muscl_van_leer'?'MUSCL':name==='muscl_van_leer_smooth'?'Smooth MUSCL':name||'Unspecified';
   const modelLabel=name=>String(name||'').includes('annular')?'Annular Euler':String(name||'').includes('nozzle')?'Euler nozzle':name||'Unspecified';
   const backendKind=name=>/legacy|native|old/i.test(name)?'legacy':/current|production|new/i.test(name)?'current':name;
-  const fluxLabel=name=>({roe:'Roe',rusanov:'Rusanov',hll:'HLL',characteristic:'Städtke-type FVS'}[name]||name||'Unspecified');
+  const fluxLabel=name=>({roe:'Roe',rusanov:'Rusanov',hll:'HLL',stadtke:'Städtke FVS'}[name]||name||'Unspecified');
   const backendLabel=name=>backendKind(name)==='legacy'?'Old native':backendKind(name)==='current'?'Current production':name||'Unspecified';
   const unique=items=>[...new Set(items.filter(x=>x!==null&&x!==undefined&&x!==''))];
   const sortedNumbers=values=>unique(values).sort((a,b)=>Number(a)-Number(b));
@@ -51,8 +51,11 @@
       const finalMetrics=raw.metrics||raw.audit||{};
       const accuracyAssessed=raw.accuracy_assessed??raw.validation?.accuracy_assessed;
       const accuracy=accuracyAssessed===false?null:(raw.accuracy_passed??raw.analytical_passed??finalMetrics.accuracy_passed??finalMetrics.analytical_passed??raw.validation?.passed);
-      return {raw,index,caseId:String(raw.case_id||raw.case?.id||raw.id||'unknown'),backend:String(raw.backend||raw.method||'current'),
-        flux:raw.flux||raw.scheme?.flux||raw.settings?.scheme?.flux||data.protocol?.scheme?.flux||'characteristic',
+      // Historical recorded identifiers remain in raw evidence; only the view name changes.
+      const recordedFlux=raw.flux||raw.scheme?.flux||raw.settings?.scheme?.flux||data.protocol?.scheme?.flux||'stadtke';
+      const displayedFlux=recordedFlux==='characteristic'?'stadtke':recordedFlux;
+      return {raw,index,recordedFlux,caseId:String(raw.case_id||raw.case?.id||raw.id||'unknown'),backend:String(raw.backend||raw.method||'current'),
+        flux:displayedFlux,
         reconstruction:raw.reconstruction||raw.scheme?.reconstruction||raw.settings?.scheme?.reconstruction||'constant',
         cells:number(raw.cells??raw.n_cells??raw.mesh?.cells??raw.settings?.cells),cap:number(raw.cap??raw.newton_cap??raw.scheme?.newton_iterations??raw.settings?.scheme?.newton_iterations),
         model:raw.model||raw.case?.model||'',status:String(status),success:explicitSuccess,accuracy,accuracyAssessed,
@@ -66,7 +69,7 @@
   const results=normalize(campaign), baselineResults=baseline?normalize(baseline):[];
   const multiFlux=unique(results.map(r=>r.flux)).length>1;
   const verificationOnly=campaign.verification_only===true||campaign.protocol?.verification_only===true;
-  const referenceFlux='characteristic';
+  const referenceFlux='stadtke';
   const caseMap=new Map();
   const caseValues=Array.isArray(campaign.cases)?campaign.cases:Object.entries(campaign.cases||{}).map(([id,value])=>({id,...value}));
   caseValues.forEach(item=>{const value=typeof item==='string'?{id:item}:item;caseMap.set(String(value.id||value.case_id),value);});
@@ -159,7 +162,7 @@
   document.documentElement.dataset.theme=theme;
   $('theme-toggle').textContent=theme==='dark'?'Light theme':'Dark theme';
   const colors={legacy:{constant:'#6a00a8',muscl_van_leer:'#9c179e',muscl_van_leer_smooth:'#9c179e'},current:{constant:'#dc5e66',muscl_van_leer:'#fca636',muscl_van_leer_smooth:'#fca636'}};
-  function style(result){const kind=backendKind(result.backend),fluxColors={roe:'#6a00a8',rusanov:'#b12a90',hll:'#e16462',characteristic:'#fca636'};return {color:multiFlux?fluxColors[result.flux]||'#b12a90':(colors[kind]||colors.current)[result.reconstruction]||'#8c6bb1',dash:kind==='legacy'?'dash':multiFlux&&result.reconstruction!=='constant'?'dash':'solid',width:result.reconstruction==='constant'?2:2.6};}
+  function style(result){const kind=backendKind(result.backend),fluxColors={roe:'#6a00a8',rusanov:'#b12a90',hll:'#e16462',stadtke:'#fca636'};return {color:multiFlux?fluxColors[result.flux]||'#b12a90':(colors[kind]||colors.current)[result.reconstruction]||'#8c6bb1',dash:kind==='legacy'?'dash':multiFlux&&result.reconstruction!=='constant'?'dash':'solid',width:result.reconstruction==='constant'?2:2.6};}
   function rowLabel(result,extra=false){return `${backendLabel(result.backend)} · ${fluxLabel(result.flux)} · ${reconLabel(result.reconstruction)}${extra?` · ${result.cells} cells · cap ${result.cap??'—'}`:''}`;}
   function fieldLabel(field){const c=caseMap.get(selectedCase)||{};const info=c.field_metadata?.[field]||c.fields?.[field];const label=typeof info==='object'?info.label:null;const units=typeof info==='object'?info.units:null;const known=knownFields[field]||[field,''];return {label:label||known[0],units:units??known[1]};}
   const plotIds=['speed-chart','error-chart','regression-chart','field-chart','residual-chart','cfl-chart','refinement-chart','mesh-timing-chart','samples-chart'];
@@ -255,7 +258,7 @@
     $('speed-chart').style.height=Math.max(355,caseCount*33+130)+'px';
     draw('speed-chart',speedTraces,{barmode:'group',margin:{l:160,r:20,t:25,b:90},xaxis:{title:multiFlux?'Flux / Städtke-type FVS mean time':'Current / native mean time'},yaxis:{autorange:'reversed'},shapes:[{type:'line',xref:'x',yref:'paper',x0:1,x1:1,y0:0,y1:1,line:{color:palette().muted,dash:'dot',width:1}}]},'No repeated method/reference pair passed with the same case, mesh, reconstruction and Newton cap in a complete, stable, clean campaign.');
     $('speed-chart-title').textContent=multiFlux?'Flux runtime relative to current FVS':'Current versus native runtime';
-    $('speed-chart-caption').textContent=multiFlux?'Matched case, mesh, reconstruction and Newton cap; successful production solves with at least two measured samples in a complete, stable, clean campaign. Above 1 means the selected flux took longer than characteristic FVS.':'Mean time ratio for comparable successful configurations with at least two measured samples in a complete, stable, clean campaign. Above 1 means the current solver took longer.';
+    $('speed-chart-caption').textContent=multiFlux?'Matched case, mesh, reconstruction and Newton cap; successful production solves with at least two measured samples in a complete, stable, clean campaign. Above 1 means the selected flux took longer than original Stadtke FVS.':'Mean time ratio for comparable successful configurations with at least two measured samples in a complete, stable, clean campaign. Above 1 means the current solver took longer.';
     if(verificationOnly){
       $('speed-chart-title').textContent='Declared accuracy checks';
       $('speed-chart-caption').textContent='Acceptance is assessed at each case\'s recommended resolution. A converged root can miss an accuracy target; coarse meshes retain refinement errors without an accuracy pass/fail claim.';

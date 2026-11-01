@@ -4,10 +4,12 @@ This client uses the production FVM engine and installed physical YAML cases.
 It records original-equation convergence, physical branch, analytical accuracy
 and complete-solve timing separately. It contains no copy of the production solver.
 
-The final [Roe study](../../roe_method/README.md) supplies its implemented theory,
+The final [Roe study](../../flux_methods/roe/README.md) supplies its implemented theory,
 160-configuration verification evidence, offline report and four-flux protocol.
-The complete Roe/Rusanov/HLL/characteristic-FVS performance campaign is prepared;
+The complete Roe/Rusanov/HLL/Stadtke-FVS performance campaign is prepared;
 no completed four-flux timing ranking is claimed.
+The Stadtke comparison explicitly sets `custom_jump_correction: false` and
+`custom_endpoint_envelope: false`, preserving the original FVS baseline.
 
 ## Physical and numerical inputs
 
@@ -17,7 +19,7 @@ beside the nozzle/annular models. Load them through
 The catalog has eight nozzle and twelve annular inviscid perfect-gas reference
 cases. Numerical meshes, reconstructions, fluxes, Newton/CFL controls, tolerances
 and repetitions belong to profiles such as [`settings.yaml`](settings.yaml) and
-[the Roe comparison profile](../../roe_method/benchmark_profile.yaml).
+[the Roe comparison profile](../../flux_methods/roe/benchmark_profile.yaml).
 
 Schema 2 adds a flux dimension to configuration, worker and resume identities;
 schema 1 native/current comparisons remain supported. The native adapter loads
@@ -32,9 +34,9 @@ perform numerical work and require a new output name after source or settings
 change:
 
 ```powershell
-poetry run python -B -u -m development.roberto.benchmarking.scripts.run --config development/roe_method/benchmark_profile.yaml --output outputs/roe_flux_v1 --wait-for-idle
+poetry run python -B -u -m development.roberto.benchmarking.scripts.run --config development/flux_methods/roe/benchmark_profile.yaml --output outputs/roe_flux_v1 --wait-for-idle
 poetry run python -B -m development.roberto.benchmarking.scripts.audit --input outputs/roe_flux_v1/summary.json
-poetry run python -B -m development.roberto.benchmarking.scripts.report --input development/roberto/benchmarking/outputs/roe_flux_v1/summary.json --output development/roe_method/REPORT.html
+poetry run python -B -m development.roberto.benchmarking.scripts.report --input development/roberto/benchmarking/outputs/roe_flux_v1/summary.json --output development/flux_methods/roe/REPORT.html
 ```
 
 Use `--resume` only for identical recorded source/cases/profile/harness/machine
@@ -47,7 +49,7 @@ measured repetitions. The Roe profile uses one measured solve on coarse meshes
 and ten at 400 cells, sequential rotating method order, no grid sequencing, and
 an idle-environment gate. All failed/rejected work remains in the record.
 Incomplete, contended, one-sample or verification-only populations cannot support
-repeated timing rankings. See the [full protocol](../../roe_method/benchmark_protocol.md)
+repeated timing rankings. See the [full protocol](../../flux_methods/roe/benchmark_protocol.md)
 for counts, matched controls and acceptance definitions.
 
 The renderer accepts optional `--baseline`, `--roe-audit`, `--roe-sod`,
@@ -59,7 +61,7 @@ licenses are embedded; no CDN or local server is needed.
 Check a report with:
 
 ```powershell
-poetry run python -B -m development.roberto.benchmarking.scripts.audit_report --input development/roe_method/REPORT.html
+poetry run python -B -m development.roberto.benchmarking.scripts.audit_report --input development/flux_methods/roe/REPORT.html
 poetry run python -B -m development.roberto.benchmarking.scripts.check_flux_sweep
 ```
 

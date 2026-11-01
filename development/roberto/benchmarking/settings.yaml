@@ -11,7 +11,9 @@ output: outputs/initial_baseline
 complete_solve_timeout_s: 300
 regression_threshold: 1.15
 scheme:
-  flux: characteristic
+  flux: stadtke
+  custom_jump_correction: false
+  custom_endpoint_envelope: false
   delta_factor: 0.1
   time_integrator: euler-implicit
   boundary_treatment: coupled

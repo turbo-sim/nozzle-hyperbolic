@@ -20,7 +20,7 @@ from .report import render, audit_html
 
 
 def main():
-    root_profile=STUDY.parents[1]/"roe_method/benchmark_profile.yaml"
+    root_profile=STUDY.parents[1]/"flux_methods/roe/benchmark_profile.yaml"
     config=yaml.safe_load(root_profile.read_text(encoding="utf-8"))
     fluxes=run.resolved_fluxes(config)
     catalog=list(run.available_cases())
@@ -34,7 +34,9 @@ def main():
     old_protocol=dict(old,cases=catalog)
     old_expected=expected_configurations(old_protocol)
     assert len(old_expected)==160 and all("__flux_" not in key for key in old_expected)
-    assert run.resolved_fluxes(old)==["characteristic"]
+    assert run.resolved_fluxes(old)==["stadtke"]
+    assert run.flux_profile(old,"stadtke")["scheme"]["custom_jump_correction"] is False
+    assert run.flux_profile(old,"stadtke")["scheme"]["custom_endpoint_envelope"] is False
     assert run.config_key("euler_nozzle/subsonic","constant",50,10,"current")=="euler_nozzle__subsonic__constant__n50__cap10__current"
     profile=run.flux_profile(config,"roe")
     profile["scheme"]["delta_factor"]=123

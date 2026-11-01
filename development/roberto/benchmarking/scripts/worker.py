@@ -179,6 +179,8 @@ def main():
                    newton_backtracking=profile["scheme"]["newton_backtracking"],update_tolerance=profile["scheme"]["newton_update_tolerance"],
                    residual_tolerance=profile["scheme"]["newton_residual_tolerance"],delta_factor=profile["scheme"]["delta_factor"],
                    flux=profile["scheme"]["flux"],jacobian_mode=profile["scheme"]["jacobian_mode"],linear_solver=profile["scheme"]["linear_solver"],
+                   custom_jump_correction=profile["scheme"].get("custom_jump_correction",False),
+                   custom_endpoint_envelope=profile["scheme"].get("custom_endpoint_envelope",False),
                    max_backtracks=profile["scheme"]["max_backtracks"])
             sample=legacy_sampler(problem,policy)
             cache.update(problem=problem,solve=lambda:solve_legacy(problem,sample,settings),fields=problem.fields,

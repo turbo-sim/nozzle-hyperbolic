@@ -230,10 +230,16 @@ def bind_legacy(
     delta_factor: float = 0.1,
     jacobian_mode: str = "colored",
     linear_solver: str = "banded",
-    flux: str = "characteristic",
+    flux: str = "stadtke",
+    custom_jump_correction: bool = False,
+    custom_endpoint_envelope: bool = False,
     max_backtracks: int = 20,
 ) -> LegacyProblem:
     """Bind a resolved catalog case without advancing any numerical state."""
+    if flux not in ("stadtke", "rusanov"):
+        raise UnsupportedLegacyCase(f"Unsupported native comparison flux: {flux}")
+    if flux == "stadtke" and (custom_jump_correction or custom_endpoint_envelope):
+        raise UnsupportedLegacyCase("Frozen native FVS has no custom corrections; disable both Stadtke flags")
     load_legacy_package()
     import jax
 
@@ -264,6 +270,8 @@ def bind_legacy(
         jacobian_mode=jacobian_mode,
         linear_solver=linear_solver,
         flux=flux,
+        custom_jump_correction=bool(custom_jump_correction),
+        custom_endpoint_envelope=bool(custom_endpoint_envelope),
         max_backtracks=int(max_backtracks),
     )
     if model_name == "euler_nozzle":
@@ -282,9 +290,9 @@ def _bind_nozzle(payload, initial, options):
 
     if initial.shape[1] != 3:
         raise ValueError("A native nozzle case needs three primitive variables")
-    if options["flux"] != "characteristic":
+    if options["flux"] != "stadtke":
         raise UnsupportedLegacyCase(
-            "The native nozzle factory exposes characteristic FVS only"
+            "The native nozzle factory exposes original Stadtke FVS only"
         )
     if options["newton_backtracking"]:
         raise UnsupportedLegacyCase(
@@ -500,7 +508,7 @@ def _bind_annular(payload, initial, options):
         raise UnsupportedLegacyCase(
             "The native annular factory has no smooth MUSCL selector"
         )
-    if options["flux"] not in ("characteristic", "rusanov"):
+    if options["flux"] not in ("stadtke", "rusanov"):
         raise UnsupportedLegacyCase(
             f"Native annular flux is not implemented: {options['flux']}"
         )
@@ -537,7 +545,8 @@ def _bind_annular(payload, initial, options):
             tau_w=walls.get("shear_stress", 0.0),
             q_w=walls.get("heat_flux", 0.0),
             reconstruction=options["reconstruction"],
-            flux_method=options["flux"],
+            # Frozen legacy API spelling; it is not a current public alias.
+            flux_method="characteristic" if options["flux"] == "stadtke" else options["flux"],
             delta_factor=options["delta_factor"],
             jacobian_mode=options["jacobian_mode"],
             linear_solver=options["linear_solver"],
