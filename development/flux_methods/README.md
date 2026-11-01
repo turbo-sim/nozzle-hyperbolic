@@ -62,3 +62,7 @@ poetry run python -B -m development.flux_methods.roe.scripts.report --presentati
 The generated standalone HTML files live at each study root and embed their
 rendering resources and offered downloads. Raw campaign outputs retain their
 recorded identities; report generation does not advance a numerical solution.
+
+The retired shock-spike prototype's contents, inventory and backup archive have
+been removed. The maintained Stadtke study retains the original method's spike
+behavior and comparisons with the custom corrections.

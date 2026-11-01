@@ -180,10 +180,8 @@ This is a representation counterexample, **not a new result of this campaign
 and not an explanation of the abnormal ideal-gas FVS shock root**. It shows why
 generic conservative algebraic corrections cannot imply a universal
 primitive-variable no-peak theorem. Analytical conservative projections and
-primitive point branches must be assessed separately. The preserved algebraic
-record is `outputs/general_algebra/exact_projection_pressure_counterexample.json`;
-its authoritative retrieval path is the
-[legacy inventory and verified archive locator](../LEGACY_SPIKE_INVENTORY.md#verified-archive-recorded-on-2026-11-01).
+primitive point branches must be assessed separately. The example above is
+self-contained; the retired prototype's supporting files have been removed.
 
 ## Verification and limits
 
