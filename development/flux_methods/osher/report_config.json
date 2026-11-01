@@ -57,7 +57,10 @@
       "configuration_matches_origin",
       "operator_equivalent_at_saved_state"
     ],
-    "native_solve": ["source_hashes_match", "numerical_clients_match"]
+    "native_solve": [
+      "source_hashes_match",
+      "numerical_clients_match"
+    ]
   },
   "snapshot_flags": [
     "snapshot_source_match",
@@ -82,5 +85,6 @@
   "native_overrides": {
     "evidence_scope": "Native cold-solve records retain their own execution source, client and case hashes; saved-state Operator evaluations and analytical accuracy are separate checks.",
     "completion_note": "The requested native-solve population is complete. Native success, saved-state evaluation checks and analytical accuracy remain separate."
-  }
+  },
+  "equation_latex": "\\widehat F=\\frac{F_L+F_R}{2}-\\frac12\\int_0^1\\left[\\sum_k\\phi_k(W(s))P_k(W(s))\\right]\\frac{dU(W(s))}{ds}\\,ds"
 }

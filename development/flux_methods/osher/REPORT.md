@@ -25,7 +25,7 @@ This report embeds current saved-row Operator evaluations. No separate productio
 
 This is numerical verification, not a performance benchmark. Compilation-inclusive elapsed diagnostics do not establish a cost ranking. Residual/CFL plots show actual accepted histories; accepted steps, rejected attempts and all Newton corrections are separate work measures.
 
-The HTML embeds all plotted values, clean audit summaries, manifests and Plotly. The download contains current-facing derived data and documents; immutable historical raw records stay archive-only. Structural and executable application audits are separate from browser rendering.
+The HTML embeds all plotted values, rendered mathematical notes, clean audit summaries, manifests, Plotly and MathJax. The download contains current-facing derived data and documents; immutable historical raw records stay archive-only. Structural and executable application audits are separate from browser rendering.
 
 Browser rendering remains unverified. Installed Chrome static rendering was blocked by Windows IPC permissions and no image exporter was installed; no bypass was attempted.
 

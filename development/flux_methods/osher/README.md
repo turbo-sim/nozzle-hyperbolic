@@ -97,3 +97,12 @@ renderer configuration and findings adapter depend only on its own saved data.
 
 Browser rendering is unverified. Structural offline checks and executable
 dropdown/trace audits are retained separately from numerical verification.
+
+## Common report presentation
+
+This report shares its header, typography, theme, navigation and plot styling
+with the other [flux-method reports](../shared/REPORT_DESIGN.md). The main
+pages are **Overview**, **Case explorer**, **Theory**, and **Protocol & evidence**.
+Method-specific checks, numerical acceptance rules and saved evidence remain
+explicit. Light, dark and automatic themes work offline; all offered downloads
+and rendering assets are embedded in the HTML.
