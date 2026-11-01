@@ -11,7 +11,7 @@ import pytest
 from nozzle_hyperbolic.models.euler_nozzle.flux_jax import (
     _jax_F_fvs_stadtke,
     _jax_F_fvs_stadtke_legacy,
-    _jax_characteristic_flux_with_entropy_viscosity,
+    _jax_stadtke_flux_with_entropy_viscosity,
     _jax_harten_absolute,
 )
 
@@ -192,7 +192,7 @@ def test_frozen_linear_characteristic_viscosity_is_harten_absolute():
     projectors = jnp.asarray(
         np.array([np.outer(row, row) for row in np.eye(3)])[None, :]
     )
-    actual = _jax_characteristic_flux_with_entropy_viscosity(
+    actual = _jax_stadtke_flux_with_entropy_viscosity(
         flux_left, flux_right, q_right - q_left, projectors, eigenvalues, width
     )
     # These scalar absolute eigenvalues follow independently from the

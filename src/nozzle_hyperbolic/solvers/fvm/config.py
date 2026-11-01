@@ -9,16 +9,27 @@ from ..residuals import ResidualPolicy
 
 @dataclass(frozen=True)
 class Scheme:
-    """Shared numerical choices.
+    """Numerical choices with two independent Stadtke correction flags.
 
-    ``flux='osher'`` uses ``quadrature_points`` (3, 5 or 9) with either
-    ``integration='gauss'`` or ``'sonic_partitioned'``. These path-integration
-    options are independent of ``time_integrator`` and ignored by other
-    flux families. An admissible model-owned path and differentiable face
-    storage are required; sampled validity is not a whole-path proof.
+    The default is corrected ``stadtke`` (both custom corrections enabled).
+    ``custom_jump_correction`` replaces finite physical-flux-jump dissipation
+    by mean-characteristic conservative-jump viscosity.
+    ``custom_endpoint_envelope`` adds the characteristic viscosity increment
+    max(mean regularized absolute speed, absolute endpoint family speeds)
+    minus the mean regularized speed. The flags are independent; disable both
+    to recover the original Stadtke contraction. Neither supplies a general
+    monotonicity theorem. Other flux families ignore the flags. No alternative
+    public name selects Stadtke.
+    For ``flux='osher'``, ``quadrature_points`` selects 3, 5 (default) or 9
+    Gauss points. ``integration='gauss'`` applies one unsplit rule;
+    ``'sonic_partitioned'`` applies that rule on panels split at sampled sonic
+    crossings. These settings are independent of ``time_integrator`` and
+    ignored by other fluxes. Osher requires an admissible path and supported
+    storage differentiation, distinct from Stadtke's custom flags.
     """
+
     reconstruction: str = "constant"
-    flux: str = "characteristic"
+    flux: str = "stadtke"
     delta_factor: float = 0.1
     newton_iterations: int = 10
     newton_backtracking: bool = False
@@ -31,6 +42,8 @@ class Scheme:
     boundary_treatment: str = "auto"
     filter_strength: float = 0.0
     smooth_limiter_coefficient: float = 1.0
+    custom_jump_correction: bool = True
+    custom_endpoint_envelope: bool = True
     quadrature_points: int = 5
     integration: str = "gauss"
 
@@ -43,12 +56,15 @@ class Scheme:
             "muscl_van_leer_smooth",
         ):
             raise ValueError("Unsupported reconstruction")
-        if self.flux not in ("characteristic", "rusanov", "hll", "roe", "osher"):
+        if self.flux not in ("stadtke", "rusanov", "hll", "roe", "osher"):
             raise ValueError("Unsupported numerical flux")
         if type(self.quadrature_points) is not int or self.quadrature_points not in (3, 5, 9):
             raise ValueError("quadrature_points must be 3, 5 or 9")
         if not isinstance(self.integration, str) or self.integration not in ("gauss", "sonic_partitioned"):
             raise ValueError("integration must be gauss or sonic_partitioned")
+        for name in ("custom_jump_correction", "custom_endpoint_envelope"):
+            if not isinstance(getattr(self, name), bool):
+                raise ValueError(f"{name} must be a boolean")
         if self.time_integrator not in (
             "euler-implicit",
             "euler-explicit",

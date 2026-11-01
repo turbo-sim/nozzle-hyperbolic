@@ -70,11 +70,12 @@ class FusedConservativeModel(BalanceModel, Protocol):
 
 
 class CharacteristicModel(Protocol):
-    """Optional characteristic/Osher eigendata in the conservative face frame.
+    """Optional Stadtke/Osher eigendata in the conservative face frame.
 
     Return projectors (faces,waves,V,V), eigenvalues and sonic widths
-    (faces,waves). The original characteristic flux requires positive widths; Osher also
-    permits zero and evaluates this callback at coincident path states.
+    (faces,waves). Stadtke requires positive widths; Osher also permits zero.
+    Endpoint-envelope speeds must retain the mean's family indexing. Osher
+    also evaluates this callback at coincident path states.
     """
 
     def face_characteristics(self, left, right, delta_factor): ...

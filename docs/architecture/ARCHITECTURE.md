@@ -63,7 +63,7 @@ The structural protocols in [`solvers/fvm/contracts.py`](../../src/nozzle_hyperb
 | `cell_conserved(W)` | Nonlinear cell-local conserved storage |
 | `face_conserved(W)`, `face_physical_flux(W)`, `face_speed_bounds(W)` | Physical face data for generic conservative fluxes |
 | `face_data(W)` | Alternative fused bundle of conserved state, physical flux, speed bounds, and opaque auxiliary data; avoids repeated expensive property evaluation |
-| `face_characteristics(...)` or `face_characteristics_from_data(...)` | Additional projectors, eigenvalues, and regularization widths required by the characteristic and Osher fluxes |
+| `face_characteristics(...)` or `face_characteristics_from_data(...)` | Additional projectors, eigenvalues, and regularization widths required by Stadtke and Osher fluxes |
 | `face_roe_data(...)` or `face_roe_data_from_data(...)` | Optional Roe capability: conservative spectral projectors, eigenvalues, nonnegative entropy widths, and a boolean validity flag for every face |
 | `flux_to_conserved_frame(flux)` | Convert model face-frame flux into the cell storage frame |
 | `integrated_source(full)` | Physical/geometric source already integrated over each control volume |
@@ -85,14 +85,14 @@ Reconstruction and flux choice are independent `Scheme` settings. They apply to 
 | Piecewise constant | `reconstruction="constant"` | Implemented; default |
 | MUSCL with Van Leer limiter | `reconstruction="muscl_van_leer"` | Implemented; coordinate-aware reconstruction on the fixed mesh |
 | MUSCL with smooth Van Leer limiter | `reconstruction="muscl_van_leer_smooth"` | Implemented; optional $C^2$ limiter regularization, controlled by `smooth_limiter_coefficient` |
-| Characteristic flux / current FVS path | `flux="characteristic"` | Implemented; default; uses model-supplied characteristic projectors/eigenvalues and entropy regularization controlled by `delta_factor` |
+| Stadtke FVS with optional custom corrections | `flux="stadtke"` | Default; uses model-supplied characteristic projectors/eigenvalues and `delta_factor`; `custom_jump_correction` and `custom_endpoint_envelope` default to `True`; disable both for original FVS |
 | Fixed-quadrature Osher path flux | `flux="osher", integration="gauss"` | Default Osher integration; `quadrature_points=5` by default, with 3, 5 or 9 Gauss nodes supported; requires supported storage differentiation and an admissible hyperbolic model-owned path |
 | Sonic-partitioned Osher path flux | `flux="osher", integration="sonic_partitioned"` | Same path viscosity with captured sonic/regularization cuts and `quadrature_points` Gauss nodes per panel; complete-capacity fallback preserves captured roots; finite sampling does not certify unseen roots or a universal monotonicity theorem |
 | Rusanov / local Lax–Friedrichs | `flux="rusanov"` | **Already implemented**; only conserved states, physical fluxes, and signal-speed bounds are needed |
 | HLL two-wave approximate Riemann flux | `flux="hll"` | **Already implemented**; uses model-supplied lower/upper signal-speed bounds |
 | Roe approximate Riemann / FDS flux | `flux="roe"` | Implemented for nozzle/annular Euler; requires model-owned finite-jump Roe data, rather than the present characteristic averaging |
 
-HLL, Rusanov, Roe and Osher are available alternatives to the default characteristic FVS path. HLL and Rusanov use signal bounds; Roe additionally needs a finite-jump linearization from the physical model. Osher integrates model-supplied characteristic viscosity along a declared state path. The generic Roe contraction supports any wave count, including a repeated speed represented by one higher-rank projector. A user-written model can provide the required optional capabilities without introducing EOS or equation-specific branches into the solver.
+HLL, Rusanov, Roe and Osher are available alternatives to Stadtke FVS. HLL and Rusanov use signal bounds; Roe additionally needs a finite-jump linearization from the physical model. Osher integrates model-supplied characteristic viscosity along a declared state path. The generic Roe contraction supports any wave count, including a repeated speed represented by one higher-rank projector. A user-written model can provide the required optional capabilities without introducing EOS or equation-specific branches into the solver.
 
 Osher's `quadrature_points` counts integration nodes, not spatial order. The default `integration="gauss"` uses one path panel. `integration="sonic_partitioned"` locates captured crossings and integrates each resulting panel separately; an unsplit nine-point rule is not equivalent to sonic partitioning.
 
@@ -151,7 +151,7 @@ It does not differentiate the history of boundary Newton iterations. This requir
 
 “Explicit” describes the cell evolution formula. With nonlinear primitive-to-conservative storage and algebraic boundary laws, small auxiliary nonlinear solves can still be necessary. The explicit implementation advances $Q=VU(W)$ and recovers $W$; it does not apply conservative RK formulas directly to primitive variables.
 
-The same integrators can be used for steady pseudo-time marching and physical-time transients, through different drivers. [`solve_single_grid`](../../src/nozzle_hyperbolic/solvers/fvm/drivers.py) marches toward the original spatial steady root. `solve_transient` advances to requested output times and checks actual time-dependent conservation budgets. A small steady residual is not a transient stopping condition. `Scheme()` defaults to characteristic FVS; `solve_transient` uses `Scheme(flux="hll")` when no scheme is supplied. Select the integrator explicitly for the intended application.
+The same integrators can be used for steady pseudo-time marching and physical-time transients, through different drivers. [`solve_single_grid`](../../src/nozzle_hyperbolic/solvers/fvm/drivers.py) marches toward the original spatial steady root. `solve_transient` advances to requested output times and checks actual time-dependent conservation budgets. A small steady residual is not a transient stopping condition. `Scheme()` defaults to `stadtke` with both custom corrections enabled; `solve_transient` uses `Scheme(flux="hll")` when no scheme is supplied. Select the integrator explicitly for the intended application.
 
 The timestep uses model wave speeds and any boundary wave-speed bound. Explicit integration additionally combines model source and optional filter bounds as additive inverse times, rather than assuming the minimum individual bound is sufficient. Invalid stages or failed nonlinear completion cause rejection/retry. The steady driver currently caps explicit CFL at `0.45`; the transient driver accepts a user CFL and defaults to `0.45`.
 
@@ -232,7 +232,9 @@ def model_factory(cells):
 
 scheme = Scheme(
     reconstruction="muscl_van_leer",
-    flux="characteristic",
+    flux="stadtke",
+    custom_jump_correction=False,    # original FVS comparison
+    custom_endpoint_envelope=False,
     time_integrator="euler-implicit",
     boundary_treatment="coupled",  # or "segregated"
     jacobian_mode="colored",
@@ -272,7 +274,7 @@ The architecture's important boundaries are:
 - **Two-fluid extension:** intended direction, not an already validated plug-in. Its equations and boundary/source structure may require an explicit contract extension.
 - **Outflow physics:** finite-wave outlet generalization to a general EOS remains open; the acoustic alternative is general EOS. Sustained reverse inflow needs additional physical data.
 - **Numerical robustness:** matching final steady roots does not imply identical Newton trajectories across boundary treatments, reconstruction choices, or controller settings. Undamped Newton and local block pivoting have finite robustness limits.
-- **Roe/EOS scope:** the Euler construction assumes a smooth, thermodynamically consistent PH map on the selected branch. Stable endpoints do not prove a positive interface sound speed. The acoustic fix does not establish global positivity or entropy stability for arbitrary real-gas/nonconvex states; phase switches, independently interpolated inconsistent property tables and future two-fluid equations need separate assessment. See the [Roe study](../../development/roe_method/README.md).
+- **Roe/EOS scope:** the Euler construction assumes a smooth, thermodynamically consistent PH map on the selected branch. Stable endpoints do not prove a positive interface sound speed. The acoustic fix does not establish global positivity or entropy stability for arbitrary real-gas/nonconvex states; phase switches, independently interpolated inconsistent property tables and future two-fluid equations need separate assessment. See the [Roe study](../../development/flux_methods/roe/README.md).
 - **Coverage:** the existence of a selector is not proof of every model × flux × reconstruction × integrator × boundary combination. Check the relevant verification study before claiming accuracy, robustness, or speed.
 - **Physical accuracy:** convergence of the discrete residual, conservation, agreement with an analytical reference, and selection of the intended flow branch are separate checks. The previously observed sonic-limit accuracy discrepancy is not eliminated simply by reducing the nonlinear residual.
 

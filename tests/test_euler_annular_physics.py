@@ -146,7 +146,7 @@ def test_four_projectors_resolve_the_independent_flux_jacobian(v_m):
             np.testing.assert_allclose(normalize(projectors[i] @ projectors[j]-expected), 0, atol=2e-12)
 
 
-@pytest.mark.parametrize("method", ["characteristic", "rusanov"])
+@pytest.mark.parametrize("method", ["stadtke", "rusanov"])
 def test_uniform_flux_consistency_uses_one_face_radius_and_area(method):
     fluid = RestrictedHPFluid(1e5)
     W = jnp.asarray([[1e5, 0.0, 8.0, 3e5], [1.1e5, 340.0, -4.0, 3.2e5],

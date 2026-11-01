@@ -23,10 +23,12 @@ and opaque JAX-pytree ``auxiliary``. The optional characteristic callback
 that auxiliary data. Models without fused callbacks keep the simple independent
 callbacks; scalar laws require neither auxiliary data nor characteristic data.
 
-Osher integrates conservative storage along an affine reconstruction-state
-path or optional face_state_path. Its sampled-node admissibility checks repeat
-sonic root construction and do not certify the entire path. Nested storage
-JVPs must be supported by the model.
+Stadtke and Osher require model-owned characteristic data. Stadtke's two
+custom corrections are independent; disabling both uses the original
+contraction. Osher integrates conservative
+storage along an affine reconstruction-state path or optional face_state_path.
+Its sampled-node admissibility checks repeat sonic root construction and do
+not certify the entire path. Nested storage JVPs must be supported by the model.
 
 Models declare source and boundary dependency radii in full-state block indices.
 The core unions those with its reconstruction stencil. Nonlocal boundary laws
@@ -45,7 +47,8 @@ import jax.numpy as jnp
 import numpy as np
 
 from nozzle_hyperbolic.numerics.characteristic import (
-    characteristic_flux_with_entropy_viscosity,
+    harten_absolute,
+    stadtke_flux_with_corrections,
 )
 from nozzle_hyperbolic.numerics.osher import OsherFlux
 from nozzle_hyperbolic.numerics.jacobians import make_block_operators
@@ -121,6 +124,10 @@ class Operator:
         fused_roe = fused_data and callable(
             getattr(model, "face_roe_data_from_data", None)
         )
+        stadtke_family = scheme.flux == "stadtke"
+        corrected_stadtke = stadtke_family and (
+            scheme.custom_jump_correction or scheme.custom_endpoint_envelope
+        )
         osher = (
             OsherFlux(
                 quadrature_points=scheme.quadrature_points,
@@ -128,7 +135,7 @@ class Operator:
             )
             if scheme.flux == "osher" else None
         )
-        needs_characteristics = scheme.flux == "characteristic" or osher is not None
+        needs_characteristics = stadtke_family or osher is not None
         if (
             needs_characteristics
             and not fused_characteristics
@@ -355,6 +362,16 @@ class Operator:
                 & jnp.all(jnp.isfinite(data["width"]) & (data["width"] >= 0))
             )
 
+        def characteristic_data(left, right, left_data=None, right_data=None):
+            if fused_characteristics:
+                if left_data is None:
+                    left_data, right_data = model.face_data(left), model.face_data(right)
+                return model.face_characteristics_from_data(
+                    left, right, scheme.delta_factor,
+                    left_data["auxiliary"], right_data["auxiliary"],
+                )
+            return model.face_characteristics(left, right, scheme.delta_factor)
+
         def face_flux(full):
             left, right = reconstruct(full)
             if fused_data:
@@ -364,23 +381,26 @@ class Operator:
             else:
                 ql, qr = model.face_conserved(left), model.face_conserved(right)
                 fl, fr = model.face_physical_flux(left), model.face_physical_flux(right)
-            if scheme.flux == "characteristic":
-                if fused_characteristics:
-                    projectors, eigenvalues, width = (
-                        model.face_characteristics_from_data(
-                            left,
-                            right,
-                            scheme.delta_factor,
-                            left_data["auxiliary"],
-                            right_data["auxiliary"],
-                        )
+            if stadtke_family:
+                projectors, eigenvalues, width = characteristic_data(
+                    left, right,
+                    left_data if fused_data else None,
+                    right_data if fused_data else None,
+                )
+                endpoints = None
+                if scheme.custom_endpoint_envelope:
+                    endpoints = (
+                        characteristic_data(left, left, left_data, left_data)[1],
+                        characteristic_data(right, right, right_data, right_data)[1],
+                    ) if fused_data else (
+                        characteristic_data(left, left)[1],
+                        characteristic_data(right, right)[1],
                     )
-                else:
-                    projectors, eigenvalues, width = model.face_characteristics(
-                        left, right, scheme.delta_factor
-                    )
-                flux = characteristic_flux_with_entropy_viscosity(
-                    fl, fr, qr - ql, projectors, eigenvalues, width
+                flux = stadtke_flux_with_corrections(
+                    fl, fr, qr - ql, projectors, eigenvalues, width,
+                    custom_jump_correction=scheme.custom_jump_correction,
+                    custom_endpoint_envelope=scheme.custom_endpoint_envelope,
+                    endpoint_eigenvalues=endpoints,
                 )
             elif osher is not None:
                 flux = osher(model, left, right, scheme.delta_factor, fl, fr)
@@ -664,16 +684,41 @@ class Operator:
                         ),
                     )
                     okay = okay & roe_data_valid(data)
-                elif explicit and osher is not None:
-                    # Bound selected sampled viscosity as well as cell waves.
+                elif explicit and (corrected_stadtke or osher is not None):
+                    # Bound the selected interface viscosity as well as cell
+                    # waves. This deliberately leaves uncorrected Stadtke's
+                    # historical timestep arithmetic unchanged.
                     left, right = reconstruct(full)
                     left_data, right_data = (
                         (model.face_data(left), model.face_data(right))
                         if fused_data else (None, None)
                     )
-                    face_speed = osher.max_sampled_speed(
-                        model, left, right, scheme.delta_factor
-                    )
+                    if osher is not None:
+                        face_speed = osher.max_sampled_speed(
+                            model, left, right, scheme.delta_factor
+                        )
+                    else:
+                        projectors, eigenvalues, width = characteristic_data(
+                            left, right, left_data, right_data
+                        )
+                        viscosity = harten_absolute(eigenvalues, width)
+                        okay = okay & (
+                            jnp.all(jnp.isfinite(projectors))
+                            & jnp.all(jnp.isfinite(eigenvalues))
+                            & jnp.all(jnp.isfinite(width) & (width > 0))
+                        )
+                        if scheme.custom_endpoint_envelope:
+                            left_speeds = characteristic_data(
+                                left, left, left_data, left_data
+                            )[1]
+                            right_speeds = characteristic_data(
+                                right, right, right_data, right_data
+                            )[1]
+                            viscosity = jnp.maximum(
+                                viscosity,
+                                jnp.maximum(jnp.abs(left_speeds), jnp.abs(right_speeds)),
+                            )
+                        face_speed = jnp.max(viscosity, axis=-1)
                     speed_callback = getattr(model, "face_speed_bounds", None)
                     if fused_data or callable(speed_callback):
                         bounds = (

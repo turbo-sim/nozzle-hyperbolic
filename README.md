@@ -15,12 +15,24 @@ Explore the [interactive architecture map](docs/architecture/ARCHITECTURE.html),
 [detailed architecture guide](docs/architecture/ARCHITECTURE.md).
 
 
+## Stadtke numerical flux
+
+The shared FVM engine selects Stadtke with `Scheme(flux="stadtke")` by
+default. Two independent project-specific corrections are enabled by default:
+`custom_jump_correction=True` and `custom_endpoint_envelope=True`. The former
+uses the conservative finite jump; the latter adds an endpoint-speed viscosity
+envelope. These custom terms are not attributed to Stadtke. Disable both to
+recover the original implemented split, while retaining the same model-owned
+projectors and physical face frame. Reconstruction remains independent of flux
+choice. See the [Stadtke study](development/flux_methods/stadtke/README.md) for
+the original and modified equations, controlled cases and limitations.
+
 ## Roe numerical flux
 
 The shared FVM engine supports `Scheme(flux="roe")` for nozzle and annular
 Euler, with model-owned general-EOS PH averaging. The generic numerical kernel
-contains no EOS assumptions. Characteristic FVS remains the default.
-See [the final Roe study](development/roe_method/README.md) for the implemented
+contains no EOS assumptions. Stadtke FVS with both custom corrections is the default.
+See [the final Roe study](development/flux_methods/roe/README.md) for the implemented
 theory, verification results, limitations and reproducible benchmark/report commands.
 
 ## Osher numerical flux

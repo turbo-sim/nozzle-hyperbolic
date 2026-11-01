@@ -2,7 +2,7 @@
 
 import jax.numpy as jnp
 
-from ...numerics.characteristic import characteristic_flux_with_entropy_viscosity
+from ...numerics.characteristic import stadtke_flux_with_entropy_viscosity
 from .equations import characteristic_speeds, transverse_flux
 from .state import state_property, thermodynamic_state, transverse_conservative
 
@@ -53,14 +53,15 @@ def conservative_projectors(W, r, rho, a, G):
 
 
 def numerical_flux(W_L, W_R, r_face, A_face, fluid, delta_factor=0.1,
-                   method="characteristic"):
+                   method="stadtke"):
     """Integrated angular flux, with the same radius and area on both sides.
 
-    ``method`` is a factory-static choice. The characteristic method reuses
-    the nozzle's shared regularized contraction; Rusanov is a diagnostic.
+    ``method`` is a factory-static choice. Stadtke reuses the original shared
+    regularized contraction; Rusanov is a diagnostic. This retained low-level
+    baseline does not implement the shared Scheme's custom-correction flags.
     A strictly positive entropy width is required for characteristic fluxes.
     """
-    if method not in ("characteristic", "rusanov"):
+    if method not in ("stadtke", "rusanov"):
         raise ValueError(f"Unknown annular flux method: {method}")
     if delta_factor <= 0:
         raise ValueError("delta_factor must be strictly positive")
@@ -85,7 +86,7 @@ def numerical_flux(W_L, W_R, r_face, A_face, fluid, delta_factor=0.1,
         delta0 = delta_factor*a[..., None]
         positive_spread = 0.5*(spread+jnp.sqrt(spread**2+delta0**2))
         width = delta0+0.5*positive_spread
-        flux = characteristic_flux_with_entropy_viscosity(
+        flux = stadtke_flux_with_entropy_viscosity(
             flux_L, flux_R, q_R-q_L, projectors, eigenvalues, width)
     flux = flux.at[..., 2].set(flux[..., 2]*jnp.asarray(r_face))
     return flux*jnp.asarray(A_face)[..., None]

@@ -4,7 +4,7 @@ import jaxprop as jxp
 from .characteristics import conservative_projectors
 from ...numerics.characteristic import (
     harten_absolute as _jax_harten_absolute,
-    characteristic_flux_with_entropy_viscosity as _jax_characteristic_flux_with_entropy_viscosity,
+    stadtke_flux_with_entropy_viscosity as _jax_stadtke_flux_with_entropy_viscosity,
 )
 
 
@@ -238,7 +238,7 @@ def _jax_F_fvs_stadtke(U_L, U_R, fluid, delta_factor=0.1):
     delta0 = delta_factor * a[:, None]
     positive_spread = 0.5 * (spread + jnp.sqrt(spread**2 + delta0**2))
     width = delta0 + 0.5 * positive_spread
-    return _jax_characteristic_flux_with_entropy_viscosity(
+    return _jax_stadtke_flux_with_entropy_viscosity(
         flux_left,
         flux_right,
         conservative_right - conservative_left,

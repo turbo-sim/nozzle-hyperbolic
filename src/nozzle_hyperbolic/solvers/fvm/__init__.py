@@ -1,6 +1,8 @@
 """Shared conservative FVM engine; physical models are callback providers.
 
-Osher uses one flux selector with separate quadrature and integration settings.
+Scheme defaults to corrected Stadtke; disabling both custom flags recovers its
+original contraction. Rusanov, HLL, Roe and Osher are also explicit Scheme
+options. Osher quadrature order and integration policy are separate settings.
 Optional structural capabilities require no model inheritance.
 """
 
