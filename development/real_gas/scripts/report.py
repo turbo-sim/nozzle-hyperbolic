@@ -17,7 +17,7 @@ import re
 
 
 STUDY = Path(__file__).resolve().parents[1]
-REPO = STUDY.parents[2]
+REPO = STUDY.parents[1]
 ASSETS = Path(__file__).resolve().parent / "report_assets"
 PLOTLY = REPO / "development/roberto/benchmarking/scripts/report_assets/vendor/plotly-2.35.2.min.js.gz"
 
@@ -134,9 +134,7 @@ def audit_html(path, data, expected_json=None):
                   embedded_payload_bytes=len(payload.encode("utf-8")),
                   embedded_data_sha256=sha256(decoded).hexdigest(),
                   complete_data_roundtrip_identical=identical,
-                  final_attempt_history_rows=sum(len(r.get("history", [])) for r in data["results"]),
-                  retained_attempt_history_rows=sum(len(a.get("history", [])) for r in data["results"]
-                                                    for a in r.get("attempts", [])),
+                  history_rows=sum(len(r.get("history", [])) for r in data["results"]),
                   browser_verified=False,
                   note="Static offline/data/control audit; browser interactions require separate verification.")
     return result
@@ -156,11 +154,9 @@ def build(input_path=STUDY / "outputs/campaign.json", output_path=STUDY / "REPOR
     payload = base64.b64encode(gzip.compress(raw, compresslevel=9, mtime=0)).decode("ascii") if compressed else raw.decode("utf-8")
     data_type = "application/octet-stream" if compressed else "application/json"
     history_rows = sum(len(r.get("history", [])) for r in data["results"])
-    retained_rows = sum(len(a.get("history", [])) for r in data["results"]
-                        for a in r.get("attempts", []))
     embedded = (f'<script id="data" type="{data_type}" data-encoding="{encoding}" '
                 f'data-json-bytes="{len(raw)}" data-json-sha256="{sha256(raw).hexdigest()}" '
-                f'data-history-rows="{history_rows}" data-retained-history-rows="{retained_rows}">{payload}</script>')
+                f'data-history-rows="{history_rows}">{payload}</script>')
     template = (ASSETS / "template.html").read_text(encoding="utf-8")
     css = (ASSETS / "style.css").read_text(encoding="utf-8")
     app = (ASSETS / "app.js").read_text(encoding="utf-8")

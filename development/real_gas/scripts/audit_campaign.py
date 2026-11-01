@@ -1,10 +1,11 @@
 """Audit completeness and consistency of saved campaign evidence, without solves."""
 import json
+from hashlib import sha256
 from itertools import product
 import numpy as np
 
-from .common import OUTPUT, identity, save
-from .profiles import compatible
+from .common import OUTPUT, identity, save, source_for_flux
+from .configuration import case_settings_id
 
 
 def main():
@@ -20,31 +21,55 @@ def main():
         expected_configuration_matrix=set(actual) == expected and len(actual) == len(expected),
         all_stages_completed=all(r["reason"] != "not_completed" for r in rows),
         unique_run_ids=len({r["id"] for r in rows}) == len(rows),
-        source_unchanged=campaign["metadata"]["src_unchanged"],
         analytical_references_verified=all(c["baseline_audit"]["passed"] for c in campaign["cases"]),
     )
     details = []
-    source_id = identity(campaign["metadata"]["source_before"])
-    profile_id = identity(settings)
+    metadata = campaign["metadata"]
+    sources = metadata["sources"]
+    checks["settings_identity"] = metadata["settings_sha256"] == identity(settings)
+    checks["execution_source_registered"] = metadata["execution_source_sha256"] in sources
+    checks["source_identities"] = all(identity(source["files"]) == key for key, source in sources.items())
+    checks["method_sources_registered"] = set(metadata["source_by_flux"]) == set(settings["fluxes"]) and all(
+        key in sources for key in metadata["source_by_flux"].values()
+    )
+    checks["source_snapshots_verified"] = all(
+        all((OUTPUT / source["snapshot"] / name).is_file()
+            and sha256((OUTPUT / source["snapshot"] / name).read_bytes()).hexdigest() == digest
+            for name, digest in source["files"].items())
+        for source in sources.values()
+    )
+    checks["table_bytes_match_references"] = all(
+        (OUTPUT / "fluid_tables" / f"{case['table']['name']}.pkl").is_file()
+        and sha256((OUTPUT / "fluid_tables" / f"{case['table']['name']}.pkl").read_bytes()).hexdigest() == case["table_sha256"]
+        for case in campaign["cases"]
+    )
     for row in rows:
         if row["reason"] == "not_completed":
             continue
         state = np.asarray(row["state"], dtype=float)
         tests = dict(
-            same_source=row["source_sha256"] == source_id,
-            same_effective_case_settings=compatible(
-                row["profile_sha256"], profile_id,
+            same_source=row["source_sha256"] == identity(source_for_flux(metadata, row["flux"])),
+            same_case_settings=row["case_settings_sha256"] == case_settings_id(
+                settings,
                 row["case_id"][:-(len("adapted")+1)] if row["case_id"].endswith("_adapted")
                 else row["case_id"][:-(len("shock")+1)],
                 "adapted" if row["case_id"].endswith("_adapted") else "shock"),
             full_state_shape=state.shape == (row["cells"] + 2, 3),
             finite_full_state=bool(np.isfinite(state).all()),
             verified_label=bool(row["verified"]) == bool(row["success"] and row["audit"].get("passed", False)),
-            failed_attempts_retained=all(not a["success"] and "state" in a and "history" in a for a in row["attempts"]),
+            attempt_records_complete=all(not a["success"] and "state" in a and "history" in a for a in row["attempts"]),
             native_success_is_converged=not row["success"] or row["reason"] == "converged",
             native_flags_consistent=not row["success"] or all(row["metrics"].get(k, False) for k in
                 ("finite", "admissible", "all_equations_passed", "boundary_passed", "global_passed")),
         )
+        if row["flux"] == "roe":
+            diagnostics = row["audit"].get("roe") or {}
+            tests["roe_regularization_metadata"] = (row.get("roe_metadata") or {}).get("secant_audit") == "regularization_remainder_v1"
+            tests["roe_raw_and_regularized_defects_recorded"] = all(
+                diagnostics.get(key, {}).get("finite") is True for key in (
+                    "pressure_secant_defect", "pressure_secant_expected_defect",
+                    "pressure_secant_audit_error", "secant_blend", "secant_audit_tolerance")
+            )
         for name, values in row.get("fields", {}).items():
             tests[f"field_{name}_shape"] = len(values) == row["cells"]
         for name, error in row.get("errors", {}).items():

@@ -2,7 +2,7 @@
 
 Run from the repository root with::
 
-    .venv/Scripts/python.exe -B -m development.real_gas.co2_nozzle_reference.scripts.plot_results
+    .venv/Scripts/python.exe -B -m development.real_gas.scripts.plot_reference
 
 This module imports neither JAXProp nor a nozzle solver. Plotting never reruns
 the reference calculations or changes their saved numerical results.
@@ -20,7 +20,7 @@ from matplotlib.ticker import FormatStrFormatter, MaxNLocator
 import numpy as np
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[1] / "outputs/reference_validation"
 COLORS = (plt.colormaps["plasma"](0.2), plt.colormaps["plasma"](0.8))
 STYLES = ("-", "--")
 REGIMES = ("adapted", "shock")
@@ -209,11 +209,11 @@ def write_report(summary, profiles_by_case, root):
         "the Rankine–Hugoniot conditions, and its location is iterated to match the specified backpressure. No FVM solution is included.", "",
         "The density interpolant defines the mechanical EOS. Smooth segments enforce $dh/dp=1/\\rho$; "
         "interpolated entropy and sound speed are retained as diagnostics. Accordingly, root accuracy and conservation "
-        "accuracy do not establish the accuracy of the 100 × 100 property approximation. See [EQUATIONS.md](EQUATIONS.md) for the equations and interpretation.", "",
+        "accuracy do not establish the accuracy of the 100 × 100 property approximation. See [EQUATIONS.md](../../EQUATIONS.md) for the equations and interpretation.", "",
         "The geometries are synthetic smooth nozzles with a common Lettieri-inspired converger and different exit area ratios, "
         "rather than the measured Lettieri contour. The supercritical case uses a smaller exit area ratio to keep the full path supercritical. "
         "The equilibrium condensation case does not model nucleation delay or the experimental Wilson line.", "",
-        "![Synthetic nozzle geometry](outputs/figures/nozzle_geometry.png)", "",
+        "![Synthetic nozzle geometry](figures/nozzle_geometry.png)", "",
         "| Case | $A_e/A_t$ | Reservoir $p_0$ [MPa] | $T_0$ [K] | Adapted $p_b$ [MPa] | Shock $p_b$ [MPa] | Shock $x_s$ [mm] | $\\dot m$ [kg/s] |",
         "|---|---:|---:|---:|---:|---:|---:|---:|",
     ]
@@ -256,8 +256,8 @@ def write_report(summary, profiles_by_case, root):
             "Quality values are physically meaningful only in equilibrium two-phase states; "
             "the table can also return 1 for a supercritical state. Values outside $[0,1]$ "
             "are displayed unchanged and have no physical mixture-quality interpretation.", "",
-            f"![{case['label']}: expected nozzle fields](outputs/figures/{ident}_fields.png)", "",
-            f"![{case['label']}: interpolation diagnostics](outputs/figures/{ident}_thermodynamics.png)", "",
+            f"![{case['label']}: expected nozzle fields](figures/{ident}_fields.png)", "",
+            f"![{case['label']}: interpolation diagnostics](figures/{ident}_thermodynamics.png)", "",
             "The principal Mach curves use $a_\\mathrm{Euler}^2=[\\rho_p+\\rho_h/\\rho]^{-1}$, "
             "calculated by differentiating the bicubic density. Dotted Mach curves use the separately interpolated table sound speed. "
             "The entropy-drift panel resets its anchor at the shock so that it measures smooth-path interpolation drift separately from the entropy jump.", "",
@@ -269,25 +269,25 @@ def write_report(summary, profiles_by_case, root):
             *compact_audit_rows(case["audit"]), "",
             f"Phase requirement: {case['audit']['setup']['requirement']}. "
             "The full checks, definitions, normalization scales, and refinement settings are retained in "
-            "[outputs/summary.json](outputs/summary.json).", "",
-            f"Saved fields: [adapted CSV](outputs/{ident}_adapted.csv), [shock CSV](outputs/{ident}_shock.csv). "
-            f"Export figures: [fields PDF](outputs/figures/{ident}_fields.pdf), "
-            f"[thermodynamics PDF](outputs/figures/{ident}_thermodynamics.pdf).", "",
+            "[summary.json](summary.json).", "",
+            f"Saved fields: [adapted CSV]({ident}_adapted.csv), [shock CSV]({ident}_shock.csv). "
+            f"Export figures: [fields PDF](figures/{ident}_fields.pdf), "
+            f"[thermodynamics PDF](figures/{ident}_thermodynamics.pdf).", "",
         ]
     lines += ["## Reproduction", "",
-              "The source settings are in [cases.json](cases.json), and the numerical values and provenance are in "
-              "[outputs/summary.json](outputs/summary.json). Both shock traces occupy the same axial position in each shock CSV. "
+              "The source settings are in [cases.json](../../cases.json), and the numerical values and provenance are in "
+              "[summary.json](summary.json). Both shock traces occupy the same axial position in each shock CSV. "
               "The `side` column identifies the upstream and downstream values; retain both when comparing a discretized solution.", "",
               "Regenerate this report and the figures from saved fields, without thermodynamic calls or flow solves:", "",
               "```powershell",
-              ".\\.venv\\Scripts\\python.exe -B -m development.real_gas.co2_nozzle_reference.scripts.plot_results",
+              ".\\.venv\\Scripts\\python.exe -B -m development.real_gas.scripts.plot_reference",
               "```", ""]
     (root / "REPORT.md").write_text("\n".join(lines), encoding="utf-8")
 
 
 def build_report(root=ROOT):
     root = Path(root)
-    output = root / "outputs"
+    output = root
     summary = json.loads((output / "summary.json").read_text(encoding="utf-8"))
     folder = output / "figures"
     folder.mkdir(exist_ok=True)
@@ -306,10 +306,10 @@ def build_report(root=ROOT):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--study", type=Path, default=ROOT,
-                        help="Study directory containing outputs/summary.json")
+    parser.add_argument("--input", type=Path, default=ROOT,
+                        help="Directory containing summary.json")
     args = parser.parse_args()
-    build_report(args.study)
+    build_report(args.input)
 
 
 if __name__ == "__main__":

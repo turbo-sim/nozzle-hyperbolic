@@ -3,13 +3,12 @@ import argparse
 import csv
 from itertools import product
 import json
-from pathlib import Path
 import subprocess
 import sys
 from time import perf_counter
 
-from .common import STUDY, REPO, BASELINE, OUTPUT, identity, provenance, save, source_manifest
-from .profiles import register, validate_existing
+from .common import (STUDY, REPO, OUTPUT, identity, provenance, save,
+                     source_manifest, execution_source)
 
 
 def read_fields(path):
@@ -19,14 +18,11 @@ def read_fields(path):
 
 
 def case_metadata():
-    prepared = OUTPUT / "reference_summary.json"
-    summary = json.loads((prepared if prepared.exists() else BASELINE / "outputs" / "summary.json").read_text())
-    reference_folder = OUTPUT if prepared.exists() else BASELINE / "outputs"
+    summary = json.loads((OUTPUT / "reference_summary.json").read_text())
     records = []
     for physical in summary["cases"]:
         for regime in ("adapted", "shock"):
-            prefix = "reference_" if prepared.exists() else ""
-            fields = read_fields(reference_folder / f"{prefix}{physical['id']}_{regime}.csv")
+            fields = read_fields(OUTPUT / f"reference_{physical['id']}_{regime}.csv")
             records.append(dict(
                 id=physical["id"] + "_" + regime, fluid_case=physical["id"], regime=regime,
                 label=physical["label"] + (" — adapted" if regime == "adapted" else " — internal shock"),
@@ -61,20 +57,7 @@ def assemble(metadata, profile):
                                     fields={}, errors={}, history=[], audit={},
                                     initialization=dict(method="not completed")))
     metadata = dict(metadata)
-    metadata["source_after"] = source_manifest()
-    metadata["src_unchanged"] = metadata["source_before"] == metadata["source_after"]
-    diagnostic_trials = []
-    for path in sorted((OUTPUT / "diagnostics").glob("*/runs/*/N*.json")):
-        row = json.loads(path.read_text())
-        row["diagnostic_trial"] = path.parents[2].name
-        diagnostic_trials.append(row)
-    metadata["diagnostic_trials"] = diagnostic_trials
-    registry = OUTPUT / "profile_registry.json"
-    if registry.exists():
-        metadata["profile_registry"] = json.loads(registry.read_text())
-    snapshot = OUTPUT / "source_snapshot_manifest.json"
-    if snapshot.exists():
-        metadata["source_snapshot"] = json.loads(snapshot.read_text())
+    metadata["execution_source_matches_current"] = execution_source(metadata) == source_manifest()
     campaign = dict(metadata=metadata, settings=profile, cases=case_metadata(), results=results, chains=chains)
     campaign["summary"] = dict(
         expected_stages=len(results), completed_stages=sum(r["reason"] != "not_completed" for r in results),
@@ -106,19 +89,14 @@ def main():
     metadata_file = OUTPUT / "provenance.json"
     if args.resume or args.assemble_only:
         metadata = json.loads(metadata_file.read_text()) if metadata_file.exists() else provenance()
-        if metadata["source_before"] != source_manifest():
-            raise RuntimeError("Source changed since campaign start; keep runs separate")
     else:
         existing = list((OUTPUT / "runs").glob("*/N*.json"))
         if existing:
             raise RuntimeError("Existing campaign stages found; use --resume to preserve/reuse them")
         metadata = provenance()
     save(metadata_file, metadata)
-    if metadata.get("profile_sha256", identity(profile)) != identity(profile):
-        validate_existing(profile)
-    else:
-        register(profile)
-    metadata["profile_sha256"] = identity(profile)
+    if metadata["settings_sha256"] != identity(profile):
+        raise RuntimeError("Saved campaign settings differ from settings.json")
     reference_metadata = json.loads((OUTPUT / "reference_summary.json").read_text())["metadata"]
     metadata["reference_fingerprint"] = reference_metadata["reference_fingerprint"]
     save(metadata_file, metadata)
@@ -128,7 +106,7 @@ def main():
                 args.flux or profile["fluxes"], args.reconstruction or profile["reconstructions"]):
             chain = "__".join((fluid_case + "_" + regime, flux, reconstruction))
             command = [sys.executable, "-B", "-u", "-m",
-                       "development.real_gas.fvm_solutions.scripts.worker",
+                       "development.real_gas.scripts.worker",
                        "--fluid-case", fluid_case, "--regime", regime,
                        "--flux", flux, "--reconstruction", reconstruction]
             if args.grids:
@@ -143,12 +121,10 @@ def main():
                 result = subprocess.run(command, cwd=REPO, stdout=stream, stderr=subprocess.STDOUT)
             print(f"END {chain}: exit={result.returncode} wall={perf_counter()-started:.1f}s log={log}", flush=True)
             assemble(metadata, profile)
-            if metadata["source_before"] != source_manifest():
-                raise RuntimeError("Source changed during campaign; completed evidence retained without mixing versions")
+            if result.returncode:
+                raise RuntimeError(f"Chain {chain} failed; inspect {log}")
     campaign = assemble(metadata, profile)
     print(json.dumps(campaign["summary"]), flush=True)
-    if not campaign["metadata"]["src_unchanged"]:
-        raise RuntimeError("Source manifest changed during campaign")
     if not args.no_report:
         from .report import main as report_main
         # The generator's CLI must not parse the campaign driver's arguments.

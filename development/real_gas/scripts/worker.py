@@ -8,7 +8,6 @@ os.environ["MPLBACKEND"] = "Agg"
 import argparse
 from dataclasses import asdict
 import json
-from pathlib import Path
 from time import perf_counter
 import traceback
 from types import SimpleNamespace
@@ -19,11 +18,12 @@ jax.config.update("jax_enable_x64", True)
 import numpy as np
 
 from nozzle_hyperbolic.solvers.fvm import Scheme, SteadySettings, ResidualPolicy, solve_grid_sequence
-from .common import STUDY, OUTPUT, clean, identity, save, source_manifest
+from .common import (STUDY, OUTPUT, clean, identity, save, source_manifest,
+                     source_for_flux, require_current_source)
 from .problem import load_context
 from .audit import evaluate_solution
 from .execution import budgeted_solve, CONTROLS
-from .profiles import register, compatible
+from .configuration import case_settings_id
 from nozzle_hyperbolic.solvers.fvm import drivers
 
 
@@ -60,19 +60,12 @@ def main():
         print(f"BUSY {chain}: another process owns this chain", flush=True)
         return
     start = perf_counter()
-    source_before = source_manifest()
     provenance_file = OUTPUT / "provenance.json"
-    if provenance_file.exists():
-        campaign_source = json.loads(provenance_file.read_text())["source_before"]
-        if source_before != campaign_source:
-            raise RuntimeError("Source changed since campaign start; refusing a mixed-source campaign")
-    context = load_context(args.fluid_case, args.regime)
-    scheme = Scheme(flux=args.flux, reconstruction=args.reconstruction, **profile["scheme"])
-    policy = ResidualPolicy(**profile["residual"])
-    settings = SteadySettings(residual=policy, **profile["steady"])
-    model_factory = lambda cells: context.model(cells, cold_start=profile.get("cold_start"))
-    profile_sha = identity(profile)
-    register(profile)
+    if not provenance_file.exists():
+        raise RuntimeError("Use scripts.run to initialize the campaign provenance")
+    metadata = json.loads(provenance_file.read_text())
+    source_id = identity(source_for_flux(metadata, args.flux))
+    case_settings_sha = case_settings_id(profile, args.fluid_case, args.regime)
     initial_solution, previous_cells = None, None
     records = []
     remaining = list(grids)
@@ -82,24 +75,34 @@ def main():
             if not path.exists():
                 break
             result = json.loads(path.read_text())
-            if not compatible(result.get("profile_sha256"), profile_sha, args.fluid_case, args.regime) or result.get("source_sha256") != identity(source_before):
+            if result.get("case_settings_sha256") != case_settings_sha or result.get("source_sha256") != source_id:
                 raise RuntimeError("Refusing resume with changed settings or source")
             records.append(result)
             remaining.remove(cells)
             previous_cells = cells
-            if result["success"]:
-                model = model_factory(cells)
-                initial_solution = SimpleNamespace(
-                    success=True, state=np.asarray(result["state"]),
-                    operator=SimpleNamespace(mesh=model.mesh),
-                )
-            else:
-                initial_solution = None
+    if not remaining:
+        print(f"COMPLETE {chain}: all requested stages are saved", flush=True)
+        return
+    require_current_source(metadata)
+    require_current_source(metadata, args.flux)
+    source_files = source_manifest()
+    context = load_context(args.fluid_case, args.regime)
+    scheme = Scheme(flux=args.flux, reconstruction=args.reconstruction, **profile["scheme"])
+    policy = ResidualPolicy(**profile["residual"])
+    settings = SteadySettings(residual=policy, **profile["steady"])
+    model_factory = lambda cells: context.model(cells, cold_start=profile.get("cold_start"))
+    if records and records[-1]["success"]:
+        result = records[-1]
+        model = model_factory(result["cells"])
+        initial_solution = SimpleNamespace(
+            success=True, state=np.asarray(result["state"]),
+            operator=SimpleNamespace(mesh=model.mesh),
+        )
 
     def on_stage(model, solution, stages):
         nonlocal previous_cells
         cells = model.mesh.n_cells
-        if source_before != source_manifest():
+        if source_files != source_manifest():
             raise RuntimeError("Source changed during grid sequence; stop and keep the completed-stage evidence")
         stage = stages[-1]
         print(f"AUDIT {chain} N={cells} native={solution.success} reason={solution.reason}", flush=True)
@@ -133,7 +136,7 @@ def main():
                                 if "prolongation" in stage["initialization"] else None),
             attempts=stage["attempts"], state=solution.state, history=history,
             metrics=solution.metrics, work=work, scheme=asdict(scheme),
-            profile_sha256=profile_sha, source_sha256=identity(source_before),
+            case_settings_sha256=case_settings_sha, source_sha256=source_id,
             roe_metadata=getattr(model, "roe_metadata", None) if args.flux == "roe" else None,
             execution_controls=CONTROLS,
             table_sha256=context.eos.table_sha256,
@@ -153,13 +156,9 @@ def main():
         save(folder / "chain.json", dict(chain=chain,
                                         completed=set(profile["grids"]).issubset(completed_cells),
                                         requested_grids=grids, completed_grids=completed_cells,
-                                        elapsed_s=perf_counter()-start,
-                                        src_unchanged=source_before == source_manifest(),
                                         records=[r["id"] for r in records]))
     except Exception:
-        save(folder / "chain.json", dict(chain=chain, completed=False, error=traceback.format_exc(),
-                                        elapsed_s=perf_counter()-start,
-                                        src_unchanged=source_before == source_manifest()))
+        save(folder / "chain.json", dict(chain=chain, completed=False, error=traceback.format_exc()))
         raise
 
 

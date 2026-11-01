@@ -1,40 +1,41 @@
-"""Prepare matching continuous references for the FVM property-table domains.
-
-Only study-local outputs are written. The established analytical study remains
-unchanged, including its original narrower supercritical property table.
-"""
+"""Prepare continuous Euler references with the benchmark's bicubic tables."""
 
 import argparse
 from copy import deepcopy
 from dataclasses import asdict
 from datetime import datetime, timezone
 from hashlib import sha256
+import inspect
 import json
-from pathlib import Path
-import shutil
 
 import numpy as np
 
-from .common import BASELINE, STUDY, OUTPUT, identity, save
-from development.real_gas.co2_nozzle_reference.scripts.thermodynamics import BicubicCO2
-from development.real_gas.co2_nozzle_reference.scripts.reference import (
-    Nozzle, SmoothPath, solve_shock_location, sample_profile,
+from .common import STUDY, REPO, OUTPUT, identity, save
+from .thermodynamics import BicubicCO2
+from .geometry import Nozzle
+from nozzle_hyperbolic.models.euler_nozzle.analytical.density_eos import (
+    SmoothPath, solve_shock_location, sample_profile,
 )
-from development.real_gas.co2_nozzle_reference.scripts.audit import audit_case
-from development.real_gas.co2_nozzle_reference.scripts.run import refine_check
+from .reference_audit import audit_case, refine_check
 
 
 def reference_fingerprint(profile=None):
     """Reference identity excludes solver settings/source, which it does not use."""
     if profile is None:
         profile = json.loads((STUDY / "settings.json").read_text(encoding="utf-8"))
-    names = ("scripts/reference.py", "scripts/thermodynamics.py", "scripts/audit.py", "scripts/run.py")
+    files = {
+        "src/nozzle_hyperbolic/models/euler_nozzle/analytical/density_eos.py":
+            REPO / "src/nozzle_hyperbolic/models/euler_nozzle/analytical/density_eos.py",
+        **{f"development/real_gas/scripts/{name}": STUDY / "scripts" / name
+           for name in ("thermodynamics.py", "geometry.py", "reference_audit.py")},
+    }
     specification = dict(
-        physical_cases=json.loads((BASELINE / "cases.json").read_text(encoding="utf-8")),
+        physical_cases=json.loads((STUDY / "cases.json").read_text(encoding="utf-8")),
         table_overrides=profile.get("table_overrides", {}),
-        reference_code_sha256={name: sha256((BASELINE / name).read_bytes()).hexdigest()
-                               for name in names},
-        preparation_code_sha256=sha256(Path(__file__).read_bytes()).hexdigest(),
+        reference_code_sha256={name: sha256(path.read_bytes()).hexdigest()
+                               for name, path in files.items()},
+        refinement_code_sha256=sha256(inspect.getsource(refine_check).encode("utf-8")).hexdigest(),
+        preparation_algorithm="bicubic_density_isentropic_rh_v1",
         stations=1001,
     )
     return identity(specification), specification
@@ -48,26 +49,6 @@ def _write_csv(path, profile):
         writer = csv.writer(stream)
         writer.writerow(keys)
         writer.writerows(zip(*(profile[k] for k in keys)))
-
-
-def _matching_tables(settings, original, saved):
-    """Copy existing original bytes only when the full table settings match."""
-    if settings != original:
-        return
-    cache = OUTPUT / "fluid_tables"
-    cache.mkdir(parents=True, exist_ok=True)
-    table = f"{settings['name']}.pkl"
-    destination = cache / table
-    if not destination.exists():
-        source = BASELINE / "outputs/fluid_tables" / table
-        if not source.exists():
-            raise FileNotFoundError("Regenerate the original baseline tables first")
-        shutil.copyfile(source, destination)
-    if sha256(destination.read_bytes()).hexdigest() != saved["table_sha256"]:
-        raise RuntimeError("Unmodified table does not match its original reference hash")
-    source_log = BASELINE / "outputs" / f"{settings['name']}_table.log"
-    if source_log.exists() and not (OUTPUT / source_log.name).exists():
-        shutil.copyfile(source_log, OUTPUT / source_log.name)
 
 
 def prepare_reference(force=False):
@@ -94,26 +75,26 @@ def prepare_reference(force=False):
                 print("Matching FVM references are already prepared", flush=True)
                 return cached
     definitions = specification["physical_cases"]
-    originals = json.loads((BASELINE / "outputs/summary.json").read_text(encoding="utf-8"))
-    original_by_id = {case["id"]: case for case in originals["cases"]}
     summary = dict(
         geometry=definitions["geometry"], cases=[],
         metadata=dict(
             created_utc=datetime.now(timezone.utc).isoformat(),
             reference_fingerprint=fingerprint, specification=specification,
-            method="Same continuous bicubic-density Euler ODE and nested RH/backpressure roots as original baseline",
+            generation_code_sha256={
+                **specification["reference_code_sha256"],
+                "development/real_gas/scripts/prepare_reference.py":
+                    sha256((STUDY / "scripts/prepare_reference.py").read_bytes()).hexdigest(),
+            },
+            method="Continuous bicubic-density Euler ODE with nested RH/backpressure roots",
             property_backend="JAXProp FluidBicubic; equilibrium HEOS-generated 100x100 tables",
-            table_domain_reason="Supercritical upper-pressure extension permits transient startup overshoots; all comparisons use a recomputed reference from the same table",
-            original_baseline_unchanged=True, fvm_solutions=False,
+            table_domain_reason="The table domains cover reservoir, reference and numerical startup states",
+            reference_kind="continuous_euler",
         ),
     )
-    for original_case in definitions["cases"]:
-        case = deepcopy(original_case)
-        original = original_by_id[case["id"]]
-        original_settings = deepcopy(case["table"])
+    for definition in definitions["cases"]:
+        case = deepcopy(definition)
         case["table"].update(profile.get("table_overrides", {}).get(case["id"], {}))
         print(f"Preparing matching reference {case['id']}: {case['table']}", flush=True)
-        _matching_tables(case["table"], original_settings, original)
         eos = BicubicCO2(case["table"], OUTPUT)
         nozzle = Nozzle(**(definitions["geometry"] | case.get("geometry_override", {})))
         reservoir = eos.reservoir(case["p0"], case["T0"])
@@ -135,31 +116,19 @@ def prepare_reference(force=False):
                                for q in (adapted, shocked))
         audit["physical_regime_passed"] = bool(setup_passed)
         audit["passed"] = bool(audit["passed"] and setup_passed and audit["refinement"]["passed"])
-        drift = dict(
-            table_settings_changed=case["table"] != original_settings,
-            original_table=original_settings,
-            original_table_sha256=original["table_sha256"],
-            mass_flow_relative=mdot / original["mdot"] - 1,
-            reservoir_enthalpy_difference_J_kg=reservoir["h"] - original["reservoir"]["h"],
-            throat_pressure_relative=throat["p"] / original["throat"]["p"] - 1,
-            adapted_exit_pressure_relative=adapted["p"][-1] / original["adapted_exit"]["p"] - 1,
-            shock_position_difference_m=shock["x"] - original["shock"]["x"],
-            shock_pre_pressure_relative=shock["pre"]["p"] / original["shock"]["pre"]["p"] - 1,
-            shock_post_pressure_relative=shock["post"]["p"] / original["shock"]["post"]["p"] - 1,
-        )
         record = dict(
             id=case["id"], label=case["label"], settings=case, geometry=asdict(nozzle),
             reservoir=reservoir, throat=throat, mdot=mdot,
             adapted_exit={k: v[-1] for k, v in adapted.items() if k != "side"},
             backpressure=case["backpressure"],
             shock={k: v for k, v in shock.items() if k != "downstream"},
-            table_sha256=eos.table_sha256, audit=audit, original_reference_drift=drift,
+            table_sha256=eos.table_sha256, audit=audit,
         )
         _write_csv(OUTPUT / f"reference_{case['id']}_adapted.csv", adapted)
         _write_csv(OUTPUT / f"reference_{case['id']}_shock.csv", shocked)
         summary["cases"].append(record)
         save(summary_path, summary)
-        print(f"Reference {case['id']}: audits={audit['passed']}; original-reference drift={drift}", flush=True)
+        print(f"Reference {case['id']}: audits={audit['passed']}", flush=True)
         if not audit["passed"]:
             raise RuntimeError(f"Matching reference {case['id']} failed its required audit")
     return summary

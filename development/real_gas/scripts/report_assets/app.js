@@ -56,9 +56,7 @@ function valueArray(f,key) {if(Array.isArray(f[key]))return f[key];if(key==="M_e
 function history(row,includeRejected=false) {return (row.history||[]).filter(h=>includeRejected||(h.accepted!==false&&h.phase!=="rejected"));}
 function stepCount(row) {const h=history(row);return Math.max(0,...h.map((x,i)=>Number(x.step??i)));}
 function rejectedCount(row) {return history(row,true).filter(h=>h.accepted===false||h.phase==="rejected").length;}
-function warmFailures(row) {return (row.attempts||[]).filter(a=>a.success===false&&/warm|prolongation/i.test(String(a.initialization?.method||a.initialization||"")));}
-function retryCell(row) {const a=warmFailures(row),reasons=a.map(v=>v.reason||"unknown").join(", ");return a.length?`${a.length} failed<span class="status-sub" title="${escape(reasons)}">${escape(reasons)}</span>`:"0";}
-function historyName(row) {return `${seriesName(row)}${warmFailures(row).length?" · final cold retry":" · final attempt"}`;}
+function historyName(row) {return seriesName(row);}
 function error(row,field,norm="l1") {
  if(field==="mass_flow") {
   const v=row.audit?.conservation?.numerical_face_mass_flow_relative_reference_error;
@@ -75,7 +73,7 @@ function status(row) {
  if(row.reason==="not_completed"||row.reason==="not_run")return {label:"Not run",css:"partial"};
  if(row.reason==="study_collapsed_cfl_plateau")return {label:"Stopped · CFL plateau",css:"fail"};
  if(row.reason==="study_wall_time_budget")return {label:"Stopped · time budget",css:"fail"};
- if(row.success&&row.audit?.passed===true)return {label:warmFailures(row).length?"Verified · cold retry":"Verified",css:"pass"};
+ if(row.success&&row.audit?.passed===true)return {label:"Verified",css:"pass"};
  if(row.success)return {label:row.audit?.passed===false?"Audit failed":"Native success",css:row.audit?.passed===false?"fail":"partial"};
  return {label:row.reason==="blocked"||row.blocked?"Blocked":"Not converged",css:"fail"};
 }
@@ -178,7 +176,7 @@ function gridTrace(group,kind) {
  const r=group[0],field=$("error-field").value;
  const y=group.map(row=>kind==="error"?error(row,field):kind==="steps"?stepCount(row):kind==="time"?row.elapsed_s:finalNorm(row));
  if(!y.some(finite))return null;
- return {type:"scatter",mode:"lines+markers",name:seriesName(r),x:group.map(x=>x.cells),y:y.map(v=>finite(v)&&v>0?v:null),line:lineStyle(r),marker:{color:COLORS[r.flux],size:7,symbol:group.map(row=>status(row).css==="pass"?(warmFailures(row).length?"diamond":row.reconstruction==="constant"?"circle-open":"circle"):"x")},customdata:group.map(row=>[status(row).label,row.reason||"",warmFailures(row).map(a=>a.reason).join(", ")]),hovertemplate:`${escape(seriesName(r))}<br>%{x} cells<br>%{y:.6g}<br>%{customdata[0]}<br>%{customdata[1]}<br>Retained warm failures: %{customdata[2]}<extra></extra>`};
+ return {type:"scatter",mode:"lines+markers",name:seriesName(r),x:group.map(x=>x.cells),y:y.map(v=>finite(v)&&v>0?v:null),line:lineStyle(r),marker:{color:COLORS[r.flux],size:7,symbol:group.map(row=>status(row).css==="pass"?(row.reconstruction==="constant"?"circle-open":"circle"):"x")},customdata:group.map(row=>[status(row).label,row.reason||""]),hovertemplate:`${escape(seriesName(r))}<br>%{x} cells<br>%{y:.6g}<br>%{customdata[0]}<br>%{customdata[1]}<extra></extra>`};
 }
 function renderGrid() {
  const groups=gridGroups(),key=$("error-field").value;
@@ -190,26 +188,13 @@ function renderGrid() {
  $("error-definition").textContent=key==="mass_flow"?"Numerical mass-flow error is |mean numerical face ṁ / reference ṁ − 1|. It measures accuracy of the conserved numerical flow rate, not the spatial spread of that flux and not the physical cell-state mass-flow error. This scalar diagnostic has no L₂ or L∞ columns.":key==="shock_position"?"Shock position is estimated from the largest positive adjacent-cell pressure jump in the divergent section. The plotted value is |estimated x_s − reference x_s| / divergent length; its resolution is limited by the mesh spacing. It is available only for internal-shock cases and has no L₂ or L∞ columns.":"Primitive-field errors are volume-weighted numerical cell states versus the continuous reference at physical cell centers, with the declared fixed normalization scale. These are not errors from an exact cell-average primitive inversion.";
  const plots=[["grid-error","error",`${FIELD_INFO[key].label}: analytic comparison`,errorAxis,true],["grid-iterations","steps","Iterations after coarse-to-fine initialization","Accepted stage steps",false],["grid-time","time","Single-run stage wall time","Stage wall time [s]",false],["grid-residual","residual","Final original spatial residual","Maximum equation RMS [fixed scale]",true]];
  const jobs=plots.map(([id,kind,title,label,log])=>{const layout=baseLayout(title,"Physical mesh cells",label);layout.xaxis.type="log";layout.xaxis.tickvals=[50,100,200,400,800];layout.xaxis.ticktext=["50","100","200","400","800"];if(log)layout.yaxis.type="log";return graph(id,groups.map(g=>gridTrace(g,kind)).filter(Boolean),layout);});
- $("grid-table").innerHTML=selectedRows(true).map(row=>`<tr><td>${row.cells}</td><td><span class="dot" style="background:${COLORS[row.flux]}"></span>${escape(seriesName(row))}</td><td><span class="badge ${status(row).css}">${status(row).label}</span></td><td>${retryCell(row)}</td><td>${number(error(row,key))}</td><td>${number(error(row,key,"l2"))}</td><td>${number(error(row,key,"linf"))}</td><td>${stepCount(row)}</td><td>${number(row.elapsed_s,2)} s</td></tr>`).join("");
+ $("grid-table").innerHTML=selectedRows(true).map(row=>`<tr><td>${row.cells}</td><td><span class="dot" style="background:${COLORS[row.flux]}"></span>${escape(seriesName(row))}</td><td><span class="badge ${status(row).css}">${status(row).label}</span></td><td>${number(error(row,key))}</td><td>${number(error(row,key,"l2"))}</td><td>${number(error(row,key,"linf"))}</td><td>${stepCount(row)}</td><td>${number(row.elapsed_s,2)} s</td></tr>`).join("");
  return Promise.all(jobs);
 }
 function initials(row) {
  const text=typeof row.initialization==="string"?row.initialization:row.initialization?.method||row.initialization?.kind||row.initialization?.source||"—";
  const source=row.source_cells??row.initialization?.source_cells;
  return source?`${text} · ${source} → ${row.cells}`:text;
-}
-function compactAttempt(a) {
- return {initialization:a.initialization,success:a.success,reason:a.reason,elapsed_s:a.elapsed_s,
-  state_shape:Array.isArray(a.state)?[a.state.length,Array.isArray(a.state[0])?a.state[0].length:0]:null,
-  history_rows:a.history?.length||0,metrics:a.metrics};
-}
-function compactMetadata(metadata) {
- const {diagnostic_trials,...other}=metadata||{};
- return {...other,diagnostic_trials:Array.isArray(diagnostic_trials)?diagnostic_trials.map(r=>({
-  id:r.id,diagnostic_trial:r.diagnostic_trial,case_id:r.case_id,flux:r.flux,reconstruction:r.reconstruction,cells:r.cells,
-  success:r.success,verified:r.verified,reason:r.reason,elapsed_s:r.elapsed_s,
-  history_rows:r.history?.length||0,attempts:(r.attempts||[]).map(compactAttempt)
- })):diagnostic_trials};
 }
 function renderSummary() {
  const c=selectedCase(),selected=selectedRows(),passed=selected.filter(r=>status(r).css==="pass").length,native=selected.filter(r=>r.success).length;
@@ -219,37 +204,26 @@ function renderSummary() {
  $("kpi-error").textContent=percent(maxFinite(selected.map(r=>error(r,"mass_flow"))));
  const source=unique(selected.map(r=>r.source_cells??r.initialization?.source_cells).filter(finite));
  const notRun=selected.every(r=>r.reason==="not_completed"||r.reason==="not_run");
- const retries=selected.filter(r=>warmFailures(r).length);
- const budgetStops=selected.filter(r=>String(r.reason||"").startsWith("study_"));
- $("kpi-multigrid").textContent=retries.length?`${retries.length} / ${selected.length} cold retries`:!notRun&&Number($("mesh").value)===50?"Cold start":"Coarse → fine";
- $("kpi-sequence").textContent=retries.length?"Failed warm attempts retained in full":notRun?"Configured: 50 → 100 → 200 → 400 → 800":source.length?`${source.join(" / ")} → ${$("mesh").value} cells · transferred state`:`${$("mesh").value} cells · ${Number($("mesh").value)===50?"first sequence stage":"see retained initialization"}`;
+ $("kpi-multigrid").textContent=!notRun&&Number($("mesh").value)===50?"Cold start":"Coarse to fine";
+ $("kpi-sequence").textContent=source.length?`${source.join(" / ")} to ${$("mesh").value} cells - transferred state`:`${$("mesh").value} cells - first sequence stage`;
  const bad=selected.filter(r=>status(r).css!=="pass");
- $("selection-notice").style.display=bad.length||!selected.length||retries.length?"block":"none";
- $("selection-notice").textContent=!selected.length?"No recorded run matches this selection. Choose another method or mesh.":notRun?"The selected mesh stages have not completed. Only the continuous reference is plotted; no numerical solution or convergence history is implied.":(bad.length?`${bad.length} selected run${bad.length===1?" is":"s are"} not independently verified. Available final fields and histories remain visible. `:"")+(retries.length?`${retries.length} selected mesh stage${retries.length===1?" required a cold restart":"s required cold restarts"} after retained warm-start failures; grid transfer did not supply the final initial state for those stages. Convergence curves show the final attempt. `:"")+(budgetStops.length?"Execution-budget stops retain the last accepted state; they do not prove that no steady root exists.":"Inspect the status and audits.");
+ $("selection-notice").style.display=bad.length||!selected.length?"block":"none";
+ $("selection-notice").textContent=!selected.length?"No recorded run matches this selection. Choose another method or mesh.":notRun?"The selected mesh stages have not completed.":`${bad.length} selected run${bad.length===1?" is":"s are"} not independently verified. Inspect the status and audits.`;
  const p0=c?.p0??c?.settings?.p0,T0=c?.T0??c?.settings?.T0,pb=c?.backpressure??c?.p_back;
  const sc=shockPosition(c),geo=c?.geometry||{};
  $("solution-context").textContent=`${c?.label||c?.id||"No physical case"} · ${$("mesh").value} cells · reservoir ${number(p0/1e6,4)} MPa / ${number(T0,2)} K · ${regime(c)==="adapted"?"reference adapted pressure":"imposed backpressure"} ${number(pb/1e6,5)} MPa${regime(c)==="shock"&&finite(sc)?` · reference shock x = ${number(sc*1e3,3)} mm`:""}`;
- $("run-table").innerHTML=selected.map(row=>`<tr><td><span class="dot" style="background:${COLORS[row.flux]}"></span>${escape(seriesName(row))}</td><td><span class="badge ${status(row).css}">${status(row).label}</span><span class="status-sub" title="${escape(row.reason)}">${escape(row.reason||"")}</span></td><td>${retryCell(row)}</td><td>${percent(error(row,"p"))}</td><td>${percent(error(row,"u"))}</td><td>${percent(error(row,"mass_flow"))}</td><td>${number(finalNorm(row))}</td><td>${stepCount(row)} / ${rejectedCount(row)}</td><td>${number(row.elapsed_s,2)} s</td><td title="${escape(initials(row))}">${escape(initials(row))}</td></tr>`).join("");
+ $("run-table").innerHTML=selected.map(row=>`<tr><td><span class="dot" style="background:${COLORS[row.flux]}"></span>${escape(seriesName(row))}</td><td><span class="badge ${status(row).css}">${status(row).label}</span><span class="status-sub" title="${escape(row.reason)}">${escape(row.reason||"")}</span></td><td>${percent(error(row,"p"))}</td><td>${percent(error(row,"u"))}</td><td>${percent(error(row,"mass_flow"))}</td><td>${number(finalNorm(row))}</td><td>${stepCount(row)} / ${rejectedCount(row)}</td><td>${number(row.elapsed_s,2)} s</td><td title="${escape(initials(row))}">${escape(initials(row))}</td></tr>`).join("");
  $("case-settings").innerHTML=cases.map(c=>{const g=c.geometry||{},t=c.table||c.settings?.table||{};const rs=c.regime||regime(c);return `<article class="settings-card"><h4>${escape(c.label||c.id)}</h4><dl><dt>Operating mode</dt><dd>${rs==="adapted"?"Adapted expansion":"Internal shock"}</dd><dt>Reservoir pressure</dt><dd>${number((c.p0??c.settings?.p0)/1e6,4)} MPa</dd><dt>Reservoir temperature</dt><dd>${number(c.T0??c.settings?.T0,2)} K</dd><dt>Backpressure</dt><dd>${number((c.backpressure??c.p_back)/1e6,5)} MPa</dd><dt>Exit / throat area</dt><dd>${number(g.exit_ratio,3)}</dd><dt>Table resolution</dt><dd>100 × 100</dd>${finite(t.p_min)?`<dt>Pressure table bounds</dt><dd>${number(t.p_min/1e6)}–${number(t.p_max/1e6)} MPa</dd>`:""}${finite(t.h_min)?`<dt>Enthalpy table bounds</dt><dd>${number(t.h_min/1e3)}–${number(t.h_max/1e3)} kJ/kg</dd>`:""}</dl></article>`;}).join("");
- $("provenance").textContent=JSON.stringify({summary:campaign.summary,settings:campaign.settings,chains:campaign.chains,metadata:compactMetadata(campaign.metadata),report_provenance:campaign.report_provenance,note:"Full states and every history row are retained in the embedded data and complete JSON download; this panel shows compact diagnostic summaries."},null,2);
- const overrides=campaign.settings?.table_overrides||{};
- const changedDomains=[];
- if(overrides.supercritical?.p_max)changedDomains.push(`supercritical 32 → ${number(overrides.supercritical.p_max/1e6,3)} MPa`);
- if(overrides.lettieri_equilibrium?.p_max)changedDomains.push(`Lettieri-type 9 → ${number(overrides.lettieri_equilibrium.p_max/1e6,3)} MPa`);
- $("setup-note").innerHTML=changedDomains.length?`<strong>Active pressure domains and matched references.</strong><p>Pressure-table upper bounds were extended to accommodate numerical startup paths: ${changedDomains.join("; ")}. Resolution stays 100 × 100; reservoirs, geometry and prescribed shock backpressures are unchanged. Extending a pressure domain changes the approximate EOS sampling. Each continuous reference is therefore recomputed with the <em>same active table</em> as its FVM case. The original narrow-domain startup and two-phase runs are retained separately as diagnostics, not mixed into the active mesh trends. No property clipping or direct HEOS fallback is used.</p>`:`<strong>Matched property table.</strong><p>Each FVM comparison uses its declared bicubic table and the matching continuous reference. Table bounds and fingerprints are recorded below; all tables have 100 × 100 nodes.</p>`;
+ $("provenance").textContent=JSON.stringify({summary:campaign.summary,settings:campaign.settings,chains:campaign.chains,metadata:campaign.metadata,report_provenance:campaign.report_provenance,note:"Full states and every history row are embedded and complete JSON download; this panel shows the settings and provenance."},null,2);
+ $("setup-note").innerHTML=`<strong>Matched property tables.</strong><p>Each FVM case and its continuous reference use the same JAXProp bicubic table with 100 x 100 nodes. The table bounds and fingerprints are recorded in the case settings and provenance. Every flow-state property call uses the bicubic backend.</p>`;
  const mismatchFor=caseItem=>caseItem?.baseline_audit?.profiles?.[regime(caseItem)==="adapted"?"adapted":"internal_shock"]?.table_sound_speed_relative_mismatch_max;
  const acousticDescription=cases.map(caseItem=>`${phys(caseItem)==="supercritical"?"Supercritical":"Two-phase"} ${regime(caseItem)}: ${percent(mismatchFor(caseItem))}`).join("; ");
- $("acoustic-note").textContent=`Active matched-reference maxima of |a_table/a_Euler − 1|: ${acousticDescription}. These values are derived from the active case audits. Historical ≈23% values belong to the original narrow-domain two-phase table. The conservative reference derives its acoustic speed from density; production boundary acoustic inputs use the separately interpolated table sound speed.`;
- const versions=Object.keys(campaign.metadata?.profile_registry||{});
- const usedVersions=unique(rows.map(r=>r.profile_sha256).filter(Boolean));
- $("profile-note").innerHTML=`<strong>Profile versions retain their original identities.</strong><p>The registry contains ${versions.length} profile versions; active stage records retain ${usedVersions.length} original global profile hash${usedVersions.length===1?"":"es"}. Case-specific compatibility compares the effective physical definition, geometry, numerical settings, stopping policy, cold start and grid sequence. Extending only the other fluid’s table therefore leaves the supercritical case’s effective setup unchanged. Saved stage hashes are not rewritten to the newer global profile. The registry and original per-stage hashes are included in the complete JSON download and the provenance summary.</p>`;
+ $("acoustic-note").textContent=`Reference maxima of |a_table/a_Euler - 1|: ${acousticDescription}. The conservative reference derives its acoustic speed from density; production wave speeds and boundary characteristics use the independently interpolated table sound speed. Numerical convergence and property-table consistency are separate assessments.`;
  const cold=campaign.settings?.cold_start;
- if(cold?.adapted==="table_mach_ramp")$("cold-start-note").textContent=`The adapted 50-cell stage uses a rough cold ramp: pressure and velocity vary linearly from the reservoir to the outlet guess, with inlet u/a₀ = ${number(cold.inlet_velocity_over_a0,3)}, target outlet table Mach ${number(cold.outlet_mach_table,3)}, and h = h₀ − u²/2. No analytic area–Mach solution, choked mass flow or shock location is used. Shock cases use the production default cold state. Finer grids receive the preceding successful mesh state through the production grid-sequence driver; retained attempts expose any fallback initialization.`;
+ if(cold?.adapted==="table_mach_ramp")$("cold-start-note").textContent=`The adapted 50-cell stage uses a rough cold ramp: pressure and velocity vary linearly from the reservoir to the outlet guess, with inlet u/a₀ = ${number(cold.inlet_velocity_over_a0,3)}, target outlet table Mach ${number(cold.outlet_mach_table,3)}, and h = h₀ − u²/2. No analytic area–Mach solution, choked mass flow or shock location is used. Shock cases use the production default cold state. Finer grids receive the preceding successful mesh state through the production grid-sequence driver.`;
  const budgetRows=rows.filter(r=>r.execution_controls),budget=budgetRows[0]?.execution_controls;
- $("execution-note").innerHTML=budget?`<strong>Declared execution budgets are not convergence tests.</strong><p>${budgetRows.length} recorded stages declare study-only execution controls. Each attempt has a ${number(budget.wall_seconds,0)} s callback-checked wall budget including solve/JIT time. A collapsed-CFL stop requires ${number(budget.plateau_window,0)} accepted steps all at CFL ≤ ${number(budget.plateau_cfl_max)} with relative residual improvement below ${number(budget.plateau_relative_improvement)} over that window. A long compiled call can overrun a callback-checked budget. A budget stop returns the last accepted full state and history, recomputes the original spatial residual, and is always unsuccessful. The production equations, Newton method, residual targets and 16,000-step ceiling are unchanged. Earlier stages without an execution_controls record used native stopping without these study budgets. These stops diagnose lack of progress within a stated execution budget; they are not evidence that a steady solution does not exist.</p>`:`<strong>Execution controls are declared per stage.</strong><p>Stages without an execution_controls record use the production stopping policy and step limit. Any study-only budget added to later stages must remain explicitly recorded and must never turn a nonconverged state into a success.</p>`;
- const diagnostics=campaign.metadata?.diagnostic_trials||campaign.diagnostic_trials||[];
- $("diagnostic-summary").textContent=Array.isArray(diagnostics)?diagnostics.length?`${diagnostics.length} diagnostic records are embedded, including their retained fields and histories. The provenance panel shows compact summaries; the JSON download preserves the complete records.`:"Diagnostic archives are retained under outputs/diagnostics; their records will appear here when included in campaign metadata.":"Diagnostic trial records are embedded in the complete report data.";
- $("selected-audits").textContent=JSON.stringify(selected.map(row=>({id:row.id,case_id:row.case_id,flux:row.flux,reconstruction:row.reconstruction,cells:row.cells,success:row.success,reason:row.reason,initialization:row.initialization,source_cells:row.source_cells,execution_controls:row.execution_controls||"native stopping without study execution budgets",history_rows:row.history?.length||0,metrics:row.metrics,audit:row.audit,errors:row.errors,attempts:(row.attempts||[]).map(compactAttempt)})),null,2);
+ $("execution-note").innerHTML=budget?`<strong>Execution limits.</strong><p>The production step ceiling is 16,000. Declared study execution controls include a ${number(budget.wall_seconds,0)} s callback-checked wall budget and a ${number(budget.plateau_window,0)}-step collapsed-CFL progress check. A budget stop is unsuccessful. Convergence always requires the original spatial residual, boundary and global conservation tests to pass. Per-stage execution controls and measured solve times are included in the downloadable data.</p>`:"";
+ $("selected-audits").textContent=JSON.stringify(selected.map(row=>({id:row.id,case_id:row.case_id,flux:row.flux,reconstruction:row.reconstruction,cells:row.cells,success:row.success,reason:row.reason,initialization:row.initialization,source_cells:row.source_cells,execution_controls:row.execution_controls,history_rows:row.history?.length||0,metrics:row.metrics,audit:row.audit,errors:row.errors})),null,2);
 }
 async function render() {
  const own=++renderNumber;lastPlots=[];renderSummary();
@@ -291,16 +265,13 @@ function initialize() {
  $("campaign-count").textContent=rows.length.toLocaleString("en-GB");
  const verified=rows.filter(r=>status(r).css==="pass").length;
  $("campaign-flux-counts").innerHTML=FLUXES.map(flux=>{const stages=rows.filter(r=>r.flux===flux),passed=stages.filter(r=>status(r).css==="pass").length;return `<span class="hero-flux-count" data-flux="${flux}" data-verified="${passed}" data-total="${stages.length}" title="Independently verified stages in this campaign"><span class="dot" style="background:${COLORS[flux]}"></span>${FLUX_NAME[flux]}<strong>${passed} / ${stages.length}</strong></span>`;}).join("");
- const failedWarm=rows.reduce((sum,row)=>sum+warmFailures(row).length,0);
- const coldRescues=rows.filter(row=>row.success&&warmFailures(row).length).length;
- $("campaign-state").textContent=`${verified} independently verified · ${rows.length-verified} other outcomes · ${failedWarm} retained warm failures / ${coldRescues} cold rescues`;
+ $("campaign-state").textContent=`${verified} independently verified mesh stages`;
  const savedTheme=(()=>{try{return localStorage.getItem("co2-fvm-theme");}catch{return null;}})();
  document.documentElement.dataset.theme=savedTheme||"light";
  for(const id of ["physical-case","regime","mesh","reconstruction","methods","residual-mode","error-field"])$(id).addEventListener("change",render);
  document.querySelectorAll(".tabs button").forEach(button=>button.addEventListener("click",()=>switchPage(button.dataset.page)));
  $("theme").addEventListener("click",()=>{const t=document.documentElement.dataset.theme==="dark"?"light":"dark";document.documentElement.dataset.theme=t;try{localStorage.setItem("co2-fvm-theme",t);}catch{}render();});
  $("download-data").addEventListener("click",()=>download("co2_fvm_report_data.json","application/json",JSON.stringify(campaign,null,2)+"\n"));
- $("download-diagnostics").addEventListener("click",()=>download("co2_fvm_startup_diagnostics.json","application/json",JSON.stringify(campaign.metadata?.diagnostic_trials||campaign.diagnostic_trials||[],null,2)+"\n"));
  $("download-fields").addEventListener("click",downloadFields);$("download-history").addEventListener("click",downloadHistory);
  render();
 }

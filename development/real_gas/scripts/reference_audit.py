@@ -6,6 +6,10 @@ evidence before raising. Entropy and tabulated acoustic inconsistencies are
 reported separately from conservation of the density-defined Euler system.
 """
 
+from nozzle_hyperbolic.models.euler_nozzle.analytical.density_eos import (
+    SmoothPath, solve_shock_location, sample_profile,
+)
+
 import numpy as np
 from numpy.polynomial.legendre import leggauss
 
@@ -217,3 +221,26 @@ def audit_case(eos, upstream, nozzle, mdot, adapted_profile, shock_profile, shoc
             "entropy": "interpolated JAXProp entropy along each mechanical smooth segment; no zero-drift assertion",
         },
     }
+
+
+def refine_check(eos, reservoir, upstream, nozzle, mdot, backpressure, shock, adapted):
+    """Repeat the ODE primitive at tighter tolerance and smaller maximum steps."""
+    tighter = dict(rtol=2e-12, max_step=0.003)
+    path = SmoothPath(eos, reservoir["h"], reservoir["p"], reservoir["h"],
+                      upstream.p_low, **tighter)
+    star = path.choke()
+    mdot_fine = nozzle.At * star["G"]
+    shock_fine = solve_shock_location(eos, path, nozzle, mdot_fine, backpressure, **tighter)
+    adapted_fine = sample_profile(path, nozzle, mdot_fine, stations=151)
+    checks = dict(
+        mdot_relative=abs(mdot_fine / mdot - 1),
+        throat_pressure_relative=abs(star["p"] / upstream.p_star - 1),
+        adapted_exit_pressure_relative=abs(adapted_fine["p"][-1] / adapted["p"][-1] - 1),
+        shock_position_over_divergent_length=abs(shock_fine["x"] - shock["x"]) / nozzle.x_out,
+        shock_pre_pressure_relative=abs(shock_fine["pre"]["p"] / shock["pre"]["p"] - 1),
+        shock_post_pressure_relative=abs(shock_fine["post"]["p"] / shock["post"]["p"] - 1),
+    )
+    checks["threshold"] = 1e-6
+    checks["passed"] = bool(max(v for k, v in checks.items() if k != "threshold") < 1e-6)
+    checks["settings"] = tighter
+    return checks

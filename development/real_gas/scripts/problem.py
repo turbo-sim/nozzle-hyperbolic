@@ -8,7 +8,6 @@ from dataclasses import dataclass
 from functools import lru_cache
 import json
 from pathlib import Path
-import shutil
 
 import jax
 jax.config.update("jax_enable_x64", True)
@@ -19,14 +18,14 @@ from scipy.optimize import brentq
 
 from nozzle_hyperbolic.models.euler_nozzle.model import NozzleModel
 from nozzle_hyperbolic.numerics.mesh import Mesh
-from development.real_gas.co2_nozzle_reference.scripts.thermodynamics import BicubicCO2
-from development.real_gas.co2_nozzle_reference.scripts.reference import (
-    Nozzle, SmoothPath, downstream_exit,
+from .thermodynamics import BicubicCO2
+from .geometry import Nozzle
+from nozzle_hyperbolic.models.euler_nozzle.analytical.density_eos import (
+    SmoothPath, downstream_exit,
 )
 
 
 STUDY = Path(__file__).resolve().parents[1]
-BASELINE = STUDY.parent / "co2_nozzle_reference"
 
 
 def _area_primitive(nozzle, x):
@@ -204,38 +203,28 @@ class CaseContext:
 
 @lru_cache(maxsize=4)
 def load_context(case_id, regime):
-    """Load a prepared matching reference when the FVM table domain is changed."""
+    """Load the continuous reference and table assigned to this FVM case."""
     if regime not in ("adapted", "shock"):
         raise ValueError("regime must be adapted or shock")
-    definitions = json.loads((BASELINE / "cases.json").read_text(encoding="utf-8"))
+    definitions = json.loads((STUDY / "cases.json").read_text(encoding="utf-8"))
     profile = json.loads((STUDY / "settings.json").read_text(encoding="utf-8"))
     prepared = STUDY / "outputs/reference_summary.json"
-    if profile.get("table_overrides"):
-        from .prepare_reference import reference_fingerprint
-        if not prepared.exists():
-            raise RuntimeError("Run scripts.prepare_reference before using an extended FVM table")
-        records = json.loads(prepared.read_text(encoding="utf-8"))
-        if records.get("metadata", {}).get("reference_fingerprint") != reference_fingerprint(profile)[0]:
-            raise RuntimeError("Prepared FVM references are stale; run scripts.prepare_reference")
-    else:
-        records = json.loads((BASELINE / "outputs/summary.json").read_text(encoding="utf-8"))
+    from .prepare_reference import reference_fingerprint
+    if not prepared.exists():
+        raise RuntimeError("Run scripts.prepare_reference before loading the FVM cases")
+    records = json.loads(prepared.read_text(encoding="utf-8"))
+    if records.get("metadata", {}).get("reference_fingerprint") != reference_fingerprint(profile)[0]:
+        raise RuntimeError("Prepared FVM references are stale; run scripts.prepare_reference")
     saved = next((c for c in records["cases"] if c["id"] == case_id), None)
     case = None if saved is None else saved["settings"]
     if case is None:
         raise ValueError(f"Unknown baseline case {case_id!r}")
     output = STUDY / "outputs"
     cache = output / "fluid_tables"
-    cache.mkdir(parents=True, exist_ok=True)
     table_name = case["table"]["name"]
-    original_table = BASELINE / "outputs/fluid_tables" / f"{table_name}.pkl"
-    cached_table = cache / original_table.name
+    cached_table = cache / f"{table_name}.pkl"
     if not cached_table.exists():
-        if not original_table.exists():
-            raise FileNotFoundError("Prepare the matching FVM references and tables first")
-        shutil.copyfile(original_table, cached_table)
-    original_log = BASELINE / "outputs" / f"{table_name}_table.log"
-    if original_log.exists() and not (output / original_log.name).exists():
-        shutil.copyfile(original_log, output / original_log.name)
+        raise FileNotFoundError("Prepare the FVM references and tables first")
     eos = BicubicCO2(case["table"], output)
     if eos.table_sha256 != saved["table_sha256"]:
         raise ValueError("FVM table bytes differ from its matching analytical reference")
@@ -246,7 +235,7 @@ def load_context(case_id, regime):
     throat = upstream.choke()
     mdot = nozzle.At * throat["G"]
     if abs(mdot / saved["mdot"] - 1) > 1e-8:
-        raise ValueError("Rebuilt reference mass flow differs from retained baseline")
+        raise ValueError("Rebuilt reference mass flow differs from the saved continuous reference")
     downstream = None
     shock_position = None
     if regime == "shock":

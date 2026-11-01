@@ -100,12 +100,23 @@ async def exercise(websocket_url, html, output):
           });
         })()""")
         checks.append(dict(name="overall_per_flux_verification_counts", passed=len(flux_counts) == 3 and all(c["passed"] for c in flux_counts), detail=flux_counts))
+        source_status = await browser.evaluate("""(()=>{
+          const c=nozzleReport.campaign,m=c.metadata||{},assigned=m.source_by_flux||{};
+          return {source_by_flux:assigned,
+            passed:c.results.every(r=>r.source_sha256===assigned[r.flux]&&Boolean(m.sources?.[r.source_sha256]))};
+        })()""")
+        checks.append(dict(name="source_fingerprints_match_results", passed=source_status["passed"], detail=source_status))
+        final_results = await browser.evaluate("""(()=>{
+          const c=nozzleReport.campaign;
+          const expected=c.cases.length*c.settings.fluxes.length*c.settings.reconstructions.length*c.settings.grids.length;
+          return c.results.length===expected&&c.results.every(r=>r.success&&r.audit?.passed===true);
+        })()""")
+        checks.append(dict(name="verified_final_configuration_matrix", passed=bool(final_results)))
         data_status = await browser.evaluate("""(()=>{
           const d=document.getElementById('data'),rows=nozzleReport.campaign.results;
           const final=rows.reduce((s,r)=>s+(r.history?.length||0),0);
-          const retained=rows.reduce((s,r)=>s+(r.attempts||[]).reduce((n,a)=>n+(a.history?.length||0),0),0);
-          return {encoding:d.dataset.encoding,final_history_rows:final,retained_history_rows:retained,
-            passed:final===Number(d.dataset.historyRows)&&retained===Number(d.dataset.retainedHistoryRows)};
+          return {encoding:d.dataset.encoding,history_rows:final,
+            passed:final===Number(d.dataset.historyRows)};
         })()""")
         checks.append(dict(name="complete_embedded_histories_after_decode", passed=data_status["passed"], detail=data_status))
         # Deterministic light-theme screenshot and full viewport overflow check.
@@ -176,28 +187,6 @@ async def exercise(websocket_url, html, output):
         for name, passed in scalar_check.items():
             checks.append(dict(name=f"scalar_error_definition_{name}", passed=passed is not False,
                                skipped_no_numerical_data=passed is None))
-        rescued = await browser.evaluate("""(()=>{
-          const r=nozzleReport.campaign.results.find(r=>r.success&&r.audit?.passed&&
-            (r.attempts||[]).some(a=>a.success===false&&/warm|prolongation/i.test(String(a.initialization?.method||a.initialization||''))));
-          if(!r)return null;
-          const c=nozzleReport.campaign.cases.find(c=>c.id===r.case_id);
-          document.getElementById('physical-case').value=c.fluid_case;
-          document.getElementById('regime').value=c.regime;
-          document.getElementById('mesh').value=String(r.cells);
-          document.getElementById('reconstruction').value=r.reconstruction;
-          document.querySelectorAll('#methods input').forEach(e=>e.checked=e.value===r.flux);
-          nozzleReport.switchPage('solution');
-          return r.id;
-        })()""")
-        if rescued:
-            await browser.settled()
-            passed = await browser.evaluate("document.getElementById('run-table').textContent.includes('Verified · cold retry')&&document.getElementById('kpi-multigrid').textContent.includes('cold retries')&&document.getElementById('selection-notice').textContent.includes('cold restart')")
-            checks.append(dict(name="visible_retained_warm_failure_and_cold_rescue", passed=bool(passed), detail=rescued))
-            await browser.evaluate("window.scrollTo(0,document.getElementById('run-table').getBoundingClientRect().top+scrollY-45)")
-            await browser.screenshot(output / "cold_retry_evidence_light.png")
-            await browser.evaluate("window.scrollTo(0,0)")
-        else:
-            checks.append(dict(name="visible_retained_warm_failure_and_cold_rescue", passed=True, skipped_no_rescue_record=True))
         await browser.evaluate("nozzleReport.switchPage('solution');document.getElementById('theme').click()")
         await browser.settled()
         checks.append(dict(name="dark_theme", passed=await browser.evaluate("document.documentElement.dataset.theme==='dark'")))

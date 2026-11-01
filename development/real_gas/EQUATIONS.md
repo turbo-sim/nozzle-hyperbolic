@@ -1,5 +1,11 @@
 # Equations defining the CO2 reference
 
+The reusable smooth-path, choking and shock algorithms are implemented in
+[`density_eos.py`](../../src/nozzle_hyperbolic/models/euler_nozzle/analytical/density_eos.py).
+The benchmark supplies its geometry and bounded JAXProp bicubic EOS through
+[`scripts/geometry.py`](scripts/geometry.py) and
+[`scripts/thermodynamics.py`](scripts/thermodynamics.py).
+
 ## Model and exactness
 
 Assume steady, inviscid, adiabatic quasi-one-dimensional flow in a stationary
@@ -69,7 +75,7 @@ Euler equations with closure $\rho(p,h)$. Its derivatives are computed by JAX
 automatic differentiation of the density interpolant, not by interpolating
 JAXProp's stored derivative properties. In a consistent EOS the two speeds
 agree. `M_euler` is used for branch/admissibility checks; `M_table` is also saved
-and plotted. A later FVM comparison that uses independently interpolated
+and plotted. An FVM comparison that uses independently interpolated
 acoustics must account for this distinction.
 
 ## Steady conservation laws
@@ -260,8 +266,8 @@ $\max|a_{\rm table}/a_{\rm Euler}-1|$ without silently asserting that these
 interpolated properties satisfy exact identities. Table-generation success
 must be 10000/10000 when building a fresh table; relevant node/coefficient
 arrays must be finite. Saved table hashes and installed package versions
-identify the baseline. No `src/` changes or package dependency changes are
-needed; before/after source manifests verify this for each execution.
+identify the baseline. Hashes of the case definitions and reference scripts
+identify the implementation used to generate the results.
 
 ## Interpretation and sources
 

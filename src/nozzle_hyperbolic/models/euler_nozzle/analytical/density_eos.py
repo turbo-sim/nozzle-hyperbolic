@@ -1,35 +1,32 @@
-"""Continuous quasi-1D Euler reference: pressure-coordinate ODE and scalar roots.
+"""Continuous density-EOS nozzle references, independent of FVM operators.
 
-No finite-volume grid, flux, time integrator or production solver is used.
+The smooth path integrates dh/dp=1/rho. Choking is a mass-flux maximum;
+normal shocks satisfy Rankine-Hugoniot, and an outer pressure root locates
+an internal shock. This is a numerical semi-analytic reference, not a
+closed-form solution or an FVM discretization.
+
+The caller supplies an EOS and a nozzle geometry; this module owns no fluid,
+table construction, cache, physical case, plotting or solver initialization.
+The geometry has its throat at x=0, with inlet x_in<0 and exit x_out>0.
+The EOS must expose bounds through settings, check(h,p), scalar rho(h,p),
+and vectorized state(h,p). States contain p, h, rho, s, a_euler, a_table,
+and inverse_a2. a_euler is the acoustic speed of the density EOS;
+a_table is an independent acoustic diagnostic. Other fields pass through.
+
+A supported branch has positive forward flow, one interior choking maximum,
+monotone mass-flux limbs and one admissible compressive shock. An equilibrium
+two-phase EOS is usable when these checks hold. Nonclassical/multiple-choking
+flows require a different branch construction. EOS implementations enforce
+bounds and physical admissibility. No backend fallback is supplied here.
 """
 
-from dataclasses import dataclass
 import numpy as np
 from scipy.integrate import solve_ivp
 from scipy.optimize import brentq
 
 
-@dataclass(frozen=True)
-class Nozzle:
-    x_in: float = -0.03201
-    x_out: float = 0.06636
-    throat_radius: float = 0.0015
-    inlet_ratio: float = 17.1
-    exit_ratio: float = 1.69
-
-    @property
-    def At(self):
-        return np.pi * self.throat_radius**2
-
-    def area(self, x):
-        x = np.asarray(x)
-        return self.At * np.where(x < 0, 1 + (self.inlet_ratio - 1) * (x / self.x_in)**2,
-                                 1 + (self.exit_ratio - 1) * (x / self.x_out)**2)
-
-    def derivative(self, x):
-        x = np.asarray(x)
-        return self.At * np.where(x < 0, 2 * (self.inlet_ratio - 1) * x / self.x_in**2,
-                                 2 * (self.exit_ratio - 1) * x / self.x_out**2)
+__all__ = ["SmoothPath", "normal_shock", "downstream_exit",
+           "solve_shock_location", "sample_profile"]
 
 
 class SmoothPath:
