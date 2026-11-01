@@ -5,8 +5,9 @@ All development work is grouped under this single directory:
 - [alberto/](alberto/README.md): legacy research drivers, settings, sensitivity
   studies and shared helpers. Its [execution audit](alberto/RUN_REPORT.md)
   records the previous run results and their limitations.
-- [roe_method/](roe_method/README.md): final general-EOS Roe formulation,
-  verification evidence and reproducible four-flux benchmark clients.
+- [flux_methods/](flux_methods/README.md): production Stadtke corrections,
+  Osher path-quadrature variants and the general-EOS Roe study, with theory,
+  controlled verification and offline Plotly reports.
 - [roberto/](roberto/README.md): current Euler verification examples, numerical
   fixes, Newton/PTC, implicit-integration and boundary-condition studies.
 

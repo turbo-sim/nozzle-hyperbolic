@@ -6,12 +6,15 @@ import base64
 import gzip
 from importlib import import_module
 from hashlib import sha256
+from html import escape
 from io import BytesIO
 import json
 import math
 from pathlib import Path
 import re
 import zipfile
+
+from .presentation import theme_css, theme_script, render_document, math_runtime
 
 SHARED = Path(__file__).resolve().parent
 STUDIES = SHARED.parent
@@ -278,17 +281,30 @@ def build(study, summary_path):
                 "original_evidence_manifest.json": dumps(payload["evidence_manifest"]).encode("utf-8"),
                 "audit_summaries.json": dumps(payload["audits"]).encode("utf-8")}
     download.update({name: blob for name, blob in originals.items() if name.startswith(("documents/", "supplemental/"))})
-    values = {"CSS": (ASSETS / "report.css").read_text(encoding="utf-8"), "PAYLOAD": dumps(payload),
+    plotly_license=(ASSETS/"vendor/PLOTLY_LICENSE.txt").read_bytes()
+    download["licenses/PLOTLY_LICENSE.txt"]=plotly_license
+    download["licenses/MATHJAX_LICENSE.txt"]=(ASSETS/"vendor/MATHJAX_LICENSE.txt").read_bytes()
+    theory=render_document(documents.get("THEORY.md",""),prefix=study+"-theory")
+    readme=render_document(documents.get("README.md",""),prefix=study+"-protocol")
+    index="".join(f'<a class="level-{item["level"]}" href="#{escape(item["id"],quote=True)}">{escape(item["text"])}</a>'
+                  for item in theory["headings"] if item["level"] in (2,3))
+    values = {"TITLE":escape(profile["title"]),"THEME_CSS":theme_css(),"THEME_SCRIPT":theme_script(),
+              "MATH_RUNTIME":math_runtime(),"THEORY_HTML":theory["html"],"THEORY_TOC":index,"README_HTML":readme["html"],
+              "LICENSE_DOWNLOAD":"data:text/plain;charset=utf-8;base64,"+base64.b64encode(plotly_license).decode("ascii"),
+              "CSS": (ASSETS / "report.css").read_text(encoding="utf-8"), "PAYLOAD": dumps(payload),
               "PLOTLY": gzip.decompress((ASSETS / "vendor/plotly-2.35.2.min.js.gz").read_bytes()).decode("utf-8"),
               "APPLICATION": (ASSETS / "report_app.js").read_text(encoding="utf-8"), "ARCHIVE": archive(download)}
     template = (ASSETS / "report_template.html").read_text(encoding="utf-8")
-    html = re.sub(r"\{\{(CSS|PAYLOAD|PLOTLY|APPLICATION|ARCHIVE)\}\}", lambda m: values[m[1]], template)
+    html = re.sub(r"\{\{([A-Z_]+)\}\}", lambda m: values[m[1]], template)
     checks = {"one_case_dropdown": html.count('<select id="case">') == 1,
               "no_static_figures": not re.search(r"<img\b|<figure\b", template, re.I),
               "offline": not re.search(r"<(?:script|link)[^>]+(?:src|href)\s*=", template, re.I),
               "four_cases": set(payload["cases"]) == set(CASES),
               "valid_row_scope": all(r["case"] in CASES and r["variant"] in ids for r in records),
               "no_stale_audits": not any(r["stale_audit"] for r in records),
+              "common_theme":'id="report-theme-css"' in html and 'id="report-theme-runtime"' in html,
+              "rendered_theory":bool(theory["headings"]) and 'id="mathjax-runtime"' in html and 'class="math-display"' in theory["html"],
+              "accessible_navigation":template.count('role="tablist"')==2 and all('>'+label+'</button>' in template for label in ("Overview","Case explorer","Theory","Protocol &amp; evidence")),
               "supplemental_originals_sha_bound": all(sha256(download[name]).hexdigest() == item["sha256"]
                                                        for name, item in supplemental.items()),
               "archive_exact": True}
@@ -316,7 +332,7 @@ def markdown(payload):
               if payload.get("supplemental_evidence") else
               "This report embeds current saved-row Operator evaluations. No separate production-test or matrix-postprocessing supplement is included."), "",
              "This is numerical verification, not a performance benchmark. Compilation-inclusive elapsed diagnostics do not establish a cost ranking. Residual/CFL plots show actual accepted histories; accepted steps, rejected attempts and all Newton corrections are separate work measures.", "",
-             "The HTML embeds all plotted values, clean audit summaries, manifests and Plotly. The download contains current-facing derived data and documents; immutable historical raw records stay archive-only. Structural and executable application audits are separate from browser rendering.", ""]
+             "The HTML embeds all plotted values, rendered mathematical notes, clean audit summaries, manifests, Plotly and MathJax. The download contains current-facing derived data and documents; immutable historical raw records stay archive-only. Structural and executable application audits are separate from browser rendering.", ""]
     lines += [payload["report_profile"].get("rendering_note","Browser rendering is unverified."), ""]
     if payload.get("epoch_recovery", {}).get("statement"):
         lines += [payload["epoch_recovery"]["statement"], ""]
@@ -338,7 +354,7 @@ def main():
     source = args.input or study_root / "outputs/verification/summary.json"
     output = args.output or study_root / "REPORT.html"
     html, payload, audit = build(args.study, source)
-    output.write_text(html, encoding="utf-8")
+    output.write_text(html, encoding="utf-8", newline="\n")
     (study_root / "REPORT.md").write_text(markdown(payload), encoding="utf-8")
     audit.update(report_sha256=sha256(output.read_bytes()).hexdigest(), bytes=output.stat().st_size)
     (source.parent / "report_audit.json").write_text(json.dumps(audit, indent=2), encoding="utf-8")

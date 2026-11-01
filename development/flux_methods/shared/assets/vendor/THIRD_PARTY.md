@@ -9,3 +9,13 @@ The decompressed bundle SHA-256 is
 The report generator checks that digest and embeds both the runtime and license.
 Reading a generated report requires no server, CDN, fonts, or network requests.
 Plotly numerical arrays and the campaign evidence are embedded in the HTML.
+
+## Offline mathematics
+
+The theory pages also vendor the existing MathJax 3.2.2 TeX-to-SVG bundle
+from the repository architecture viewer. The verified unmodified runtime is
+`mathjax-3.2.2-tex-svg.js.gz`; its provenance and decompressed SHA-256 are in
+[mathjax-source.json](mathjax-source.json). The Apache 2.0 license is preserved
+in [MATHJAX_LICENSE.txt](MATHJAX_LICENSE.txt) and embedded in generated HTML.
+The SVG font cache is local and no external font, autoload extension or menu
+is required to typeset the supplied equations.

@@ -1,10 +1,106 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Flux-method verification</title><style>{{CSS}}</style></head><body>
-<header><div><p class="eyebrow">PRODUCTION FLUXES · INDEPENDENT SAVED-DATA STUDY</p><h1 id="title"></h1><p id="lead"></p></div><button id="theme">Theme</button></header>
-<div class="toolbar"><label>Physical case<select id="case"></select></label><label>Cells<select id="cells"></select></label><label>Reconstruction<select id="reconstruction"></select></label><label>Configurations (Ctrl/Cmd to select)<select id="variant" multiple size="4"></select></label><label>Alignment<select id="alignment"></select></label><label>Range<select id="range"><option value="domain">Full domain</option><option value="shock">Shock window</option></select></label></div>
-<nav><button data-page="profiles" class="active">Profiles</button><button data-page="convergence">Convergence &amp; work</button><button data-page="refinement">Accuracy &amp; refinement</button><button data-page="theory">Theory &amp; evidence</button></nav>
-<main><p id="progress" class="notice"></p><p id="selection"></p>
-<section id="profiles" class="active"><div id="findings" class="card"></div><div class="plot-grid"><div id="field0" class="plot"></div><div id="field1" class="plot"></div><div id="field2" class="plot"></div><div id="field3" class="plot"></div></div><div class="card"><h2>Selected saved states</h2><p>Analytical point branches and conservative cell projections have distinct meanings. Shock smearing, displacement, branch excess and a local extremum are separate diagnostics. Convergence does not establish physical accuracy.</p><div class="scroll"><table><thead><tr><th>Configuration</th><th id="parameterHeader">Parameters</th><th>Outcome</th><th>Accepted</th><th>Rejected</th><th>Newton corrections</th><th>Fresh audit</th><th>Pressure local peak [%]</th><th>Velocity local dip [%]</th><th>h0 relative error</th></tr></thead><tbody id="rows"></tbody></table></div><details><summary>Exact settings, residual checks, errors and provenance</summary><pre id="details"></pre></details></div></section>
-<section id="convergence"><div class="plot-grid"><div id="residual" class="plot"></div><div id="cfl" class="plot"></div></div><div class="card"><h2>Complete nonlinear work</h2><p>Histories are actual accepted trajectories, including the initial sample. Rejected attempts and Newton corrections are separate totals; inner Newton convergence differs from the original spatial-equation stopping test.</p><div id="work" class="plot"></div><p>No matched performance timings are claimed. Compilation-inclusive elapsed diagnostics remain in selected details, separate from convergence work.</p></div></section>
-<section id="refinement"><div class="card"><h2>Analytical accuracy across the grid sequence</h2><label>Saved error metric<select id="errorMetric"></select></label><p>Cell metrics use the analytical conservative finite-volume projection. Point metrics are separately labeled. Circle markers require native success plus a fresh hash-joined audit with passing original/branch checks, source/client/case/cold-state identities and no failed snapshot checks. Crosses mark known failures; open diamonds mark incomplete audits. All saved points remain visible. Gauss-point count describes flux quadrature, not spatial reconstruction order.</p><div id="refinementPlot" class="plot"></div></div></section>
-<section id="theory"><div class="card"><h2 id="theoryHeading"></h2><p id="theoryLead"></p><div id="equation" class="equation"></div><div id="documents"></div></div><div class="card"><h2>Independent checks and provenance</h2><p>Recorded execution identities, preserved numeric payloads and current evaluation identities are separate. A configuration/API migration is not a new cold-solve campaign. Origin hashes and explicit evaluation checks govern which evidence can be promoted.</p><p>Each saved row is checked against its summary SHA-256. Fresh independent audits are joined by path and exact row hash. Independence means rebuilt production Operators and independent stopping reductions, not a second numerical-flux implementation. Original equations, boundary/global conservation, branch selection and analytical error remain distinct. False flags and incomplete attempts remain visible.</p><p id="epochRecovery"></p><p id="focusedTests"></p><pre id="auditSummary"></pre><details><summary>Supplemental production and saved-data evidence</summary><p>Any listed supplements are production tests, API checks or matrix postprocessing, not fresh saved-row Operator evaluations. Listed original supplemental JSONs are included in the download with their displayed filenames and hashes.</p><pre id="supplemental"></pre></details><p><a class="download" download="flux_study_report_data.zip" href="data:application/zip;base64,{{ARCHIVE}}">Download compact report data</a></p><details><summary>Original evidence manifest</summary><pre id="manifest"></pre></details><p>The report embeds Plotly, plotted values, styles, scripts and compact audits. It needs no network or server. The download contains plot data, audit summaries, documents and original-file hashes; historical raw records remain immutable in the ignored archive; the public download contains only derived data and current-facing audit summaries. Presentation code imports no numerical solver. Browser rendering is unverified; structural and executable application audits are separate evidence.</p></div></section>
-</main><script id="payload" type="application/json">{{PAYLOAD}}</script><script>{{PLOTLY}}</script><script>{{APPLICATION}}</script></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; worker-src blob:; base-uri 'none'; form-action 'none'">
+<meta name="description" content="Standalone flux-method verification: analytical profiles, convergence, accuracy, theory and source-bound evidence.">
+<title>{{TITLE}}</title>
+<style id="report-theme-css">{{THEME_CSS}}</style>
+<style id="report-study-css">{{CSS}}</style>
+{{MATH_RUNTIME}}
+<script id="report-theme-runtime">{{THEME_SCRIPT}}</script>
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to report</a>
+<header class="topbar">
+  <div class="brand" aria-hidden="true">NH</div>
+  <div class="identity"><p class="eyebrow">NOZZLE-HYPERBOLIC / FLUX METHODS</p><h1 id="title"></h1><p id="lead"></p></div>
+  <div class="header-tools">
+    <span class="offline-pill"><span></span>Offline report</span>
+    <label class="theme-control"><span>Theme</span><select id="report-theme" aria-label="Color theme"><option value="auto">Automatic</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
+    <button id="download-toggle" class="button" type="button" aria-expanded="false" aria-controls="download-menu">Downloads <span aria-hidden="true">&#8595;</span></button>
+    <div id="download-menu" class="download-menu" hidden>
+      <a id="evidence-download" download="flux_study_report_data.zip" href="data:application/zip;base64,{{ARCHIVE}}">Report data &amp; evidence &middot; ZIP</a>
+      <button id="download-json" type="button">Plotted data &middot; JSON</button>
+      <button id="download-csv" type="button">Selected states &middot; CSV</button>
+      <a download="PLOTLY_LICENSE.txt" href="{{LICENSE_DOWNLOAD}}">Plotly license &middot; MIT</a>
+    </div>
+  </div>
+</header>
+<nav id="report-tabs" class="page-tabs" data-report-tabs role="tablist" aria-label="Report pages">
+  <button id="tab-overview" role="tab" aria-controls="page-overview" aria-selected="true" data-page="overview">Overview</button>
+  <button id="tab-case" role="tab" aria-controls="page-case" aria-selected="false" tabindex="-1" data-page="case">Case explorer</button>
+  <button id="tab-theory" role="tab" aria-controls="page-theory" aria-selected="false" tabindex="-1" data-page="theory">Theory</button>
+  <button id="tab-protocol" role="tab" aria-controls="page-protocol" aria-selected="false" tabindex="-1" data-page="protocol">Protocol &amp; evidence</button>
+  <span id="campaign-stamp"></span>
+</nav>
+<main id="content" tabindex="-1">
+<p id="progress" class="notice" role="status"></p>
+<section id="page-overview" class="report-page active" role="tabpanel" aria-labelledby="tab-overview">
+  <div class="section-heading"><div><p class="eyebrow">01 / STUDY OVERVIEW</p><h2>Coverage, convergence and accuracy.</h2><p>The saved population, numerical checks and agreement with an analytical solution are separate results. Every retained configuration remains available in the case explorer.</p></div><span id="overview-status" class="status-badge"></span></div>
+  <div id="overview-cards" class="stat-grid"></div>
+  <div id="findings" class="card prose"></div>
+  <div class="chart-grid">
+    <article class="panel plot-panel"><div class="panel-heading"><h3>Recorded coverage by configuration</h3><p>Recorded solves and independently validated saved states. These counts measure coverage, not an analytical accuracy guarantee.</p></div><div id="coverage-plot" class="plot"></div></article>
+    <article class="panel prose scope-panel"><h3>Scope of this evidence</h3><p id="study-scope"></p><p>This is a numerical verification study. Nonlinear work counts and compilation-inclusive elapsed diagnostics do not establish a repeated timing ranking.</p><p>Use Case explorer to compare the original analytical branches, conservative cell projections, accepted residual and CFL histories, and all retained grid errors.</p><button id="open-case" class="button" type="button">Explore a physical case</button></article>
+  </div>
+  <article class="panel table-panel summary-table"><div class="panel-heading"><h3>Configuration coverage</h3><p>The parameter choices below identify the saved experiments. Missing evaluations and failed attempts are counted explicitly.</p></div><div class="table-wrap"><table><thead><tr><th>Configuration</th><th>Parameters</th><th>Recorded</th><th>Converged</th><th>Validated</th><th>Failed checks</th><th>Incomplete checks</th></tr></thead><tbody id="overview-rows"></tbody></table></div></article>
+</section>
+<section id="page-case" class="report-page" role="tabpanel" aria-labelledby="tab-case" hidden>
+  <div class="section-heading"><div><p class="eyebrow">02 / CASE EXPLORER</p><h2>Follow the numerical solution.</h2><p>Select one physical case and compare its face-flux configurations with identical plot conventions. Stored cell representatives and analytical projections retain their distinct meanings.</p></div><span id="case-status" class="model-badge"></span></div>
+  <div class="toolbar panel">
+    <label class="wide-filter">Physical case<select id="case"></select></label>
+    <label>Cells<select id="cells"></select></label>
+    <label>Reconstruction<select id="reconstruction"></select></label>
+    <fieldset class="configurations-filter"><legend>Configurations</legend><div id="configuration-controls" class="configuration-choices"></div><div class="choice-tools"><button id="config-all" type="button">All</button><button id="config-none" type="button">None</button><span id="configuration-help">Select the configurations to compare.</span></div><select id="variant" multiple size="4" hidden aria-hidden="true" tabindex="-1"></select></fieldset>
+    <label>Alignment<select id="alignment"></select></label>
+    <label>Profile range<select id="range"><option value="domain">Full domain</option><option value="shock">Shock window</option></select></label>
+  </div>
+  <p id="selection"></p>
+  <p id="empty-selection" class="notice warning" hidden>No saved states match this selection. Select at least one available configuration.</p>
+  <nav id="case-tabs" class="case-tabs" data-report-tabs role="tablist" aria-label="Case views">
+    <button id="case-tab-profiles" role="tab" aria-controls="profiles" aria-selected="true" data-page="profiles">Profiles</button>
+    <button id="case-tab-convergence" role="tab" aria-controls="convergence" aria-selected="false" tabindex="-1" data-page="convergence">Convergence &amp; work</button>
+    <button id="case-tab-refinement" role="tab" aria-controls="refinement" aria-selected="false" tabindex="-1" data-page="refinement">Accuracy &amp; refinement</button>
+  </nav>
+  <section id="profiles" class="case-page active" role="tabpanel" aria-labelledby="case-tab-profiles">
+    <div class="plot-grid">
+      <article class="panel plot-panel"><div id="field0" class="plot field-plot"></div></article><article class="panel plot-panel"><div id="field1" class="plot field-plot"></div></article>
+      <article class="panel plot-panel"><div id="field2" class="plot field-plot"></div></article><article class="panel plot-panel"><div id="field3" class="plot field-plot"></div></article>
+    </div>
+    <article class="panel table-panel"><div class="panel-heading"><h3>Selected saved states</h3><p>Analytical point branches and conservative cell projections have distinct meanings. Shock smearing, displacement, branch excess and a local extremum are separate diagnostics.</p></div><div class="table-wrap"><table><thead><tr><th>Configuration</th><th id="parameterHeader">Parameters</th><th>Outcome</th><th>Accepted</th><th>Rejected</th><th>Newton corrections</th><th>Fresh audit</th><th>Pressure local peak [%]</th><th>Velocity local dip [%]</th><th>h0 relative error</th></tr></thead><tbody id="rows"></tbody></table></div></article>
+    <details class="panel evidence-panel"><summary>Exact settings, residual checks, errors and provenance</summary><pre id="details"></pre></details>
+  </section>
+  <section id="convergence" class="case-page" role="tabpanel" aria-labelledby="case-tab-convergence" hidden>
+    <div class="plot-grid"><article class="panel plot-panel"><div id="residual" class="plot"></div></article><article class="panel plot-panel"><div id="cfl" class="plot"></div></article></div>
+    <article class="panel plot-panel"><div class="panel-heading"><h3>Complete nonlinear work</h3><p>Actual accepted trajectories include the initial sample. Rejected attempts and Newton corrections are separate totals; inner Newton convergence differs from the original spatial-equation stopping test.</p></div><div id="work" class="plot"></div><p class="plot-caption">No matched performance timings are claimed. Compilation-inclusive elapsed diagnostics remain in selected details.</p></article>
+  </section>
+  <section id="refinement" class="case-page" role="tabpanel" aria-labelledby="case-tab-refinement" hidden>
+    <article class="panel plot-panel"><div class="panel-heading"><h3>Analytical accuracy across the grid sequence</h3><p>Cell metrics use the analytical conservative finite-volume projection. Point metrics remain separately labeled. All saved points are retained.</p></div><div class="filterbar"><label class="wide-filter">Saved error metric<select id="errorMetric"></select></label></div><div id="refinementPlot" class="plot"></div><div class="plot-caption"><span class="legend-key"><span>&#9679; Native success + validated fresh audit</span><span>&#215; Known failure or identity mismatch</span><span>&#9671; Incomplete audit</span></span>Circle markers require original/branch checks, source/client/case/cold-state identities and no failed aggregate or snapshot checks. Quadrature count is independent of spatial reconstruction order.</div></article>
+  </section>
+</section>
+<section id="page-theory" class="report-page" role="tabpanel" aria-labelledby="tab-theory" hidden>
+  <div class="section-heading"><div><p class="eyebrow">03 / MATHEMATICAL FORMULATION</p><h2 id="theoryHeading"></h2><p id="theoryLead"></p></div></div>
+  <nav class="panel document-index" aria-label="Theory sections">{{THEORY_TOC}}</nav>
+  <article class="panel document-card math-content"><div id="equation" class="equation"></div>{{THEORY_HTML}}</article>
+  <details class="panel evidence-panel"><summary>Original theory Markdown</summary><pre id="theory-source"></pre></details>
+</section>
+<section id="page-protocol" class="report-page" role="tabpanel" aria-labelledby="tab-protocol" hidden>
+  <div class="section-heading"><div><p class="eyebrow">04 / PROTOCOL &amp; EVIDENCE</p><h2>Interpret and reproduce the evidence.</h2><p>Recorded execution identities, numerical payloads and evaluation identities remain distinct. A configuration/API migration is not a new cold-solve campaign.</p></div></div>
+  <div class="protocol-grid"><article class="panel prose"><h3>Independent numerical checks</h3><p>Each saved row is checked against its summary SHA-256. Fresh independent audits are joined by path and exact row hash. Independence means rebuilt production Operators and independent stopping reductions, not a second numerical-flux implementation.</p><p>Original equations, boundary/global conservation, branch selection and analytical error remain separate. False flags and incomplete attempts remain visible.</p></article><article class="panel prose"><h3>Recorded execution and evaluation scope</h3><p id="epochRecovery"></p><p id="focusedTests"></p><p>The renderer reads saved data without advancing a flow. Historical raw records stay in the immutable archive. Public downloads contain the plotted derived data, current-facing audit summaries, exact documents and evidence hashes.</p></article></div>
+  <article class="panel document-card math-content"><h3>Study protocol and commands</h3>{{README_HTML}}</article>
+  <details class="panel evidence-panel"><summary>Population, independent audit summaries and source fingerprints</summary><pre id="auditSummary"></pre></details>
+  <details class="panel evidence-panel"><summary>Supplemental production and saved-data evidence</summary><div class="prose"><p>Any listed supplements are production tests, API checks or matrix postprocessing, not fresh saved-row Operator evaluations. Original supplemental JSONs are included in the download with their displayed filenames and hashes.</p></div><pre id="supplemental"></pre></details>
+  <details class="panel evidence-panel"><summary>Original evidence manifest</summary><pre id="manifest"></pre></details>
+  <article class="panel prose"><h3>Portable offline artifact</h3><p>Plotly, MathJax, plotted values, styles, scripts and compact audits are embedded. This HTML needs no network or server. The data ZIP contains plotted data, documents, audit summaries and original-file hashes. Numerical checks, structural/application audits and a browser preview are separate evidence.</p><button id="download-evidence" class="button" type="button">Download report data &amp; evidence</button></article>
+</section>
+</main>
+<footer><span>nozzle-hyperbolic &middot; Flux-method verification studies</span><span>Embedded Plotly and mathematics &middot; Offline HTML</span></footer>
+<p id="announcement" class="sr-only" aria-live="polite" aria-atomic="true"></p>
+<script id="payload" type="application/json">{{PAYLOAD}}</script>
+<script id="plotly-runtime">{{PLOTLY}}</script>
+<script id="report-app">{{APPLICATION}}</script>
+</body>
+</html>
