@@ -1,5 +1,8 @@
 # Development workspace
 
+For experiment layout, verification, timing and report packaging, follow the
+[numerical study conventions](../docs/numerical_studies.md).
+
 All development work is grouped under this single directory:
 
 - [alberto/](alberto/README.md): legacy research drivers, settings, sensitivity

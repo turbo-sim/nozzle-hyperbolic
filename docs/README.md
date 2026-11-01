@@ -12,6 +12,7 @@ Numerical source remains the authority for defaults and callback signatures.
 | [Residual monitoring](residual_monitoring.md) | Fixed-scale spatial, boundary and global checks, stopping criteria and physical monitors |
 | [Migration](migration.md) | Breaking changes from the model-specific factories to the shared FVM API |
 | [Analytical references](analytical_references.md) | Reference assumptions, invariants, source attribution and conservative cell projections |
+| [Numerical studies](numerical_studies.md) | Controlled experiments, fair timing, provenance, figures and standalone report conventions |
 
 Other material has an explicit role:
 
