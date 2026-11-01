@@ -1,0 +1,10 @@
+{
+  "role": "pre-final interrupted check; not a completed test result",
+  "session_id": 63352,
+  "interrupted": true,
+  "exit_code": 1,
+  "reason": "Superseded by explicit user request to remove the characteristic public flux ID and add numerical-viscosity CFL guards",
+  "pytest_results_emitted": false,
+  "completed_test_count": null,
+  "note": "No pytest log or JUnit file had been emitted before interruption; subsequent process inventory found no Python worker"
+}

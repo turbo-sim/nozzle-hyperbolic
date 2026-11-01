@@ -31,38 +31,39 @@ entry points; they do not automatically acquire the shared correction flags or
 Osher path support. The two-fluid implementation has its own model-specific
 FVS/eigenstructure and has not been ported or benchmarked by these studies.
 
-## Reports and controlled studies
+The new Stadtke and Osher studies request only nozzle/annular shocks at 35%
+and 70%, on 50/100/200/400 cells, both reconstructions and four variants per
+study. Each profile requests 128 independent cold solves. Actual completion,
+failures and fresh original-equation checks are recorded in each report;
+requested coverage alone is not evidence of completed runs. Compile-inclusive
+verification durations are not repeated performance measurements.
 
-- [Stadtke](stadtke/README.md): original FVS, each independent custom correction
-  and both corrections on four nozzle/annular shock cases and both reconstructions.
-- [Osher](osher/README.md): one configurable flux with explicit quadrature-point
-  and integration parameters, using the same four shock cases.
-- [Roe](roe/README.md): the broader steady suite, general-EOS matrix checks, Sod
-  transients and retained real-gas flow attempts.
-
-Each report records its actual coverage, failures, analytical accuracy and
-execution/evaluation identities. A configured population is not a completion
-claim, and verification durations do not establish matched timing rankings.
-
-The [common presentation guide](shared/REPORT_DESIGN.md) describes the shared
-Overview / Case explorer / Theory / Protocol & evidence layout, offline assets,
-themes and executable presentation audits. The method-specific numerical data
-and acceptance criteria remain distinct.
-
-Shared [execution](shared/run.py), [saved-state auditing](shared/audit.py) and
-[report generation](shared/report.py) use production code without importing
-older prototypes. For presentation-only rebuilding from saved data:
-
-```powershell
-poetry run python -B -m development.flux_methods.shared.report --study stadtke
-poetry run python -B -m development.flux_methods.shared.report --study osher
-poetry run python -B -m development.flux_methods.roe.scripts.report --presentation-only
-```
-
-The generated standalone HTML files live at each study root and embed their
-rendering resources and offered downloads. Raw campaign outputs retain their
-recorded identities; report generation does not advance a numerical solution.
+Shared [execution](shared/run.py), [fresh auditing](shared/audit.py) and
+[report generation](shared/report.py) have no runtime dependency on the older
+shock-spike prototype. Each campaign preserves settings, source/client byte
+snapshots, physical-case fingerprints, saved states, histories and raw balances.
+Reports are standalone offline HTML with Plotly figures and a case dropdown.
+The [common presentation guide](shared/REPORT_DESIGN.md) documents the shared
+Overview / Case explorer / Theory / Protocol & evidence structure, theme,
+accessible controls and saved-data-only rebuild commands.
 
 The retired shock-spike prototype's contents, inventory and backup archive have
 been removed. The maintained Stadtke study retains the original method's spike
 behavior and comparisons with the custom corrections.
+
+The completed [delivery check](shared/evidence/delivery_audit.json) joins
+256 native converged results and 256 fresh audits to their recorded source
+epoch. A concurrent Roe edit is preserved; its guarded Osher recovery used
+byte-verified isolated source files, with the original 115 rows unchanged.
+Accuracy tradeoffs remain explicit in each report. The delivery record predates
+the requested removal of the prototype archive; its archival checks describe
+that earlier state.
+
+The [historical delivery audit](shared/audit_delivery.py) joins saved campaign
+identities and production-test evidence without removing files. It requires
+the original pre-migration campaign schemas, source-isolation records and test
+artifacts. These prerequisites are not all retained in the current checkout,
+and the current canonical campaign views use a newer schema. The saved delivery
+record documents its recorded epoch; it is not a fresh validation of today's
+checkout. Failed numerical runs must remain explicit and agree with their fresh
+checks; a valid audit does not turn a failed solve into a converged result.

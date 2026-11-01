@@ -1,0 +1,7 @@
+{
+  "source_files": {
+    "metrics.py": "9965a6058a3293effef6148e0b906f10830f49585362d059e08de70818b62142",
+    "run.py": "facc49f0415a2d7d84c3c2f3780afad35ec2da83d81395d698afedd0cc9191f3"
+  },
+  "scope": "Study assessment functions copied by AST; imports are now independent. No physics setup or reference formula was replaced. Nonpositive shock thickness is unavailable instead of an enormous reciprocal."
+}

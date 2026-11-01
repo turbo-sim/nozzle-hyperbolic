@@ -1,0 +1,58 @@
+{
+  "role": "Read-only static review of an external production source epoch change; no package imported or solver executed",
+  "old_snapshot_path": "development/flux_methods/osher/outputs/verification/implementation_snapshot/src/nozzle_hyperbolic/models/euler_roe.py",
+  "current_path": "src/nozzle_hyperbolic/models/euler_roe.py",
+  "old_sha256": "00e440ffbd31b206879dfe3067b2efc4df6b7b4ef4fe86f602ff698b45ac8d15",
+  "current_sha256": "5ed5a9c34227f97a5a6155aa10101f5e5bbc8b4d2f683037e7c4f690572c524b",
+  "frozen_workspace_sha256": {
+    "C:\\Users\\roagr\\git_projects\\frozen_flux_ac212542a979\\nozzle_hyperbolic\\models\\euler_roe.py": "00e440ffbd31b206879dfe3067b2efc4df6b7b4ef4fe86f602ff698b45ac8d15",
+    "C:\\Users\\roagr\\git_projects\\frozen_flux_ac212542a979\\src\\nozzle_hyperbolic\\models\\euler_roe.py": "00e440ffbd31b206879dfe3067b2efc4df6b7b4ef4fe86f602ff698b45ac8d15"
+  },
+  "source_files_changed_since_recorded_full_tests": [
+    "src/nozzle_hyperbolic/models/euler_roe.py"
+  ],
+  "modified_functions": [
+    "roe_metadata",
+    "_centered_secant",
+    "euler_roe_data"
+  ],
+  "ast_body_matches_after_removing_declared_audit_and_diagnostic_changes": {
+    "roe_metadata": true,
+    "_centered_secant": true,
+    "euler_roe_data": true
+  },
+  "numerical_change": "Roe small-jump admissibility now audits pressure_defect minus the intentional (1-blend)*provisional_defect remainder, instead of requiring pressure_defect itself to be roundoff-small. Roe slopes/matrix/projectors/speeds/width arithmetic is unchanged; accepted Roe faces and solve trajectories can change.",
+  "metadata_change": "roe_metadata adds secant_audit=regularization_remainder_v1; both Euler constructors call it regardless of selected flux, so the model metadata changes for all constructed instances.",
+  "additional_diagnostics": [
+    "pressure_secant_expected_defect",
+    "pressure_secant_audit_error",
+    "secant_blend",
+    "secant_audit_tolerance"
+  ],
+  "call_paths": {
+    "metadata": [
+      "euler_nozzle/model.py:94",
+      "euler_annular/model.py:138"
+    ],
+    "roe_data": [
+      "euler_nozzle/model.py:235-244",
+      "euler_annular/model.py:273-284"
+    ],
+    "shared_selected_roe": [
+      "solvers/fvm/operator.py:147",
+      "solvers/fvm/operator.py:284",
+      "solvers/fvm/operator.py:408",
+      "solvers/fvm/operator.py:491",
+      "solvers/fvm/operator.py:650",
+      "solvers/fvm/operator.py:670"
+    ],
+    "non_roe": "Stadtke calls face_characteristics; Osher calls coincident face_characteristics along its path. Neither calls euler_roe_data. Rusanov/HLL use physical endpoint fluxes and signal bounds."
+  },
+  "recorded_full_suite": {
+    "passed": 503,
+    "xfailed": 3,
+    "applies_to": "Exact production_tests_source_before/summary snapshot including old Roe digest above",
+    "current_checkout_validated": false
+  },
+  "scope": "This is a real Roe validity/metadata change, not proof of harmlessness or current-tree test success. The unconditional source fingerprint guard correctly rejected mixing epochs. Source was not edited or restored by this review."
+}
