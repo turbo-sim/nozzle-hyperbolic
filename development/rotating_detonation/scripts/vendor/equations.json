@@ -1,0 +1,12 @@
+{
+  "normal_geometry": "b(s)=\\frac{2\\left[R_t-r(s)\\right]}{x'(s)},\\qquad A(s)=2\\pi r(s)b(s)",
+  "area_ratio": "\\mathcal A=\\frac{A_{\\mathrm{out}}}{A_{\\mathrm{in}}}=\\frac{1-\\eta_{\\mathrm{out}}^2}{1-\\eta_{\\mathrm{in}}^2},\\qquad \\eta_{\\mathrm{out}}=\\sqrt{1-\\mathcal A\\left(1-\\eta_{\\mathrm{in}}^2\\right)}",
+  "angle_forcing": "\\alpha(t)=\\bar\\alpha+\\Delta\\alpha\\sin(2\\pi f t),\\qquad p_0=\\mathrm{constant},\\quad T_0=\\mathrm{constant}",
+  "reservoir_inlet": "h+\\frac12\\left[v_m^2+\\left(\\frac{\\ell}{r}\\right)^2\\right]=h_0,\\qquad s=s_0,\\qquad v_\\theta\\cos\\alpha-v_m\\sin\\alpha=0",
+  "normal_characteristics": "M_m=M\\cos\\alpha,\\qquad \\lambda=\\left(v_m-a,\\ v_m,\\ v_m,\\ v_m+a\\right)",
+  "pressure_outlet": "p_b=p_{\\mathrm{exit}},\\qquad p_b-p_{\\mathrm{ext}}+\\rho_{\\mathrm{int}}a_{\\mathrm{int}}\\left(v_{m,b}-v_{m,\\mathrm{ext}}\\right)=0",
+  "mass_inventory": "\\frac{\\mathrm d}{\\mathrm dt}\\int_\\Omega\\rho\\,\\mathrm dV=\\dot m_{\\mathrm{in}}-\\dot m_{\\mathrm{out}}",
+  "time_average": "\\left\\langle q\\right\\rangle(s)=\\frac{1}{NT}\\int_{t_a}^{t_a+NT}q(s,t)\\,\\mathrm dt,\\qquad T=\\frac1f",
+  "periodic_rms": "\\epsilon_k=\\max_j\\left[\\frac{1}{n_xn_\\phi}\\sum_{i,\\phi}\\left(\\frac{z_{j,i,\\phi}^{(k)}-z_{j,i,\\phi}^{(k-1)}}{S_j}\\right)^2\\right]^{1/2}",
+  "acoustic_split": "w_\\pm=\\frac12\\left(p'\\pm\\bar\\rho\\,\\bar a\\,v_m'\\right),\\qquad \\omega=2\\pi f"
+}

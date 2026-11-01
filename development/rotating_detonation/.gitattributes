@@ -1,0 +1,3 @@
+# Preserve generated reports and hash-verified vendor assets byte for byte.
+REPORT.html binary
+scripts/vendor/* -text

@@ -4,31 +4,38 @@ geometry:
   expansion_length_m: 0.20
   junction_blend_m: 0.02
   inlet_hub_tip: 0.8
-  outlet_hub_tip: 0.7
-fluid: Air # calorically perfect gas, frozen composition, adiabatic inviscid walls
+  outlet_area_ratio: 2.0
+  extension_length_m: 0.10
+fluid: Air
 inlet:
   stagnation_temperature_K: 1000.0
   stagnation_pressure_Pa: 2000000.0
-  mach: 1.2 # total speed / sound speed
-  angle_deg: 30.0 # measured from the meridional direction
+  mach: 0.95 # Design guide only; the fixed backpressure determines actual Mach.
+  angle_deg: 45.0
 outlet:
-  pressure_Pa: 10000.0
-  regime: auto
+  kind: pressure
+  pressure_Pa: 1268451.145800547 # Higher constant backpressure; total Mach responds freely.
 forcing:
   frequency_Hz: 3500.0
-  mach_amplitude: 0.3
-  angle_amplitude_deg: 10.0
-  cycles: 8
+  angle_amplitude_deg: 5.0 # Actual inlet angle varies 40--50 degrees.
   frames_per_cycle: 24
+  minimum_cycles: 40
+  maximum_cycles: 100
+  periodic_tolerance: 0.001
+  periodic_maximum_tolerance: 0.005
+  inventory_tolerance: 0.0001
+  comparison_lag_cycles: 10
+  consecutive_cycles: 5
+  collection_cycles: 10
+  refinement_cycles: 10
 numerics:
   flux: hll
   reconstruction: muscl_van_leer
-  steady_grids: [50, 100, 200]
-  transient_cells: 200
-  explicit_cfl: 0.4
-  implicit_transient_cfl: 2.0
-  max_steady_steps: 20000
-  max_transient_steps: 100000
-benchmark:
-  excluded_complete_solves: 1
-  measured_repeats: 10
+  steady_grids: [67, 133, 267]
+  transient_cells: 267
+  rk3_cfl: 0.4
+  rk3_refined_cfl: 0.2
+  max_steady_steps: 6000
+  max_transient_steps: 1000000
+  newton_iterations: 15
+  newton_backtracking: true

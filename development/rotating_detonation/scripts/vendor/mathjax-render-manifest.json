@@ -1,0 +1,64 @@
+{
+  "engine": "MathJax",
+  "version": "3.2.2",
+  "format": "prerendered self-contained SVG, fontCache:none",
+  "source_url": "https://registry.npmjs.org/mathjax-full/-/mathjax-full-3.2.2.tgz",
+  "package_file": "mathjax-full-3.2.2.tgz",
+  "package_sha256": "d8f080d2e4bdfb75284aac34d5eff155002eca47798b1d4e4bde31453e653f87",
+  "latex_source_file": "equations.json",
+  "latex_source_sha256": "58905d4a49c008abe2534dca9e1304806d04496fde6d8bbfe436337e91951ede",
+  "renderer_file": "render_math.mjs",
+  "renderer_sha256": "1e99c4168560b197f385af1ebd663f5fb64cddf07f3114d2dda39fa409a72bbe",
+  "formulas": {
+    "normal_geometry": {
+      "tex": "b(s)=\\frac{2\\left[R_t-r(s)\\right]}{x'(s)},\\qquad A(s)=2\\pi r(s)b(s)",
+      "svg_file": "equation-normal_geometry.svg",
+      "sha256": "6aa6ea797f517d7bf3b6581fff9bc6a4e8ea827039289aa9a6f69f86fce53d9c"
+    },
+    "area_ratio": {
+      "tex": "\\mathcal A=\\frac{A_{\\mathrm{out}}}{A_{\\mathrm{in}}}=\\frac{1-\\eta_{\\mathrm{out}}^2}{1-\\eta_{\\mathrm{in}}^2},\\qquad \\eta_{\\mathrm{out}}=\\sqrt{1-\\mathcal A\\left(1-\\eta_{\\mathrm{in}}^2\\right)}",
+      "svg_file": "equation-area_ratio.svg",
+      "sha256": "8e0c338d884b8060022fecc7513c1a9f2db19f30535bd54889e07c462669d05e"
+    },
+    "angle_forcing": {
+      "tex": "\\alpha(t)=\\bar\\alpha+\\Delta\\alpha\\sin(2\\pi f t),\\qquad p_0=\\mathrm{constant},\\quad T_0=\\mathrm{constant}",
+      "svg_file": "equation-angle_forcing.svg",
+      "sha256": "622f78053e0df78ec0a4e0b6a1a21949604258507296c458ab0887f9c103f200"
+    },
+    "reservoir_inlet": {
+      "tex": "h+\\frac12\\left[v_m^2+\\left(\\frac{\\ell}{r}\\right)^2\\right]=h_0,\\qquad s=s_0,\\qquad v_\\theta\\cos\\alpha-v_m\\sin\\alpha=0",
+      "svg_file": "equation-reservoir_inlet.svg",
+      "sha256": "0af0a0aba14bc08ebd0991b0fa201ce859155f5696b81e756cc4615d9d2ae068"
+    },
+    "normal_characteristics": {
+      "tex": "M_m=M\\cos\\alpha,\\qquad \\lambda=\\left(v_m-a,\\ v_m,\\ v_m,\\ v_m+a\\right)",
+      "svg_file": "equation-normal_characteristics.svg",
+      "sha256": "414ec2566657e01a6f0ad9aa35f0b4b6eadc8e3433e4fe1d91fdd7f0b3b4233c"
+    },
+    "pressure_outlet": {
+      "tex": "p_b=p_{\\mathrm{exit}},\\qquad p_b-p_{\\mathrm{ext}}+\\rho_{\\mathrm{int}}a_{\\mathrm{int}}\\left(v_{m,b}-v_{m,\\mathrm{ext}}\\right)=0",
+      "svg_file": "equation-pressure_outlet.svg",
+      "sha256": "b01edb89e073310850f9fca648955d9a81823014d298985e7aa7c05018fd6b10"
+    },
+    "mass_inventory": {
+      "tex": "\\frac{\\mathrm d}{\\mathrm dt}\\int_\\Omega\\rho\\,\\mathrm dV=\\dot m_{\\mathrm{in}}-\\dot m_{\\mathrm{out}}",
+      "svg_file": "equation-mass_inventory.svg",
+      "sha256": "cebebb81652e3fa717f81c8f4ceeaa4e73e66bac48391f217f85f2fdb3741450"
+    },
+    "time_average": {
+      "tex": "\\left\\langle q\\right\\rangle(s)=\\frac{1}{NT}\\int_{t_a}^{t_a+NT}q(s,t)\\,\\mathrm dt,\\qquad T=\\frac1f",
+      "svg_file": "equation-time_average.svg",
+      "sha256": "be8819c02c567d8279309d55f82470c9dc7d6785fd65dd60feb6d0e9ef24f976"
+    },
+    "periodic_rms": {
+      "tex": "\\epsilon_k=\\max_j\\left[\\frac{1}{n_xn_\\phi}\\sum_{i,\\phi}\\left(\\frac{z_{j,i,\\phi}^{(k)}-z_{j,i,\\phi}^{(k-1)}}{S_j}\\right)^2\\right]^{1/2}",
+      "svg_file": "equation-periodic_rms.svg",
+      "sha256": "3ebd4cc7c25930e9020625ed2cd2f3f3bd48544eb4bf38509b4dbff9e087e3e9"
+    },
+    "acoustic_split": {
+      "tex": "w_\\pm=\\frac12\\left(p'\\pm\\bar\\rho\\,\\bar a\\,v_m'\\right),\\qquad \\omega=2\\pi f",
+      "svg_file": "equation-acoustic_split.svg",
+      "sha256": "19b13f7d484d74455af24a5d107a77e1097780c3c6c54596d7193bb2d1847f3a"
+    }
+  }
+}
