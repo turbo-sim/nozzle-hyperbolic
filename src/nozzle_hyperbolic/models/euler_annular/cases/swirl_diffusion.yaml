@@ -1,0 +1,34 @@
+# Physical verification case; numerical settings belong to the benchmark profile.
+schema_version: 1
+model: euler_annular
+id: swirl_diffusion
+label: Radial swirl diffusion, large tangential velocity
+description: Historical fixed annular geometry and steady inviscid operating point. Meridional flow is
+  positive; analytical invariants select boundary data and never seed the numerical solution.
+fluid:
+  backend: perfect_gas
+  name: Air
+geometry:
+  kind: radial
+  r_in: 0.1
+  r_out: 0.2
+  height: 0.005
+inlet:
+  p0: 200000.0
+  T0: 300.0
+  M_m: 0.3
+  alpha_tangent: 5.0
+boundaries:
+  inlet: subsonic
+  outlet: subsonic
+  outlet_formulation: acoustic
+reference:
+  shock_fraction: null
+walls:
+  shear_stress: 0.0
+  heat_flux: 0.0
+accuracy:
+  recommended_finest_cells: 400
+  Cp_length_mean_absolute: 0.01
+  shock_position_cells: 2.0
+  conservative_normalized_l1: 0.001

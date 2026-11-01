@@ -1,0 +1,32 @@
+# Physical verification case; numerical settings belong to the benchmark profile.
+schema_version: 1
+model: euler_nozzle
+id: overexpanded
+label: Below shock-at-exit pressure / overexpanded
+description: Parabolic smooth nozzle; reservoir data and reference-selected operating pressure. Exit adjustment
+  occurs outside the modeled nozzle; outlet is fully outgoing and backpressure sets only the cold-start
+  datum.
+fluid:
+  backend: perfect_gas
+  name: Air
+geometry:
+  kind: symmetric_nozzle
+  length: 0.2
+  inlet_area: 0.0003
+  throat_area: 0.00015
+inlet:
+  p0: 200000.0
+  T0: 300.0
+boundaries:
+  inlet: subsonic
+  outlet: supersonic
+  outlet_formulation: acoustic
+reference:
+  condition: external_midpoint
+walls:
+  shear_stress: 0.0
+  heat_flux: 0.0
+accuracy:
+  recommended_finest_cells: 400
+  normalized_field_l1: 0.03
+  shock_position_cells: 2.0

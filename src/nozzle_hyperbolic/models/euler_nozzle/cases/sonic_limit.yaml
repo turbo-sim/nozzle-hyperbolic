@@ -1,0 +1,33 @@
+# Physical verification case; numerical settings belong to the benchmark profile.
+schema_version: 1
+model: euler_nozzle
+id: sonic_limit
+label: Exactly sonic throat / subsonic exit
+description: Parabolic smooth nozzle; reservoir data and reference-selected operating pressure. Analytical
+  profile selects the physical outlet pressure; numerical initial state remains model-owned and cold.
+fluid:
+  backend: perfect_gas
+  name: Air
+geometry:
+  kind: symmetric_nozzle
+  length: 0.2
+  inlet_area: 0.0003
+  throat_area: 0.00015
+inlet:
+  p0: 200000.0
+  T0: 300.0
+boundaries:
+  inlet: subsonic
+  outlet: subsonic
+  outlet_formulation: acoustic
+reference:
+  condition: critical
+walls:
+  shear_stress: 0.0
+  heat_flux: 0.0
+accuracy:
+  recommended_finest_cells: 400
+  normalized_field_l1: 0.03
+  shock_position_cells: 2.0
+known_limit: The exactly sonic throat/subsonic-exit limit has a retained discrete branch/analytical-accuracy
+  discrepancy. Report convergence and accuracy separately; do not relax the target to hide it.

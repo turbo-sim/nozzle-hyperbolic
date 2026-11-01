@@ -1,7 +1,12 @@
 """Shared conservative FVM engine; physical models are callback providers."""
 
 from .config import Scheme, SteadySettings, Solution, TimestepInfo
-from .contracts import ConservativeModel, FusedConservativeModel
+from .contracts import (
+    ConservativeModel,
+    FusedConservativeModel,
+    RoeModel,
+    FusedRoeModel,
+)
 from .operator import Operator
 from .drivers import solve_single_grid, solve_grid_sequence, solve_transient, sampler
 from ..residuals import ResidualPolicy
@@ -21,4 +26,6 @@ __all__ = [
     "TimestepInfo",
     "ConservativeModel",
     "FusedConservativeModel",
+    "RoeModel",
+    "FusedRoeModel",
 ]

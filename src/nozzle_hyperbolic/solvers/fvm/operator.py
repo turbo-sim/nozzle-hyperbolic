@@ -45,6 +45,7 @@ from nozzle_hyperbolic.numerics.characteristic import (
 from nozzle_hyperbolic.numerics.jacobians import make_block_operators
 from nozzle_hyperbolic.numerics.reconstruction import reconstruct_faces
 from nozzle_hyperbolic.numerics.fluxes import rusanov, hll
+from nozzle_hyperbolic.numerics.roe import roe, roe_absolute
 from nozzle_hyperbolic.numerics.filters import fourth_difference_flux
 from nozzle_hyperbolic.solvers.time_marching.implicit import make_newton_solver
 from nozzle_hyperbolic.solvers.time_marching.explicit import make_explicit_step
@@ -111,12 +112,21 @@ class Operator:
         fused_characteristics = fused_data and callable(
             getattr(model, "face_characteristics_from_data", None)
         )
+        fused_roe = fused_data and callable(
+            getattr(model, "face_roe_data_from_data", None)
+        )
         if (
             scheme.flux == "characteristic"
             and not fused_characteristics
             and not callable(getattr(model, "face_characteristics", None))
         ):
             raise ValueError("This model does not supply characteristic flux data")
+        if (
+            scheme.flux == "roe"
+            and not fused_roe
+            and not callable(getattr(model, "face_roe_data", None))
+        ):
+            raise ValueError("This model does not supply Roe flux data")
         self.shape = (n + 2, nvar)
         # Trace shapes once at binding, not during Newton iterations. This
         # catches accidental broadcasting and nonsquare callback contracts.
@@ -166,7 +176,7 @@ class Operator:
         else:
             for name in ("face_conserved", "face_physical_flux"):
                 require_shape(shape_of(name, face_abstract), (n + 1, nvar), name)
-            if scheme.flux != "characteristic":
+            if scheme.flux in ("rusanov", "hll"):
                 require_bounds(shape_of("face_speed_bounds", face_abstract))
         require_shape(
             shape_of(
@@ -240,6 +250,44 @@ class Operator:
                 (*eigenvalues.shape, nvar, nvar),
                 "characteristic projectors",
             )
+        if scheme.flux == "roe":
+            if fused_roe:
+                roe_shapes = shape_of(
+                    "face_roe_data_from_data",
+                    face_abstract,
+                    face_abstract,
+                    scheme.delta_factor,
+                    data["auxiliary"],
+                    data["auxiliary"],
+                )
+            else:
+                roe_shapes = shape_of(
+                    "face_roe_data",
+                    face_abstract,
+                    face_abstract,
+                    scheme.delta_factor,
+                )
+            required = {"projectors", "eigenvalues", "width", "valid"}
+            if not isinstance(roe_shapes, dict) or not required.issubset(roe_shapes):
+                raise ValueError(
+                    f"Roe data must be a dict containing {sorted(required)}"
+                )
+            eigenvalues = roe_shapes["eigenvalues"]
+            if (
+                len(eigenvalues.shape) != 2
+                or eigenvalues.shape[0] != n + 1
+                or eigenvalues.shape[1] < 1
+            ):
+                raise ValueError("Roe eigenvalues must return (faces,waves)")
+            require_shape(
+                roe_shapes["projectors"],
+                (*eigenvalues.shape, nvar, nvar),
+                "Roe projectors",
+            )
+            require_shape(roe_shapes["width"], eigenvalues.shape, "Roe widths")
+            require_shape(roe_shapes["valid"], (n + 1,), "Roe validity")
+            if roe_shapes["valid"].dtype != jnp.bool_:
+                raise ValueError("Roe validity must be a boolean face vector")
         points = jnp.asarray(self.mesh.points)
         faces = jnp.asarray(self.mesh.faces)
         area = jnp.asarray(self.mesh.area_faces)
@@ -259,6 +307,29 @@ class Operator:
                 scheme.reconstruction,
                 variable_scales=model.variable_scales,
                 smooth_coefficient=scheme.smooth_limiter_coefficient,
+            )
+
+        def roe_data(left, right, left_data=None, right_data=None):
+            if fused_roe:
+                if left_data is None:
+                    left_data, right_data = model.face_data(left), model.face_data(
+                        right
+                    )
+                return model.face_roe_data_from_data(
+                    left,
+                    right,
+                    scheme.delta_factor,
+                    left_data["auxiliary"],
+                    right_data["auxiliary"],
+                )
+            return model.face_roe_data(left, right, scheme.delta_factor)
+
+        def roe_data_valid(data):
+            return (
+                jnp.all(data["valid"])
+                & jnp.all(jnp.isfinite(data["eigenvalues"]))
+                & jnp.all(jnp.isfinite(data["projectors"]))
+                & jnp.all(jnp.isfinite(data["width"]) & (data["width"] >= 0))
             )
 
         def face_flux(full):
@@ -287,6 +358,20 @@ class Operator:
                     )
                 flux = characteristic_flux_with_entropy_viscosity(
                     fl, fr, qr - ql, projectors, eigenvalues, width
+                )
+            elif scheme.flux == "roe":
+                data = (
+                    roe_data(left, right, left_data, right_data)
+                    if fused_data
+                    else roe_data(left, right)
+                )
+                flux = roe(
+                    fl,
+                    fr,
+                    qr - ql,
+                    data["projectors"],
+                    data["eigenvalues"],
+                    data["width"],
                 )
             else:
                 if fused_data:
@@ -352,11 +437,18 @@ class Operator:
                 & jnp.all(jnp.isfinite(left))
                 & jnp.all(jnp.isfinite(right))
             )
-            return jax.lax.cond(
+            physical = jax.lax.cond(
                 finite,
                 lambda: model.admissible(full, left, right),
                 lambda: jnp.asarray(False),
             )
+            if scheme.flux == "roe":
+                return jax.lax.cond(
+                    physical,
+                    lambda: roe_data_valid(roe_data(left, right)),
+                    lambda: jnp.asarray(False),
+                )
+            return physical
 
         block = make_block_operators(
             residual,
@@ -501,6 +593,8 @@ class Operator:
         self.step_with_balance = jax.jit(with_balance)
         self.complete_boundaries = complete
         self.recover_storage = jax.jit(recover)
+        if scheme.flux == "roe":
+            self.roe_data = jax.jit(lambda full: roe_data(*reconstruct(full)))
 
         def timestep(full, cfl, time=0.0):
             completion_ok = jnp.asarray(True)
@@ -519,6 +613,24 @@ class Operator:
                     & jnp.isfinite(cfl)
                     & (cfl > 0)
                 )
+                if explicit and scheme.flux == "roe":
+                    # Interface Roe speeds can exceed cell physical speeds,
+                    # e.g. a large transverse-velocity jump in an annular face.
+                    # Bound the actual selected numerical dissipation using
+                    # callback data, without knowing any physical variables.
+                    data = roe_data(*reconstruct(full))
+                    face_speed = jnp.max(
+                        roe_absolute(data["eigenvalues"], data["width"]), axis=-1
+                    )
+                    local_speed = jnp.maximum(face_speed[:-1], face_speed[1:])
+                    base = jnp.minimum(
+                        base,
+                        jnp.min(
+                            jnp.asarray(self.mesh.widths)
+                            / jnp.maximum(local_speed, 1e-300)
+                        ),
+                    )
+                    okay = okay & roe_data_valid(data)
                 if boundary_speed is not None:
                     bounds = boundary_speed(full)
                     base = jnp.minimum(

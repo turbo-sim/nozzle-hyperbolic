@@ -67,3 +67,24 @@ class FusedConservativeModel(BalanceModel, Protocol):
     def face_data(self, face_states):
         """Return conserved,physical_flux,speed_bounds,auxiliary in one dict."""
         ...
+
+
+class RoeModel(Protocol):
+    """Optional Roe capability; no physical averaging is inferred by the solver.
+
+    The dict contains projectors (faces,waves,V,V), eigenvalues/width
+    (faces,waves) and boolean valid (faces,). Width is nonnegative; zero
+    selects the exact absolute value. Projectors act in the same conservative
+    face frame as face_conserved/face_physical_flux. Models own a consistent
+    finite-jump Roe linearization, real spectrum and any diagnostic extras.
+    """
+
+    def face_roe_data(self, left, right, delta_factor): ...
+
+
+class FusedRoeModel(Protocol):
+    """Alternative Roe capability reusing opaque side ``face_data`` payloads."""
+
+    def face_roe_data_from_data(
+        self, left, right, delta_factor, aux_left, aux_right
+    ): ...

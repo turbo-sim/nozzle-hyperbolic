@@ -33,7 +33,7 @@ class Scheme:
             "muscl_van_leer_smooth",
         ):
             raise ValueError("Unsupported reconstruction")
-        if self.flux not in ("characteristic", "rusanov", "hll"):
+        if self.flux not in ("characteristic", "rusanov", "hll", "roe"):
             raise ValueError("Unsupported numerical flux")
         if self.time_integrator not in (
             "euler-implicit",

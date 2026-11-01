@@ -30,6 +30,7 @@ from nozzle_hyperbolic.models.euler_annular.state import (
 )
 from nozzle_hyperbolic.thermodynamics.adapters import as_jax_fluid
 from nozzle_hyperbolic.models.filtering import VelocityGate, face_filter_speed
+from nozzle_hyperbolic.models.euler_roe import euler_roe_data, roe_metadata
 
 
 class AnnularModel:
@@ -128,6 +129,13 @@ class AnnularModel:
         self.reference_density = float(state_property(ref_state, "rho"))
         self.reference_sound_speed = float(state_property(ref_state, "a"))
         self.reference_pressure, self.reference_enthalpy = float(p_ref), float(h_ref)
+        self._roe_reference = (
+            self.reference_density,
+            self.reference_pressure,
+            self.reference_sound_speed,
+            self.reference_enthalpy,
+        )
+        self.roe_metadata = roe_metadata(self._roe_reference)
         temperature = float(state_property(ref_state, "T"))
         rho, sound, radius = (
             self.reference_density,
@@ -216,7 +224,7 @@ class AnnularModel:
             conserved=q,
             physical_flux=flux,
             speed_bounds=(velocity - sound, velocity + sound),
-            auxiliary=sound,
+            auxiliary={"rho": rho, "a": sound, "G": state_property(state, "G")},
         )
 
     def face_characteristics(self, left, right, delta_factor):
@@ -230,6 +238,8 @@ class AnnularModel:
         self, left, right, delta_factor, sound_left, sound_right
     ):
         """Reuse side sound speeds and evaluate the average EOS only once."""
+        if isinstance(sound_left, dict):
+            sound_left, sound_right = sound_left["a"], sound_right["a"]
         average = 0.5 * (left + right)
         mean_state = thermodynamic_state(average, self.fluid)
         rho, sound, gruneisen = (
@@ -245,6 +255,32 @@ class AnnularModel:
         base = delta_factor * sound[..., None]
         positive_spread = 0.5 * (spread + jnp.sqrt(spread**2 + base**2))
         return projectors, eigenvalues, base + 0.5 * positive_spread
+
+    def face_roe_data(self, left, right, delta_factor):
+        """Finite-jump Roe linearization in the common face transverse frame."""
+        left_state, right_state = (
+            thermodynamic_state(left, self.fluid),
+            thermodynamic_state(right, self.fluid),
+        )
+        return self.face_roe_data_from_data(
+            left,
+            right,
+            delta_factor,
+            {key: state_property(left_state, key) for key in ("rho", "a", "G")},
+            {key: state_property(right_state, key) for key in ("rho", "a", "G")},
+        )
+
+    def face_roe_data_from_data(self, left, right, delta_factor, aux_left, aux_right):
+        """Use ell/r_face on both sides; the shared operator transports r*flux."""
+        return euler_roe_data(
+            left,
+            right,
+            aux_left,
+            aux_right,
+            self._roe_reference,
+            delta_factor,
+            radius=self._r_face,
+        )
 
     def flux_to_conserved_frame(self, face_flux):
         return face_flux.at[..., 2].set(face_flux[..., 2] * self._r_face)

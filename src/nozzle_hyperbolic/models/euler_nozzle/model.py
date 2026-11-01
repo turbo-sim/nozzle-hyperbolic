@@ -11,6 +11,7 @@ import jaxprop as jxp
 import numpy as np
 
 from .characteristics import conservative_projectors
+from nozzle_hyperbolic.models.euler_roe import euler_roe_data, roe_metadata
 from nozzle_hyperbolic.thermodynamics.adapters import as_jax_fluid
 from nozzle_hyperbolic.models.euler_outlet import EulerOutlet, transmissive_residual
 from nozzle_hyperbolic.models.filtering import VelocityGate, face_filter_speed
@@ -89,6 +90,8 @@ class NozzleModel:
         self.h0, self.s0, self.rho0, self.a0 = (
             float(reservoir[key]) for key in ("h", "s", "rho", "a")
         )
+        self._roe_reference = (self.rho0, self.p0, self.a0, self.h0)
+        self.roe_metadata = roe_metadata(self._roe_reference)
         self.variable_scales = np.array([self.p0, self.a0, self.a0 * self.a0])
         self.conservative_scales = self.rho0 * np.array(
             [1.0, self.a0, self.a0 * self.a0]
@@ -165,7 +168,7 @@ class NozzleModel:
             conserved=q,
             physical_flux=flux,
             speed_bounds=(u - sound, u + sound),
-            auxiliary=sound,
+            auxiliary={"rho": rho, "a": sound, "G": state["G"]},
         )
 
     def face_conserved(self, W):
@@ -198,6 +201,8 @@ class NozzleModel:
         self, left, right, delta_factor, sound_left, sound_right
     ):
         """Reuse left/right EOS data; evaluate only the averaging state here."""
+        if isinstance(sound_left, dict):
+            sound_left, sound_right = sound_left["a"], sound_right["a"]
         average = 0.5 * (left + right)
         center = self.thermodynamic_state(average)
         projectors = conservative_projectors(
@@ -213,6 +218,25 @@ class NozzleModel:
         base = delta_factor * center["a"][..., None]
         width = base + 0.25 * (spread + jnp.sqrt(spread * spread + base * base))
         return projectors, eigen, width
+
+    def face_roe_data(self, left, right, delta_factor):
+        """Model-owned finite-jump general-EOS homogeneous Euler data."""
+        left_state, right_state = self.thermodynamic_state(
+            left
+        ), self.thermodynamic_state(right)
+        return self.face_roe_data_from_data(
+            left,
+            right,
+            delta_factor,
+            {key: left_state[key] for key in ("rho", "a", "G")},
+            {key: right_state[key] for key in ("rho", "a", "G")},
+        )
+
+    def face_roe_data_from_data(self, left, right, delta_factor, aux_left, aux_right):
+        """Reuse both PH EOS evaluations from fused physical face data."""
+        return euler_roe_data(
+            left, right, aux_left, aux_right, self._roe_reference, delta_factor
+        )
 
     def flux_to_conserved_frame(self, flux):
         return flux

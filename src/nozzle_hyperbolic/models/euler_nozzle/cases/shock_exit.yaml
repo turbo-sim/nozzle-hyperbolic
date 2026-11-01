@@ -1,0 +1,33 @@
+# Physical verification case; numerical settings belong to the benchmark profile.
+schema_version: 1
+model: euler_nozzle
+id: shock_exit
+label: Shock exactly at exit
+description: Parabolic smooth nozzle; reservoir data and reference-selected operating pressure. Analytical
+  profile selects the physical outlet pressure; numerical initial state remains model-owned and cold.
+fluid:
+  backend: perfect_gas
+  name: Air
+geometry:
+  kind: symmetric_nozzle
+  length: 0.2
+  inlet_area: 0.0003
+  throat_area: 0.00015
+inlet:
+  p0: 200000.0
+  T0: 300.0
+boundaries:
+  inlet: subsonic
+  outlet: subsonic
+  outlet_formulation: acoustic
+reference:
+  condition: shock_exit
+walls:
+  shear_stress: 0.0
+  heat_flux: 0.0
+accuracy:
+  recommended_finest_cells: 400
+  normalized_field_l1: 0.03
+  shock_position_cells: 2.0
+known_limit: 'An exact exit shock is a boundary-limit case: the analytical nozzle interior takes the upstream
+  limit at x=L; the prescribed downstream pressure is separate exterior data.'
