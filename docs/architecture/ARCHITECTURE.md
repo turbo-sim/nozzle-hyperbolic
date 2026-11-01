@@ -37,7 +37,7 @@ Here $W$ is the model's iteration/reconstruction representation. It need not equ
 | User-programmed balance law | Arbitrary variable count, subject to the contract below | Supported extension point; no model base class is required |
 | Two-fluid model | Additional phase variables, interactions, closures, and potentially nonconservative terms | **Deferred**: [`models/two_fluid/`](../../src/nozzle_hyperbolic/models/two_fluid/) retains legacy code, not a model integrated with the shared FVM engine |
 
-Euler thermodynamic properties come from **JAXProp `Fluid.get_state()`**, including the density, sound speed, entropy, and derivative data needed by the model. Choosing a perfect-gas property backend does not select a separate numerical solver. In the evolution path, the deliberate exception is the optional finite-wave outlet described below, which currently contains perfect-gas relations. Separately scoped analytical verification references may also assume a perfect gas.
+Euler thermodynamic properties come from **JAXProp `Fluid.get_state()`**, including the density, sound speed, entropy, and derivative data needed by the model. Choosing a perfect-gas property backend does not select a separate numerical solver. The optional finite-wave outlet computes general-EOS PH wave curves and retains perfect-gas closed forms for that backend. Separately scoped analytical verification references may also assume a perfect gas.
 
 [`thermodynamics/adapters.py`](../../src/nozzle_hyperbolic/thermodynamics/adapters.py) provides `as_jax_fluid`: native JAX property backends pass through, while configured host-only fluids use JAXProp's callback/custom-JVP bridge. The adapter preserves the selected fluid and its configuration. A lock protects mutable host property evaluation; this route can have different performance characteristics from a native JAX backend. Physical property calls and their derivatives remain outside the generic numerical layer.
 
@@ -113,13 +113,13 @@ There are two separate decisions: **what physical law applies at an endpoint**, 
 | Nozzle reservoir inlet | Subsonic inlet: prescribed reservoir total enthalpy and entropy, plus outgoing acoustic compatibility |
 | Annular inlet | Subsonic reservoir data plus either inlet flow angle or angular momentum; alternatively a complete prescribed supersonic inlet state |
 | Acoustic pressure outlet | `outlet_formulation="acoustic"` (default): prescribed backpressure, acoustic compatibility, entropy extrapolation, and extrapolated advected components; general EOS |
-| Finite-wave pressure outlet | `outlet_formulation="finite_wave"`: finite compression/expansion-wave treatment with outgoing and sonic-fan branches; **currently restricted to `jaxprop.FluidPerfectGas`** |
+| Finite-wave pressure outlet | `outlet_formulation="finite_wave"`: general-EOS PH Hugoniot compression and numerical expansion curves with outgoing and sonic-fan branches; perfect-gas closed forms retained |
 | Static supersonic outflow | `outlet_regime="supersonic"`: extrapolated fully outgoing endpoint state |
 | Automatic outflow regime | `outlet_regime="auto"`: acoustic pressure/choking/outgoing active-set selection; the finite-wave formulation already selects its wave regime |
 | Transmissive Sod endpoints | Nozzle `transmissive=True`: zero-gradient traces at both endpoints; use a domain/time interval where boundary interaction does not contaminate the intended Riemann comparison |
 | Scalar endpoints | Model-owned prescribed inflow and extrapolated outflow, appropriate to the transport direction |
 
-The shared Euler outlet implementation is [`models/euler_outlet.py`](../../src/nozzle_hyperbolic/models/euler_outlet.py). Its finite-wave law is the explicitly allowed location for perfect-gas relations, with a TODO to replace them by general-EOS Hugoniot/isentropic wave curves. The default acoustic law evaluates fluid behavior through `get_state()`.
+The shared Euler outlet implementation is [`models/euler_outlet.py`](../../src/nozzle_hyperbolic/models/euler_outlet.py). Its general-EOS wave curves live in [`models/euler_wave.py`](../../src/nozzle_hyperbolic/models/euler_wave.py). Compression enforces the moving Hugoniot; expansion integrates $dh/dp=1/\rho$ and $du/dp=-1/(\rho a)$ using the configured EOS. Independently interpolated entropy and sound speed need not satisfy the exact identities behind this construction. Invalid paths are rejected, without property clipping or a replacement outlet. See the [backpressure theory](../../development/BC_baclpressure/THEORY.md) for assumptions and numerical controls. The default acoustic law also evaluates fluid behavior through `get_state()`.
 
 The automatic acoustic law uses a physical pressure/sonic active set rather than a Mach-dependent blend. It remains a linearized acoustic compatibility law, rather than an exact finite-amplitude rarefaction integral. Negative trial velocities are not clipped, but a backpressure value alone does not prescribe all exterior data needed for sustained physical reverse inflow.
 
@@ -187,7 +187,7 @@ Three public drivers cover the main use cases:
 
 The initialization accelerator often called “multigrid” in development notes is **grid sequencing / nested iteration**. It solves each mesh's original equations and uses componentwise linear interpolation to initialize the next mesh. There is no fine-grid defect restriction, FAS cycle, or multigrid correction operator. Failed warm starts remain recorded and may be followed by an independent cold retry. Each mesh starts its own residual normalization.
 
-For steady marching, the source defaults are `cfl=0.2`, `cfl_growth=1.4`, `cfl_shrink=0.5`, `cfl_max=1e7`, `max_steps=4000`, and `max_retries=14`. These are package defaults, not the settings of every development benchmark. Growth follows successful steps; failed trials reduce the requested timestep.
+For steady marching, the source defaults are `cfl=0.2`, `cfl_growth=1.2`, `cfl_shrink=0.5`, `cfl_max=1e6`, `max_steps=4000`, and `max_retries=14`. These are package defaults, not the settings of every development benchmark. Growth follows successful steps; failed trials reduce the requested timestep.
 
 `ResidualPolicy` checks each equation with fixed physical reference scales. The defaults are a volume-weighted L2 norm and **relative reduction of `1e-6` OR absolute norm of `1e-9`**. `criterion` can instead be `"relative"`, `"absolute"`, or `"both"`; `"either"` is the default. Equations initially below the `1e-14` floor use the absolute target. These dimensionless absolute norms are not raw residuals in SI units.
 
@@ -272,7 +272,7 @@ The architecture's important boundaries are:
 
 - **Current contract:** square conservative systems, cell-local storage, fixed one-dimensional geometry, two nonperiodic endpoint traces. Nonconservative products, rectangular systems, moving geometry, and periodic problems are not supported by this contract.
 - **Two-fluid extension:** intended direction, not an already validated plug-in. Its equations and boundary/source structure may require an explicit contract extension.
-- **Outflow physics:** finite-wave outlet generalization to a general EOS remains open; the acoustic alternative is general EOS. Sustained reverse inflow needs additional physical data.
+- **Outflow physics:** both outlet formulations support a general EOS. Finite-wave curves assume classical wave structure; nonconvex compound waves and independent bicubic thermodynamic inconsistencies limit exactness. Sustained reverse inflow needs additional physical data.
 - **Numerical robustness:** matching final steady roots does not imply identical Newton trajectories across boundary treatments, reconstruction choices, or controller settings. Undamped Newton and local block pivoting have finite robustness limits.
 - **Roe/EOS scope:** the Euler construction assumes a smooth, thermodynamically consistent PH map on the selected branch. Stable endpoints do not prove a positive interface sound speed. The acoustic fix does not establish global positivity or entropy stability for arbitrary real-gas/nonconvex states; phase switches, independently interpolated inconsistent property tables and future two-fluid equations need separate assessment. See the [Roe study](../../development/flux_methods/roe/README.md).
 - **Coverage:** the existence of a selector is not proof of every model × flux × reconstruction × integrator × boundary combination. Check the relevant verification study before claiming accuracy, robustness, or speed.

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="1800" height="2490" viewBox="0 0 1800 2490" role="img" aria-labelledby="architecture-title architecture-description">
 <title id="architecture-title">nozzle-hyperbolic: model-agnostic finite-volume architecture</title>
-<desc id="architecture-description">A source-verified architecture map. Physical models supply EOS, geometry, closures, storage, fluxes and boundary equations to a common finite-volume engine. Numerical choices include constant or MUSCL reconstruction, characteristic FVS, implemented HLL, Rusanov and model-owned Roe FDS alternatives, coupled or segregated boundaries, explicit Euler and SSPRK3, backward Euler, automatic differentiation, direct linear solves, Newton policy, coarse-to-fine initialization and convergence audits. Dashed amber elements are planned or deferred.</desc>
+<desc id="architecture-description">A source-verified architecture map. Physical models supply EOS, geometry, closures, storage, fluxes and boundary equations to a common finite-volume engine. Numerical choices include constant or MUSCL reconstruction, Stadtke FVS, implemented HLL, Rusanov and model-owned Roe FDS alternatives, coupled or segregated boundaries, explicit Euler and SSPRK3, backward Euler, automatic differentiation, direct linear solves, Newton policy, coarse-to-fine initialization and convergence audits. Dashed amber elements are planned or deferred.</desc>
 <defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0L8 4L0 8Z" fill="#8A9CAD"/></marker></defs>
 <style>text{font-family:Arial,Helvetica,sans-serif} [data-topic]{cursor:pointer} [data-topic]:focus{outline:none} [data-topic]:focus>rect:first-of-type{stroke:#D59B2F;stroke-width:3}</style>
 <rect width="1800" height="2490" fill="#FFFFFF"/>
@@ -43,7 +43,7 @@
 <text x="267" y="609" font-size="13" font-weight="400" fill="#5C7083" >legacy separate</text>
 </g>
 <g id="architecture-card-eos" data-topic="eos" role="button" tabindex="0" aria-labelledby="architecture-card-eos-title" aria-describedby="architecture-card-eos-description">
-<title id="architecture-card-eos-title">Thermodynamics</title><desc id="architecture-card-eos-description">Euler evolution obtains state and thermodynamic derivatives through JAXProp get_state. Native JAX fluids pass through; configured host-only fluids use JAXProp&#x27;s callback/custom-JVP adapter. The numerical engine contains no EOS assumptions. The finite-wave outlet is the deliberate perfect-gas exception in the evolution path. Separately scoped analytical verification references may assume a perfect gas.</desc>
+<title id="architecture-card-eos-title">Thermodynamics</title><desc id="architecture-card-eos-description">Euler evolution obtains state and thermodynamic derivatives through JAXProp get_state. Native JAX fluids pass through; configured host-only fluids use JAXProp&#x27;s callback/custom-JVP adapter. The numerical engine contains no EOS assumptions. The finite-wave outlet computes general-EOS PH wave curves and retains closed forms for a perfect-gas backend. Separately scoped analytical verification references may assume a perfect gas.</desc>
 <rect x="490" y="390" width="400" height="253" rx="18" fill="white" stroke="#D7E1EA" />
 <rect x="491" y="408" width="4" height="217" rx="2" fill="#127D85" stroke="#127D85" />
 <text x="513" y="426" font-size="21" font-weight="700" fill="#142C44" >Thermodynamics</text>
@@ -52,7 +52,7 @@
 <text x="514" y="523" font-size="16.5" font-weight="400" fill="#5C7083" >Native JAX or host-fluid bridge</text>
 <text x="514" y="551" font-size="16.5" font-weight="400" fill="#5C7083" >Properties, derivatives and domain checks</text>
 <rect x="513" y="583" width="354" height="38" rx="9" fill="#FFF8E8" stroke="#EDDBAE" />
-<text x="525" y="607" font-size="14" font-weight="600" fill="#815F21" >Finite-wave outlet: perfect-gas exception</text>
+<text x="525" y="607" font-size="14" font-weight="600" fill="#815F21" >Finite-wave outlet: general-EOS curves</text>
 </g>
 <g id="architecture-card-geometry" data-topic="geometry" role="button" tabindex="0" aria-labelledby="architecture-card-geometry-title" aria-describedby="architecture-card-geometry-description">
 <title id="architecture-card-geometry-title">Fixed geometry + mesh</title><desc id="architecture-card-geometry-description">Geometry builders preprocess stationary nozzle and annular geometries into physical cells, endpoint traces, face measures, cell volumes and integrated source geometry. Annular NURBS construction is host preprocessing; geometry is not evolved in time.</desc>
@@ -108,11 +108,11 @@
 </g>
 <path d="M470 1074L488 1074" fill="none" stroke="#D7E1EA" stroke-width="2" marker-end="url(#arrow)"/>
 <g id="architecture-card-fluxes" data-topic="fluxes" role="button" tabindex="0" aria-labelledby="architecture-card-fluxes-title" aria-describedby="architecture-card-fluxes-description">
-<title id="architecture-card-fluxes-title">Numerical interface flux</title><desc id="architecture-card-fluxes-description">The default characteristic FVS uses model projectors/waves, Harten regularization and conservative sonic viscosity. HLL and Rusanov use model signal bounds without requiring an eigensystem. Implemented Roe FDS contracts model-owned finite-jump eigenspaces, with acoustic Harten regularization and exact contact/shear absolute value. Euler uses PH property calls, a centered secant and C2 roundoff blend with a 4096-times-machine-epsilon audit; invalid faces are rejected without fallback. Explicit timesteps also bound interface dissipation speeds. A conservative fourth-difference filter is optional and off by default.</desc>
+<title id="architecture-card-fluxes-title">Numerical interface flux</title><desc id="architecture-card-fluxes-description">The default Stadtke FVS uses model projectors/waves, Harten regularization and conservative sonic viscosity. HLL and Rusanov use model signal bounds without requiring an eigensystem. Implemented Roe FDS contracts model-owned finite-jump eigenspaces, with acoustic Harten regularization and exact contact/shear absolute value. Euler uses PH property calls, a centered secant and C2 roundoff blend with a 4096-times-machine-epsilon audit; invalid faces are rejected without fallback. Explicit timesteps also bound interface dissipation speeds. A conservative fourth-difference filter is optional and off by default.</desc>
 <rect x="490" y="935" width="640" height="280" rx="18" fill="white" stroke="#D7E1EA" />
 <rect x="491" y="953" width="4" height="244" rx="2" fill="#2F62C4" stroke="#2F62C4" />
 <text x="513" y="971" font-size="21" font-weight="700" fill="#142C44" >Numerical interface flux</text>
-<text x="515" y="1007" font-size="19" font-weight="700" fill="#142C44" >Characteristic FVS</text>
+<text x="515" y="1007" font-size="19" font-weight="700" fill="#142C44" >Stadtke FVS</text>
 <rect x="738" y="989" width="139" height="25" rx="12" fill="#FFF3CB" stroke="#E8D495" stroke-dasharray="none"/>
 <text x="748" y="1006" font-size="12.5" font-weight="700" fill="#775818" >DEFAULT</text>
 <text x="515" y="1035" font-size="15.5" font-weight="400" fill="#5C7083" >Model eigenstructure · Harten regularization · sonic viscosity</text>
@@ -145,12 +145,12 @@
 <text x="76" y="1315" font-size="17" font-weight="700" fill="#127D85" letter-spacing="1.1">04  /  BOUNDARY LAWS AND THEIR NUMERICAL TREATMENT</text>
 <text x="750" y="1315" font-size="16" font-weight="400" fill="#5C7083" >The physical equations are defined once; their solution strategy is selectable.</text>
 <g id="architecture-card-boundary-laws" data-topic="boundary-laws" role="button" tabindex="0" aria-labelledby="architecture-card-boundary-laws-title" aria-describedby="architecture-card-boundary-laws-description">
-<title id="architecture-card-boundary-laws-title">Physical boundary conditions</title><desc id="architecture-card-boundary-laws-description">Nozzle reservoir inlet enforces enthalpy, entropy and acoustic compatibility. Annular inlet also prescribes angle or angular momentum, or a complete supersonic state. Outlets select acoustic/entropy or restricted perfect-gas finite-wave laws with pressure, sonic/automatic or fully outgoing regimes. Sod uses transmissive traces. Scalar models supply their own inflow/outflow equations.</desc>
+<title id="architecture-card-boundary-laws-title">Physical boundary conditions</title><desc id="architecture-card-boundary-laws-description">Nozzle reservoir inlet enforces enthalpy, entropy and acoustic compatibility. Annular inlet also prescribes angle or angular momentum, or a complete supersonic state. Outlets select general-EOS acoustic/entropy or finite-wave laws with pressure, sonic/automatic or fully outgoing regimes. Finite-wave curves assume classical wave structure and retain perfect-gas closed forms. Sod uses transmissive traces. Scalar models supply their own inflow/outflow equations.</desc>
 <rect x="70" y="1340" width="810" height="195" rx="18" fill="white" stroke="#D7E1EA" />
 <rect x="71" y="1358" width="4" height="159" rx="2" fill="#127D85" stroke="#127D85" />
 <text x="93" y="1376" font-size="21" font-weight="700" fill="#142C44" >Physical boundary conditions</text>
 <text x="95" y="1409" font-size="16" font-weight="400" fill="#5C7083" >Reservoir inlet: h0 / s0 + acoustic compatibility; annular swirl law</text>
-<text x="95" y="1438" font-size="16" font-weight="400" fill="#5C7083" >Outlet: acoustic / entropy (general EOS) or finite-wave (perfect gas)</text>
+<text x="95" y="1438" font-size="16" font-weight="400" fill="#5C7083" >Outlet: acoustic / entropy or finite-wave curves (both general EOS)</text>
 <text x="95" y="1467" font-size="16" font-weight="400" fill="#5C7083" >Regimes: subsonic · supersonic · automatic pressure / sonic / outgoing</text>
 <text x="95" y="1496" font-size="16" font-weight="400" fill="#5C7083" >Sod: transmissive · scalar laws: signed inflow / extrapolated outflow</text>
 </g>

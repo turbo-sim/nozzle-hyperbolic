@@ -341,11 +341,15 @@ independently programmed two-equation nonlinear-storage model and a wider source
 stencil. The production Euler models show general-EOS storage/eigenstructure,
 closure injection, physical geometry and characteristic endpoint laws.
 
-Euler thermodynamics come from `jaxprop.Fluid.get_state()`. The sole permitted
-perfect-gas exception is the selectable finite-wave pressure outlet in
-[`models/euler_outlet.py`](../src/nozzle_hyperbolic/models/euler_outlet.py), which
-is explicitly restricted to a perfect-gas backend and carries a TODO for general
-EOS extension. The default acoustic outlet uses general-EOS properties. Sod
+Euler thermodynamics come from `jaxprop.Fluid.get_state()`. Both selectable
+pressure outlets in
+[`models/euler_outlet.py`](../src/nozzle_hyperbolic/models/euler_outlet.py) support
+a general EOS. The finite-wave law computes PH Hugoniot shocks and numerical
+expansion curves in
+[`models/euler_wave.py`](../src/nozzle_hyperbolic/models/euler_wave.py), retaining
+perfect-gas closed forms for that backend. Its classical-wave and bicubic
+consistency limits are described in the
+[backpressure theory](../development/BC_baclpressure/THEORY.md). Sod
 uses transmissive traces at both ends, with no pressure/reservoir condition.
 Exact waves should remain away from the endpoints during reference comparisons;
 finite-grid diffusive tails can still affect numerical boundary transfer. Use

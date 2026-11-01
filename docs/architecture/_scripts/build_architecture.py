@@ -84,7 +84,7 @@ def build_svg():
     raw(f'''<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="{WIDTH}" height="{HEIGHT}" viewBox="0 0 {WIDTH} {HEIGHT}" role="img" aria-labelledby="architecture-title architecture-description">
 <title id="architecture-title">nozzle-hyperbolic: model-agnostic finite-volume architecture</title>
-<desc id="architecture-description">A source-verified architecture map. Physical models supply EOS, geometry, closures, storage, fluxes and boundary equations to a common finite-volume engine. Numerical choices include constant or MUSCL reconstruction, characteristic FVS, implemented HLL, Rusanov and model-owned Roe FDS alternatives, coupled or segregated boundaries, explicit Euler and SSPRK3, backward Euler, automatic differentiation, direct linear solves, Newton policy, coarse-to-fine initialization and convergence audits. Dashed amber elements are planned or deferred.</desc>
+<desc id="architecture-description">A source-verified architecture map. Physical models supply EOS, geometry, closures, storage, fluxes and boundary equations to a common finite-volume engine. Numerical choices include constant or MUSCL reconstruction, Stadtke FVS, implemented HLL, Rusanov and model-owned Roe FDS alternatives, coupled or segregated boundaries, explicit Euler and SSPRK3, backward Euler, automatic differentiation, direct linear solves, Newton policy, coarse-to-fine initialization and convergence audits. Dashed amber elements are planned or deferred.</desc>
 <defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0L8 4L0 8Z" fill="#8A9CAD"/></marker></defs>
 <style>text{{font-family:Arial,Helvetica,sans-serif}} [data-topic]{{cursor:pointer}} [data-topic]:focus{{outline:none}} [data-topic]:focus>rect:first-of-type{{stroke:#D59B2F;stroke-width:3}}</style>
 <rect width="1800" height="{HEIGHT}" fill="#FFFFFF"/>
@@ -118,11 +118,11 @@ def build_svg():
     endcard()
 
     card("eos",490,390,400,253,"Thermodynamics",
-        "Euler evolution obtains state and thermodynamic derivatives through JAXProp get_state. Native JAX fluids pass through; configured host-only fluids use JAXProp's callback/custom-JVP adapter. The numerical engine contains no EOS assumptions. The finite-wave outlet is the deliberate perfect-gas exception in the evolution path. Separately scoped analytical verification references may assume a perfect gas.",PHYSICS)
+        "Euler evolution obtains state and thermodynamic derivatives through JAXProp get_state. Native JAX fluids pass through; configured host-only fluids use JAXProp's callback/custom-JVP adapter. The numerical engine contains no EOS assumptions. The finite-wave outlet computes general-EOS PH wave curves and retains closed forms for a perfect-gas backend. Separately scoped analytical verification references may assume a perfect gas.",PHYSICS)
     text(514,461,"JAXProp fluid.get_state()",20,PHYSICS,700)
     lines(514,495,["General EOS / configured fluid backend","Native JAX or host-fluid bridge","Properties, derivatives and domain checks"],16.5,28)
     rect(513,583,354,38,"#FFF8E8","#EDDBAE",9)
-    text(525,607,"Finite-wave outlet: perfect-gas exception",14,"#815F21",600)
+    text(525,607,"Finite-wave outlet: general-EOS curves",14,"#815F21",600)
     endcard()
 
     card("geometry",910,390,400,253,"Fixed geometry + mesh",
@@ -158,8 +158,8 @@ def build_svg():
     line(470,1074,488,1074,arrow=True)
 
     card("fluxes",490,935,640,280,"Numerical interface flux",
-        "The default characteristic FVS uses model projectors/waves, Harten regularization and conservative sonic viscosity. HLL and Rusanov use model signal bounds without requiring an eigensystem. Implemented Roe FDS contracts model-owned finite-jump eigenspaces, with acoustic Harten regularization and exact contact/shear absolute value. Euler uses PH property calls, a centered secant and C2 roundoff blend with a 4096-times-machine-epsilon audit; invalid faces are rejected without fallback. Explicit timesteps also bound interface dissipation speeds. A conservative fourth-difference filter is optional and off by default.",NUMERICS)
-    text(515,1007,"Characteristic FVS",19,INK,700)
+        "The default Stadtke FVS uses model projectors/waves, Harten regularization and conservative sonic viscosity. HLL and Rusanov use model signal bounds without requiring an eigensystem. Implemented Roe FDS contracts model-owned finite-jump eigenspaces, with acoustic Harten regularization and exact contact/shear absolute value. Euler uses PH property calls, a centered secant and C2 roundoff blend with a 4096-times-machine-epsilon audit; invalid faces are rejected without fallback. Explicit timesteps also bound interface dissipation speeds. A conservative fourth-difference filter is optional and off by default.",NUMERICS)
+    text(515,1007,"Stadtke FVS",19,INK,700)
     pill(738,989,"DEFAULT",width=139)
     text(515,1035,"Model eigenstructure · Harten regularization · sonic viscosity",15.5,MUTED)
     text(515,1073,"HLL + Rusanov",19,INK,700)
@@ -183,8 +183,8 @@ def build_svg():
 
     band(1280,280,"04","BOUNDARY LAWS AND THEIR NUMERICAL TREATMENT","The physical equations are defined once; their solution strategy is selectable.",PHYSICS)
     card("boundary-laws",70,1340,810,195,"Physical boundary conditions",
-        "Nozzle reservoir inlet enforces enthalpy, entropy and acoustic compatibility. Annular inlet also prescribes angle or angular momentum, or a complete supersonic state. Outlets select acoustic/entropy or restricted perfect-gas finite-wave laws with pressure, sonic/automatic or fully outgoing regimes. Sod uses transmissive traces. Scalar models supply their own inflow/outflow equations.",PHYSICS)
-    lines(95,1409,["Reservoir inlet: h0 / s0 + acoustic compatibility; annular swirl law","Outlet: acoustic / entropy (general EOS) or finite-wave (perfect gas)","Regimes: subsonic · supersonic · automatic pressure / sonic / outgoing","Sod: transmissive · scalar laws: signed inflow / extrapolated outflow"],16,29)
+        "Nozzle reservoir inlet enforces enthalpy, entropy and acoustic compatibility. Annular inlet also prescribes angle or angular momentum, or a complete supersonic state. Outlets select general-EOS acoustic/entropy or finite-wave laws with pressure, sonic/automatic or fully outgoing regimes. Finite-wave curves assume classical wave structure and retain perfect-gas closed forms. Sod uses transmissive traces. Scalar models supply their own inflow/outflow equations.",PHYSICS)
+    lines(95,1409,["Reservoir inlet: h0 / s0 + acoustic compatibility; annular swirl law","Outlet: acoustic / entropy or finite-wave curves (both general EOS)","Regimes: subsonic · supersonic · automatic pressure / sonic / outgoing","Sod: transmissive · scalar laws: signed inflow / extrapolated outflow"],16,29)
     endcard()
     line(880,1434,898,1434,arrow=True)
     card("boundary-treatment",900,1340,830,195,"Boundary solution strategy",
