@@ -6,7 +6,7 @@ baseline for comparisons with the current implementation in
 [`src/nozzle_hyperbolic/`](../src/nozzle_hyperbolic/).
 
 The preserved package stays outside `src/` and normal production imports.
-The [native performance study](../development/roberto/nozzle_native_performance/README.md)
+The [native performance study](../development/roberto/benchmarking/README.md)
 loads it explicitly in a separate worker process, using its original package
 namespace. The benchmark's `ARCHIVE` constant identifies the selected tree.
 
