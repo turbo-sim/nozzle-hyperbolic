@@ -23,6 +23,17 @@ contains no EOS assumptions. Characteristic FVS remains the default.
 See [the final Roe study](development/roe_method/README.md) for the implemented
 theory, verification results, limitations and reproducible benchmark/report commands.
 
+## Osher numerical flux
+
+The shared FVM engine supports `Scheme(flux="osher")` with
+`quadrature_points=5` by default (3, 5 or 9 supported) and
+`integration="gauss"` by default or `"sonic_partitioned"`.
+Sonic partitioning applies the selected Gauss rule per captured path panel;
+an unsplit nine-point rule is not equivalent. Quadrature count is independent
+of spatial reconstruction order. See the
+[Osher study](development/flux_methods/osher/README.md) for equations,
+verification and sampling assumptions.
+
 ## Cloning git repository and installing dependencies
 
 Install Python 3.12-3.13 and Poetry, then clone the repository and install the

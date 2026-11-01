@@ -1,9 +1,16 @@
-"""Shared conservative FVM engine; physical models are callback providers."""
+"""Shared conservative FVM engine; physical models are callback providers.
+
+Osher uses one flux selector with separate quadrature and integration settings.
+Optional structural capabilities require no model inheritance.
+"""
 
 from .config import Scheme, SteadySettings, Solution, TimestepInfo
 from .contracts import (
     ConservativeModel,
     FusedConservativeModel,
+    CharacteristicModel,
+    FusedCharacteristicModel,
+    FaceStatePathModel,
     RoeModel,
     FusedRoeModel,
 )
@@ -26,6 +33,9 @@ __all__ = [
     "TimestepInfo",
     "ConservativeModel",
     "FusedConservativeModel",
+    "CharacteristicModel",
+    "FusedCharacteristicModel",
+    "FaceStatePathModel",
     "RoeModel",
     "FusedRoeModel",
 ]

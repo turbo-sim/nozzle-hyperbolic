@@ -23,6 +23,11 @@ and opaque JAX-pytree ``auxiliary``. The optional characteristic callback
 that auxiliary data. Models without fused callbacks keep the simple independent
 callbacks; scalar laws require neither auxiliary data nor characteristic data.
 
+Osher integrates conservative storage along an affine reconstruction-state
+path or optional face_state_path. Its sampled-node admissibility checks repeat
+sonic root construction and do not certify the entire path. Nested storage
+JVPs must be supported by the model.
+
 Models declare source and boundary dependency radii in full-state block indices.
 The core unions those with its reconstruction stencil. Nonlocal boundary laws
 declare ``boundary_coupling='global'`` and require dense AD and dense solution;
@@ -42,6 +47,7 @@ import numpy as np
 from nozzle_hyperbolic.numerics.characteristic import (
     characteristic_flux_with_entropy_viscosity,
 )
+from nozzle_hyperbolic.numerics.osher import OsherFlux
 from nozzle_hyperbolic.numerics.jacobians import make_block_operators
 from nozzle_hyperbolic.numerics.reconstruction import reconstruct_faces
 from nozzle_hyperbolic.numerics.fluxes import rusanov, hll
@@ -115,8 +121,16 @@ class Operator:
         fused_roe = fused_data and callable(
             getattr(model, "face_roe_data_from_data", None)
         )
+        osher = (
+            OsherFlux(
+                quadrature_points=scheme.quadrature_points,
+                integration=scheme.integration,
+            )
+            if scheme.flux == "osher" else None
+        )
+        needs_characteristics = scheme.flux == "characteristic" or osher is not None
         if (
-            scheme.flux == "characteristic"
+            needs_characteristics
             and not fused_characteristics
             and not callable(getattr(model, "face_characteristics", None))
         ):
@@ -219,7 +233,7 @@ class Operator:
         require_shape(admissible, (), "admissible")
         if admissible.dtype != jnp.bool_:
             raise ValueError("admissible must return a scalar boolean")
-        if scheme.flux == "characteristic":
+        if needs_characteristics:
             if fused_characteristics:
                 projectors, eigenvalues, width = shape_of(
                     "face_characteristics_from_data",
@@ -250,6 +264,15 @@ class Operator:
                 (*eigenvalues.shape, nvar, nvar),
                 "characteristic projectors",
             )
+        if osher is not None and getattr(model, "face_state_path", None) is not None:
+            path_shapes = shape_of(
+                "face_state_path", face_abstract, face_abstract,
+                jax.ShapeDtypeStruct((n + 1, 1), dtype),
+            )
+            if not isinstance(path_shapes, (tuple, list)) or len(path_shapes) != 2:
+                raise ValueError("face_state_path must return state and tangent")
+            for value in path_shapes:
+                require_shape(value, (n + 1, nvar), "face_state_path state/tangent")
         if scheme.flux == "roe":
             if fused_roe:
                 roe_shapes = shape_of(
@@ -359,6 +382,8 @@ class Operator:
                 flux = characteristic_flux_with_entropy_viscosity(
                     fl, fr, qr - ql, projectors, eigenvalues, width
                 )
+            elif osher is not None:
+                flux = osher(model, left, right, scheme.delta_factor, fl, fr)
             elif scheme.flux == "roe":
                 data = (
                     roe_data(left, right, left_data, right_data)
@@ -446,6 +471,14 @@ class Operator:
                 return jax.lax.cond(
                     physical,
                     lambda: roe_data_valid(roe_data(left, right)),
+                    lambda: jnp.asarray(False),
+                )
+            if osher is not None:
+                return jax.lax.cond(
+                    physical,
+                    lambda: osher.path_admissible(
+                        model, full, left, right, scheme.delta_factor
+                    ),
                     lambda: jnp.asarray(False),
                 )
             return physical
@@ -631,6 +664,36 @@ class Operator:
                         ),
                     )
                     okay = okay & roe_data_valid(data)
+                elif explicit and osher is not None:
+                    # Bound selected sampled viscosity as well as cell waves.
+                    left, right = reconstruct(full)
+                    left_data, right_data = (
+                        (model.face_data(left), model.face_data(right))
+                        if fused_data else (None, None)
+                    )
+                    face_speed = osher.max_sampled_speed(
+                        model, left, right, scheme.delta_factor
+                    )
+                    speed_callback = getattr(model, "face_speed_bounds", None)
+                    if fused_data or callable(speed_callback):
+                        bounds = (
+                            (*left_data["speed_bounds"], *right_data["speed_bounds"])
+                            if fused_data else (*speed_callback(left), *speed_callback(right))
+                        )
+                        physical_speed = jnp.max(
+                            jnp.abs(jnp.stack(bounds)), axis=0
+                        )
+                        okay = okay & jnp.all(jnp.isfinite(jnp.stack(bounds)))
+                        face_speed = jnp.maximum(face_speed, physical_speed)
+                    okay = okay & jnp.all(jnp.isfinite(face_speed) & (face_speed >= 0))
+                    local_speed = jnp.maximum(face_speed[:-1], face_speed[1:])
+                    base = jnp.minimum(
+                        base,
+                        jnp.min(
+                            jnp.asarray(self.mesh.widths)
+                            / jnp.maximum(local_speed, 1e-300)
+                        ),
+                    )
                 if boundary_speed is not None:
                     bounds = boundary_speed(full)
                     base = jnp.minimum(

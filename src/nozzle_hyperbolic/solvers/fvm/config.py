@@ -9,6 +9,14 @@ from ..residuals import ResidualPolicy
 
 @dataclass(frozen=True)
 class Scheme:
+    """Shared numerical choices.
+
+    ``flux='osher'`` uses ``quadrature_points`` (3, 5 or 9) with either
+    ``integration='gauss'`` or ``'sonic_partitioned'``. These path-integration
+    options are independent of ``time_integrator`` and ignored by other
+    flux families. An admissible model-owned path and differentiable face
+    storage are required; sampled validity is not a whole-path proof.
+    """
     reconstruction: str = "constant"
     flux: str = "characteristic"
     delta_factor: float = 0.1
@@ -23,6 +31,8 @@ class Scheme:
     boundary_treatment: str = "auto"
     filter_strength: float = 0.0
     smooth_limiter_coefficient: float = 1.0
+    quadrature_points: int = 5
+    integration: str = "gauss"
 
     def __post_init__(self):
         if not isinstance(self.newton_backtracking, bool):
@@ -33,8 +43,12 @@ class Scheme:
             "muscl_van_leer_smooth",
         ):
             raise ValueError("Unsupported reconstruction")
-        if self.flux not in ("characteristic", "rusanov", "hll", "roe"):
+        if self.flux not in ("characteristic", "rusanov", "hll", "roe", "osher"):
             raise ValueError("Unsupported numerical flux")
+        if type(self.quadrature_points) is not int or self.quadrature_points not in (3, 5, 9):
+            raise ValueError("quadrature_points must be 3, 5 or 9")
+        if not isinstance(self.integration, str) or self.integration not in ("gauss", "sonic_partitioned"):
+            raise ValueError("integration must be gauss or sonic_partitioned")
         if self.time_integrator not in (
             "euler-implicit",
             "euler-explicit",

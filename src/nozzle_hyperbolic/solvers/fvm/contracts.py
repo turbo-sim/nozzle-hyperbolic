@@ -69,6 +69,39 @@ class FusedConservativeModel(BalanceModel, Protocol):
         ...
 
 
+class CharacteristicModel(Protocol):
+    """Optional characteristic/Osher eigendata in the conservative face frame.
+
+    Return projectors (faces,waves,V,V), eigenvalues and sonic widths
+    (faces,waves). The original characteristic flux requires positive widths; Osher also
+    permits zero and evaluates this callback at coincident path states.
+    """
+
+    def face_characteristics(self, left, right, delta_factor): ...
+
+
+class FusedCharacteristicModel(Protocol):
+    """Alternative eigendata callback reusing opaque face_data payloads."""
+
+    def face_characteristics_from_data(
+        self, left, right, delta_factor, aux_left, aux_right
+    ): ...
+
+
+class FaceStatePathModel(Protocol):
+    """Optional path for Osher; otherwise reconstruction states interpolate.
+
+    parameter has shape (faces,1). Return state and dstate/dparameter with
+    shape (faces,V), maintaining an admissible hyperbolic path in the model's
+    reconstruction variables. Sampled-node checks do not prove whole-path
+    admissibility or capture every possible sonic crossing. Scheme.integration
+    selects an unsplit Gauss rule or sonic-partitioned panels; both use the
+    declared Scheme.quadrature_points without changing the physical path.
+    """
+
+    def face_state_path(self, left, right, parameter): ...
+
+
 class RoeModel(Protocol):
     """Optional Roe capability; no physical averaging is inferred by the solver.
 
