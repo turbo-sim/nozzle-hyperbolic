@@ -305,6 +305,126 @@ def test_inactive_subnormal_secant_denominator_keeps_forward_and_reverse_ad_fini
     assert np.all(np.isfinite(jax.jacrev(function)(pair)))
 
 
+@pytest.mark.parametrize(
+    "left,right,thermo_left,thermo_right,expected_sound2",
+    [
+        (
+            [29975815.784017976, 10.77174558024093, 445178.6005148805],
+            [29975396.502781052, 10.850539219613832, 445178.08110596164],
+            [561.3362508010418, 390.82023629007625, 0.4753650990138035],
+            [561.3331082280263, 390.8172024622921, 0.4753629359372426],
+            152739.27178742868,
+        ),
+        (
+            [29968050.83132269, 12.14161600464112, 445168.8318273567],
+            [29967481.40158683, 12.23557379271619, 445168.1043983356],
+            [561.2783039540287, 390.76411759225664, 0.4753252114896336],
+            [561.2740731405097, 390.7600071352137, 0.47532229909755713],
+            152694.98903219542,
+        ),
+    ],
+    ids=["unprojected", "partially_projected"],
+)
+def test_independently_tabulated_co2_small_faces_are_admissible(
+    left, right, thermo_left, thermo_right, expected_sound2
+):
+    # Actual in-domain CO2 PH face pairs with independently interpolated
+    # density, sound speed and Gruneisen coefficient. Keeping just these raw
+    # values makes this a production regression without loading a table or
+    # importing a development study. The first pair is below the transition;
+    # the second is within it. Both previously failed the exact-secant gate.
+    reference = (561.4954878405654, 3e7, 390.98928990048864, 445221.1223038513)
+    left, right = jnp.asarray(left), jnp.asarray(right)
+    thermo_left = dict(zip(("rho", "a", "G"), map(jnp.asarray, thermo_left)))
+    thermo_right = dict(zip(("rho", "a", "G"), map(jnp.asarray, thermo_right)))
+    data = euler_roe_data(left, right, thermo_left, thermo_right, reference, 0.1)
+    assert bool(data["valid"])
+    np.testing.assert_allclose(data["sound_speed_squared"], expected_sound2, rtol=2e-14)
+    assert abs(float(data["pressure_secant_defect"])) > 4096 * np.finfo(float).eps
+    assert 0 <= float(data["secant_blend"]) < 1
+    assert abs(float(data["pressure_secant_audit_error"])) <= float(
+        data["secant_audit_tolerance"]
+    )
+    np.testing.assert_allclose(
+        data["pressure_secant_defect"],
+        data["pressure_secant_expected_defect"],
+        rtol=1e-8,
+        atol=1e-18,
+    )
+    assert np.all(np.isfinite(data["matrix"]))
+
+
+class IndependentAuxiliaryFluid(NobleAbelFluid):
+    """Synthetic independent property errors, with the density EOS unchanged."""
+
+    def get_state(self, pair, first, second):
+        state = super().get_state(pair, first, second)
+        return dict(state, a=state["a"] * 1.0002, G=state["G"] * 0.9999)
+
+
+def _dimensionless_thermodynamic_coordinates(fluid, state):
+    rho_ref, p_ref, a_ref, h_ref = _reference(fluid)
+    energy_ref = h_ref - p_ref / rho_ref
+    p, h = state[0], state[-1]
+    rho = fluid.get_state(jxp.HmassP_INPUTS, h, p)["rho"]
+    return jnp.stack(
+        (rho / rho_ref, (rho * (h - energy_ref) - p) / (rho_ref * a_ref**2))
+    )
+
+
+def test_independent_auxiliary_properties_keep_small_jump_and_full_secant_policies():
+    fluid = IndependentAuxiliaryFluid()
+    state = jnp.asarray([1.2e5, 100.0, 3e5])
+    direction = jnp.asarray([1e5, 80.0, 2e5])
+    coordinates = lambda step: _dimensionless_thermodynamic_coordinates(
+        fluid, state + step * direction
+    )
+    coordinate_speed = jnp.linalg.norm(jax.jacfwd(coordinates)(jnp.asarray(0.0)))
+    tau = jnp.finfo(jnp.float64).eps ** (1 / 3)
+    transition_step = tau / coordinate_speed
+    steps = transition_step * jnp.asarray([0.0, 0.2, 1.05, 1.4, 1.95, 2.2, 10.0])
+    evaluate = lambda step: _data(fluid, state, state + step * direction)
+    data = jax.jit(jax.vmap(evaluate))(steps)
+    assert np.all(data["valid"])
+    assert np.all(data["sound_speed_squared"] > 0)
+    assert np.all(np.isfinite(data["projectors"]))
+    assert np.all(
+        np.abs(data["pressure_secant_audit_error"]) <= data["secant_audit_tolerance"]
+    )
+    # Independent auxiliary surfaces introduce a linear-in-jump tangent
+    # mismatch. A partial projection may therefore retain a measurable defect.
+    defects = np.abs(data["pressure_secant_defect"])
+    assert np.all(defects[1:5] > 4096 * np.finfo(float).eps)
+    # Once the jump is outside the C2 transition, the original roundoff-level
+    # finite-jump secant remains required despite those auxiliary errors.
+    actual_jumps = jax.vmap(coordinates)(steps) - coordinates(0.0)
+    assert np.all(jnp.sum(actual_jumps[-2:] ** 2, axis=-1) > 4 * tau**2)
+    assert np.all(defects[-2:] < 4096 * np.finfo(float).eps)
+    np.testing.assert_array_equal(data["secant_blend"][-2:], 1.0)
+    np.testing.assert_array_equal(data["pressure_secant_expected_defect"][-2:], 0.0)
+    pair = jnp.stack((state, state + steps[3] * direction))
+    function = lambda w: _data(fluid, w[0], w[1])["matrix"]
+    forward, reverse = jax.jacfwd(function)(pair), jax.jacrev(function)(pair)
+    assert np.all(np.isfinite(forward)) and np.all(np.isfinite(reverse))
+    np.testing.assert_allclose(forward, reverse, rtol=2e-10, atol=3e-8)
+    coincident = jnp.stack((state, state))
+    assert np.all(np.isfinite(jax.jacfwd(function)(coincident)))
+    assert np.all(np.isfinite(jax.jacrev(function)(coincident)))
+
+
+@pytest.mark.parametrize(
+    "key,value",
+    [("rho", 0.0), ("rho", -1.0), ("a", 0.0), ("a", -1.0), ("G", np.nan)],
+)
+def test_small_jump_policy_does_not_admit_invalid_endpoint_properties(key, value):
+    fluid = NobleAbelFluid()
+    state = jnp.asarray([1.2e5, 100.0, 3e5])
+    thermo = fluid.get_state(jxp.HmassP_INPUTS, state[-1], state[0])
+    bad = dict(thermo, **{key: jnp.asarray(value)})
+    data = euler_roe_data(state, state, bad, thermo, _reference(fluid), 0.1)
+    assert not bool(data["valid"])
+
+
 def test_invalid_roe_sound_speed_is_reported_without_hidden_clipping():
     fluid = NobleAbelFluid()
     left, right = jnp.asarray([1e5, -1000.0, 3e5]), jnp.asarray([1e5, 1000.0, 3e5])

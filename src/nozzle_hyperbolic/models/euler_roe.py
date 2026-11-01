@@ -19,6 +19,7 @@ def roe_metadata(reference):
         small_jump_policy="c2_roundoff_blend_v1",
         small_jump_threshold="eps^(1/3), dimensionless thermodynamic jump",
         small_jump_transition="squared jump from tau^2 to 4*tau^2",
+        secant_audit="regularization_remainder_v1",
         secant_audit_factor=4096,
         reference_convention="model_reservoir_centered_internal_energy",
         reference_density=rho,
@@ -36,8 +37,9 @@ def _centered_secant(left, right, thermo_left, thermo_right, reference):
     differ from the exact secant by O(jump^3) for a smooth consistent EOS.
     Below eps^(1/3) they avoid amplifying EOS/subtraction noise by 1/jump.
     A C2 quintic transition restores the full projection above 2*eps^(1/3).
-    The remaining mixed absolute/relative secant defect is returned and audited;
-    the tiny-jump branch is not advertised as an exact finite secant.
+    The residual is audited against the remainder of this declared blend;
+    the tiny-jump branch is not advertised as an exact finite secant. Independent
+    tabulated acoustic properties need not have an O(jump^3) provisional defect.
     """
     rho_l, a_l, g_l = (thermo_left[key] for key in ("rho", "a", "G"))
     rho_r, a_r, g_r = (thermo_right[key] for key in ("rho", "a", "G"))
@@ -84,9 +86,14 @@ def _centered_secant(left, right, thermo_left, thermo_right, reference):
     chi_c, kappa = p_ref / rho_ref * g, p_ref / energy_scale * b
     pressure_defect = d - g * x - b * y
     audit_scale = 1.0 + jnp.abs(d) + jnp.abs(g * x) + jnp.abs(b * y)
-    # Host PH inversions can carry several hundred eps of state noise. This
-    # audit remains far below a solver tolerance and is explicit in metadata.
-    secant_valid = jnp.abs(pressure_defect) <= 4096 * eps * audit_scale
+    # Only the full projection promises a zero secant defect. In the diagonal
+    # regularization, the uncorrected fraction is intentional, including for
+    # independently interpolated EOS coefficients. Audit its algebraic remainder
+    # without imposing an unrelated EOS-consistency tolerance on admissibility.
+    expected_defect = (1.0 - blend) * defect
+    audit_error = pressure_defect - expected_defect
+    audit_tolerance = 4096 * eps * audit_scale
+    secant_valid = jnp.abs(audit_error) <= audit_tolerance
     return (
         chi_c,
         kappa,
@@ -94,6 +101,10 @@ def _centered_secant(left, right, thermo_left, thermo_right, reference):
         energy_ref,
         pressure_defect,
         valid_sides & secant_valid,
+        expected_defect,
+        audit_error,
+        blend,
+        audit_tolerance,
     )
 
 
@@ -109,9 +120,18 @@ def euler_roe_data(
     Invalid averages are flagged, never clipped to a different Roe method.
     """
     left, right = jnp.asarray(left), jnp.asarray(right)
-    chi_c, kappa, average, energy_ref, defect, valid = _centered_secant(
-        left, right, thermo_left, thermo_right, reference
-    )
+    (
+        chi_c,
+        kappa,
+        average,
+        energy_ref,
+        defect,
+        valid,
+        expected_defect,
+        audit_error,
+        blend,
+        audit_tolerance,
+    ) = _centered_secant(left, right, thermo_left, thermo_right, reference)
     u_l, u_r = left[..., 1], right[..., 1]
     u = average(u_l, u_r)
     zero, one = jnp.zeros_like(u), jnp.ones_like(u)
@@ -206,6 +226,10 @@ def euler_roe_data(
         matrix=matrix,
         sound_speed_squared=sound2,
         pressure_secant_defect=defect,
+        pressure_secant_expected_defect=expected_defect,
+        pressure_secant_audit_error=audit_error,
+        secant_blend=blend,
+        secant_audit_tolerance=audit_tolerance,
         chi=chi_c - kappa * energy_ref,
         kappa=kappa,
     )
