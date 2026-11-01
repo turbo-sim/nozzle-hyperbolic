@@ -1,0 +1,49 @@
+# Source-backed numerical verification, not a runtime benchmark.
+schema_version: 1
+cases:
+- euler_nozzle/shock_35
+- euler_nozzle/shock_70
+- euler_annular/shock35
+- euler_annular/shock70
+variants:
+- stadtke_original
+- stadtke_jump
+- stadtke_endpoint
+- stadtke_both
+configurations:
+  stadtke_original: {flux: stadtke, custom_jump_correction: false, custom_endpoint_envelope: false}
+  stadtke_jump: {flux: stadtke, custom_jump_correction: true, custom_endpoint_envelope: false}
+  stadtke_endpoint: {flux: stadtke, custom_jump_correction: false, custom_endpoint_envelope: true}
+  stadtke_both: {flux: stadtke, custom_jump_correction: true, custom_endpoint_envelope: true}
+grids: [50, 100, 200, 400]
+reconstructions: [constant, muscl_van_leer]
+study_wall_budget_s: 3600
+scheme:
+  delta_factor: 0.1
+  newton_iterations: 10
+  time_integrator: euler-implicit
+  boundary_treatment: coupled
+  newton_backtracking: false
+  newton_update_tolerance: 1.0e-10
+  newton_residual_tolerance: 1.0e-12
+  max_backtracks: 20
+  jacobian_mode: colored
+  linear_solver: banded
+  filter_strength: 0.0
+steady:
+  cfl: 0.2
+  cfl_growth: 1.2
+  cfl_max: 1000000.0
+  cfl_shrink: 0.5
+  max_steps: 16000
+  max_retries: 14
+  stagnation_steps: 64
+residual:
+  norm: l2
+  weighting: volume
+  criterion: either
+  relative_tolerance: 1.0e-06
+  absolute_tolerance: 1.0e-09
+  boundary_tolerance: 1.0e-09
+  global_tolerance: 1.0e-09
+  initial_floor: 1.0e-14

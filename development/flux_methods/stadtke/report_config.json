@@ -1,0 +1,66 @@
+{
+  "study": "stadtke",
+  "title": "Stadtke FVS and custom corrections",
+  "public_flux": "stadtke",
+  "row_configuration_key": "variant",
+  "configurations": [
+    {
+      "id": "stadtke_original",
+      "label": "stadtke_original",
+      "color": "#6a00a8",
+      "parameters": {
+        "custom_jump_correction": false,
+        "custom_endpoint_envelope": false
+      }
+    },
+    {
+      "id": "stadtke_jump",
+      "label": "stadtke_jump",
+      "color": "#9c179e",
+      "parameters": {
+        "custom_jump_correction": true,
+        "custom_endpoint_envelope": false
+      }
+    },
+    {
+      "id": "stadtke_endpoint",
+      "label": "stadtke_endpoint",
+      "color": "#cc4778",
+      "parameters": {
+        "custom_jump_correction": false,
+        "custom_endpoint_envelope": true
+      }
+    },
+    {
+      "id": "stadtke_both",
+      "label": "stadtke_both",
+      "color": "#ed7953",
+      "parameters": {
+        "custom_jump_correction": true,
+        "custom_endpoint_envelope": true
+      }
+    }
+  ],
+  "parameter_heading": "Custom correction switches",
+  "audit_required_true": [
+    "source_hashes_match",
+    "numerical_clients_match",
+    "case_hashes_match",
+    "initial_state_matches_model_cold"
+  ],
+  "notes_module": "report_notes",
+  "lead": "Original FVS and independent custom jump and endpoint corrections.",
+  "theory_heading": "Baseline split and custom correction terms",
+  "theory_lead": "The original baseline disables both custom switches; the two corrections remain independent.",
+  "equation_html": "Fhat = Fhat0 + chi_J Cjump + chi_E Cend",
+  "public_evidence_only": true,
+  "supplemental_evidence": [
+    {
+      "file": "../../../shared/evidence/stadtke_matrix_postprocess.json",
+      "scope": "Recorded-epoch saved-data Stadtke matrix assessment; separate from current unified-API Osher evaluations."
+    }
+  ],
+  "evidence_scope": "These native cold solves and fresh checks belong to their recorded source/case/client epoch. They are not a current-checkout certification or a migrated Osher campaign.",
+  "rendering_note": "Browser rendering remains unverified. Structural, archive and executable application checks are separate from a browser preview.",
+  "equation_latex": "\\widehat F=\\widehat F_0+\\chi_J C_{\\rm jump}+\\chi_E C_{\\rm end}"
+}
