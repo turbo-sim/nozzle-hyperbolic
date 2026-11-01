@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "recorded_directory": "development/BC_baclpressure",
+  "current_directory": "development/BC_backpressure",
+  "changed_files": {
+    "scripts/common.py": {
+      "recorded_sha256": "0fa278dc3be0b33c93c86840a4029ee2bb52860d112e42a9a6524292bcbf1450",
+      "current_sha256": "109b23c0fd0f4a04e49cef75be88abcfc62963698c778eab793652ff348a26d5"
+    },
+    "scripts/run.py": {
+      "recorded_sha256": "0cf31c2a5a97eb9aeb971724f509a5c24c724f1f037c8d59b09b08abc9040ae6",
+      "current_sha256": "103c95d4f9d7b79b172d952d5cded3401eeec2cfc5127645a07ede2f968673f0"
+    },
+    "scripts/audit_campaign.py": {
+      "recorded_sha256": "e1cdd681f80a13c07ebcbd800582ab8120a9bb0cd4523446aeb930f8fc2d5984",
+      "current_sha256": "fc481661ea04216dd2b1faa4f3694c6f22c49232208defb927d9f5f954934e43"
+    }
+  },
+  "note": "Directory spelling correction only. The executed provenance and original snapshots remain unchanged. Launcher module path and source-validation guards are the only registered client changes; numerical equations, methods, settings and saved solutions retain their execution identities."
+}

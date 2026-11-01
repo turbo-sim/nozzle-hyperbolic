@@ -349,7 +349,7 @@ expansion curves in
 [`models/euler_wave.py`](../src/nozzle_hyperbolic/models/euler_wave.py), retaining
 perfect-gas closed forms for that backend. Its classical-wave and bicubic
 consistency limits are described in the
-[backpressure theory](../development/BC_baclpressure/THEORY.md). Sod
+[backpressure theory](../development/BC_backpressure/THEORY.md). Sod
 uses transmissive traces at both ends, with no pressure/reservoir condition.
 Exact waves should remain away from the endpoints during reference comparisons;
 finite-grid diffusive tails can still affect numerical boundary transfer. Use

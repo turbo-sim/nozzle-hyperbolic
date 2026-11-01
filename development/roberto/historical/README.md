@@ -7,7 +7,6 @@ Canonical analytical references live beside their physical models in
 
 | Directory | Retained material |
 |---|---|
-| [`BC_backpressure/`](BC_backpressure/README.md) | Outlet-law, backpressure, and boundary-regime investigations |
 | [`BC_residual/`](BC_residual/README.md) | Coupled versus internal boundary equations and matched timing studies |
 | [`implicit_integration/`](implicit_integration/README.md) | Newton caps, CFL policies, and implicit integration sensitivity |
 | [`multigrid/`](multigrid/README.md) | Single-grid versus coarse-to-fine initialization benchmarks and FAS design notes |
@@ -15,6 +14,10 @@ Canonical analytical references live beside their physical models in
 | [`euler_annular/`](euler_annular/README.md) | Annular Euler geometry, steady/transient verification, source checks, and accuracy studies |
 | [`euler_nozzle/`](euler_nozzle/README.md) | Steady nozzle and Sod reference comparisons and baseline reports |
 | [`newton_solve/`](newton_solve/README.md) | Newton, pseudo-transient continuation, initialization, and performance investigations |
+
+The current acoustic and general-EOS finite-wave pressure-outlet comparison
+lives in [BC_backpressure](../../BC_backpressure/README.md), covering shocked
+nozzle, annular and CO2 flows from stagnant and numerical adapted starts.
 
 Module entry points now begin with `development.roberto.historical.<study>`.
 The relocation updates imports, repository roots, and shared report-asset paths;

@@ -11,6 +11,9 @@ All development work is grouped under this single directory:
 - [flux_methods/](flux_methods/README.md): production Stadtke corrections,
   Osher path-quadrature variants and the general-EOS Roe study, with theory,
   controlled verification and offline Plotly reports.
+- [BC_backpressure/](BC_backpressure/README.md): acoustic and general-EOS
+  finite-wave pressure outlets, stagnant/adapted initialization and shocked
+  nozzle, annular and CO2 target cases.
 - [roberto/](roberto/README.md): current Euler verification examples, numerical
   fixes, Newton/PTC, implicit-integration and boundary-condition studies.
 
