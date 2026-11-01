@@ -1,0 +1,56 @@
+# Untimed Roe-only verification: all 20 cases, four grids and both reconstructions.
+# Numerical controls match benchmark_profile.yaml; no performance samples.
+schema_version: 2
+cases: all
+backends:
+- current
+fluxes:
+- roe
+reconstructions:
+- constant
+- muscl_van_leer
+grids:
+- 50
+- 100
+- 200
+- 400
+newton_caps:
+- 10
+repeats: 1
+refinement_repeats: 1
+legacy_refinement: false
+output: outputs/roe_steady_verification
+complete_solve_timeout_s: 300
+regression_threshold: 1.15
+scheme:
+  delta_factor: 0.1
+  time_integrator: euler-implicit
+  boundary_treatment: coupled
+  newton_backtracking: false
+  newton_update_tolerance: 1.0e-10
+  newton_residual_tolerance: 1.0e-12
+  max_backtracks: 20
+  jacobian_mode: colored
+  linear_solver: banded
+  filter_strength: 0.0
+roe_options:
+  averaging: centered_secant_projection_v1
+  entropy_fix: acoustic_harten
+  invalid_face_policy: reject
+steady:
+  cfl: 0.2
+  cfl_growth: 1.2
+  cfl_max: 1000000.0
+  cfl_shrink: 0.5
+  max_steps: 16000
+  max_retries: 14
+  stagnation_steps: 64
+residual:
+  norm: l2
+  weighting: volume
+  criterion: either
+  relative_tolerance: 1.0e-06
+  absolute_tolerance: 1.0e-09
+  boundary_tolerance: 1.0e-09
+  global_tolerance: 1.0e-09
+  initial_floor: 1.0e-14

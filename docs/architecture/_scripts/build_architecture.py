@@ -84,7 +84,7 @@ def build_svg():
     raw(f'''<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="{WIDTH}" height="{HEIGHT}" viewBox="0 0 {WIDTH} {HEIGHT}" role="img" aria-labelledby="architecture-title architecture-description">
 <title id="architecture-title">nozzle-hyperbolic: model-agnostic finite-volume architecture</title>
-<desc id="architecture-description">A source-verified architecture map. Physical models supply EOS, geometry, closures, storage, fluxes and boundary equations to a common finite-volume engine. Numerical choices include constant or MUSCL reconstruction, characteristic FVS, implemented HLL and Rusanov alternatives, planned Roe FDS, coupled or segregated boundaries, explicit Euler and SSPRK3, backward Euler, automatic differentiation, direct linear solves, Newton policy, coarse-to-fine initialization and convergence audits. Dashed amber elements are planned or deferred.</desc>
+<desc id="architecture-description">A source-verified architecture map. Physical models supply EOS, geometry, closures, storage, fluxes and boundary equations to a common finite-volume engine. Numerical choices include constant or MUSCL reconstruction, characteristic FVS, implemented HLL, Rusanov and model-owned Roe FDS alternatives, coupled or segregated boundaries, explicit Euler and SSPRK3, backward Euler, automatic differentiation, direct linear solves, Newton policy, coarse-to-fine initialization and convergence audits. Dashed amber elements are planned or deferred.</desc>
 <defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0L8 4L0 8Z" fill="#8A9CAD"/></marker></defs>
 <style>text{{font-family:Arial,Helvetica,sans-serif}} [data-topic]{{cursor:pointer}} [data-topic]:focus{{outline:none}} [data-topic]:focus>rect:first-of-type{{stroke:#D59B2F;stroke-width:3}}</style>
 <rect width="1800" height="{HEIGHT}" fill="#FFFFFF"/>
@@ -138,7 +138,7 @@ def build_svg():
     line(900,670,900,708,arrow=True)
 
     card("contract",70,710,1660,127,"02  /  Structural model contract",
-        "A user-written model supplies square conservative storage, face fluxes/conserved states/wave bounds, optional characteristic projectors, integrated sources, boundary equations, admissibility, scales and dependency stencils. Callbacks are JAX traceable; no inheritance, EOS or fixed equation count is required. Nonconservative or rectangular systems require an explicit future contract extension.",NUMERICS)
+        "A user-written model supplies square conservative storage, face fluxes/conserved states/wave bounds, optional characteristic or finite-jump Roe eigenspaces/validity, integrated sources, boundary equations, admissibility, scales and dependency stencils. Callbacks are JAX traceable; no inheritance, EOS or fixed equation count is required. Nonconservative or rectangular systems require an explicit future contract extension.",NUMERICS)
     pill(1438,729,"MODEL AGNOSTIC",kind="available",width=265)
     text(95,782,"Storage Q(W) · face flux / wave bounds · optional eigenstructure · integrated sources",18,INK)
     text(95,812,"Boundary B(W,t) · admissibility · scales · dependency reach · initial state · optional fused face data",17,MUTED)
@@ -158,16 +158,17 @@ def build_svg():
     line(470,1074,488,1074,arrow=True)
 
     card("fluxes",490,935,640,280,"Numerical interface flux",
-        "The default characteristic FVS uses model projectors/waves, Harten regularization and conservative sonic viscosity. HLL and Rusanov approximate-Riemann fluxes are already implemented and use signal bounds without requiring an eigensystem. Roe FDS is planned and is not the same as the present FVS averaging. A conservative fourth-difference filter is optional and off by default.",NUMERICS)
+        "The default characteristic FVS uses model projectors/waves, Harten regularization and conservative sonic viscosity. HLL and Rusanov use model signal bounds without requiring an eigensystem. Implemented Roe FDS contracts model-owned finite-jump eigenspaces, with acoustic Harten regularization and exact contact/shear absolute value. Euler uses PH property calls, a centered secant and C2 roundoff blend with a 4096-times-machine-epsilon audit; invalid faces are rejected without fallback. Explicit timesteps also bound interface dissipation speeds. A conservative fourth-difference filter is optional and off by default.",NUMERICS)
     text(515,1007,"Characteristic FVS",19,INK,700)
     pill(738,989,"DEFAULT",width=139)
     text(515,1035,"Model eigenstructure · Harten regularization · sonic viscosity",15.5,MUTED)
     text(515,1073,"HLL + Rusanov",19,INK,700)
     pill(707,1055,"IMPLEMENTED",kind="available",width=163)
     text(515,1099,"Approximate-Riemann alternatives; model signal bounds",15.5,MUTED)
-    rect(514,1116,590,43,"#FBF7EF","#CEB88D",9,stroke_dasharray="6 4")
-    text(528,1143,"Roe FDS",18,FUTURE,700)
-    pill(666,1124,"PLANNED",kind="planned",width=106)
+    rect(514,1116,590,59,"#EAF5F0","#C3DFD1",9)
+    text(528,1140,"Roe FDS",18,INK,700)
+    pill(666,1124,"IMPLEMENTED",kind="available",width=163)
+    text(528,1162,"PH secant / acoustic Harten / invalid-face rejection",13.5,MUTED)
     text(515,1190,"Optional conservative fourth-difference filter · default OFF",15,MUTED)
     endcard()
     line(1130,1074,1148,1074,arrow=True)

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="1800" height="2490" viewBox="0 0 1800 2490" role="img" aria-labelledby="architecture-title architecture-description">
 <title id="architecture-title">nozzle-hyperbolic: model-agnostic finite-volume architecture</title>
-<desc id="architecture-description">A source-verified architecture map. Physical models supply EOS, geometry, closures, storage, fluxes and boundary equations to a common finite-volume engine. Numerical choices include constant or MUSCL reconstruction, characteristic FVS, implemented HLL and Rusanov alternatives, planned Roe FDS, coupled or segregated boundaries, explicit Euler and SSPRK3, backward Euler, automatic differentiation, direct linear solves, Newton policy, coarse-to-fine initialization and convergence audits. Dashed amber elements are planned or deferred.</desc>
+<desc id="architecture-description">A source-verified architecture map. Physical models supply EOS, geometry, closures, storage, fluxes and boundary equations to a common finite-volume engine. Numerical choices include constant or MUSCL reconstruction, characteristic FVS, implemented HLL, Rusanov and model-owned Roe FDS alternatives, coupled or segregated boundaries, explicit Euler and SSPRK3, backward Euler, automatic differentiation, direct linear solves, Newton policy, coarse-to-fine initialization and convergence audits. Dashed amber elements are planned or deferred.</desc>
 <defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0L8 4L0 8Z" fill="#8A9CAD"/></marker></defs>
 <style>text{font-family:Arial,Helvetica,sans-serif} [data-topic]{cursor:pointer} [data-topic]:focus{outline:none} [data-topic]:focus>rect:first-of-type{stroke:#D59B2F;stroke-width:3}</style>
 <rect width="1800" height="2490" fill="#FFFFFF"/>
@@ -79,7 +79,7 @@
 </g>
 <path d="M900 670L900 708" fill="none" stroke="#D7E1EA" stroke-width="2" marker-end="url(#arrow)"/>
 <g id="architecture-card-contract" data-topic="contract" role="button" tabindex="0" aria-labelledby="architecture-card-contract-title" aria-describedby="architecture-card-contract-description">
-<title id="architecture-card-contract-title">02  /  Structural model contract</title><desc id="architecture-card-contract-description">A user-written model supplies square conservative storage, face fluxes/conserved states/wave bounds, optional characteristic projectors, integrated sources, boundary equations, admissibility, scales and dependency stencils. Callbacks are JAX traceable; no inheritance, EOS or fixed equation count is required. Nonconservative or rectangular systems require an explicit future contract extension.</desc>
+<title id="architecture-card-contract-title">02  /  Structural model contract</title><desc id="architecture-card-contract-description">A user-written model supplies square conservative storage, face fluxes/conserved states/wave bounds, optional characteristic or finite-jump Roe eigenspaces/validity, integrated sources, boundary equations, admissibility, scales and dependency stencils. Callbacks are JAX traceable; no inheritance, EOS or fixed equation count is required. Nonconservative or rectangular systems require an explicit future contract extension.</desc>
 <rect x="70" y="710" width="1660" height="127" rx="18" fill="white" stroke="#D7E1EA" />
 <rect x="71" y="728" width="4" height="91" rx="2" fill="#2F62C4" stroke="#2F62C4" />
 <text x="93" y="746" font-size="21" font-weight="700" fill="#142C44" >02  /  Structural model contract</text>
@@ -108,7 +108,7 @@
 </g>
 <path d="M470 1074L488 1074" fill="none" stroke="#D7E1EA" stroke-width="2" marker-end="url(#arrow)"/>
 <g id="architecture-card-fluxes" data-topic="fluxes" role="button" tabindex="0" aria-labelledby="architecture-card-fluxes-title" aria-describedby="architecture-card-fluxes-description">
-<title id="architecture-card-fluxes-title">Numerical interface flux</title><desc id="architecture-card-fluxes-description">The default characteristic FVS uses model projectors/waves, Harten regularization and conservative sonic viscosity. HLL and Rusanov approximate-Riemann fluxes are already implemented and use signal bounds without requiring an eigensystem. Roe FDS is planned and is not the same as the present FVS averaging. A conservative fourth-difference filter is optional and off by default.</desc>
+<title id="architecture-card-fluxes-title">Numerical interface flux</title><desc id="architecture-card-fluxes-description">The default characteristic FVS uses model projectors/waves, Harten regularization and conservative sonic viscosity. HLL and Rusanov use model signal bounds without requiring an eigensystem. Implemented Roe FDS contracts model-owned finite-jump eigenspaces, with acoustic Harten regularization and exact contact/shear absolute value. Euler uses PH property calls, a centered secant and C2 roundoff blend with a 4096-times-machine-epsilon audit; invalid faces are rejected without fallback. Explicit timesteps also bound interface dissipation speeds. A conservative fourth-difference filter is optional and off by default.</desc>
 <rect x="490" y="935" width="640" height="280" rx="18" fill="white" stroke="#D7E1EA" />
 <rect x="491" y="953" width="4" height="244" rx="2" fill="#2F62C4" stroke="#2F62C4" />
 <text x="513" y="971" font-size="21" font-weight="700" fill="#142C44" >Numerical interface flux</text>
@@ -120,10 +120,11 @@
 <rect x="707" y="1055" width="163" height="25" rx="12" fill="#EAF5F0" stroke="#C3DFD1" stroke-dasharray="none"/>
 <text x="717" y="1072" font-size="12.5" font-weight="700" fill="#247557" >IMPLEMENTED</text>
 <text x="515" y="1099" font-size="15.5" font-weight="400" fill="#5C7083" >Approximate-Riemann alternatives; model signal bounds</text>
-<rect x="514" y="1116" width="590" height="43" rx="9" fill="#FBF7EF" stroke="#CEB88D" stroke-dasharray="6 4"/>
-<text x="528" y="1143" font-size="18" font-weight="700" fill="#A47024" >Roe FDS</text>
-<rect x="666" y="1124" width="106" height="25" rx="12" fill="#FBF4E8" stroke="#CEB88D" stroke-dasharray="5 3"/>
-<text x="676" y="1141" font-size="12.5" font-weight="700" fill="#A47024" >PLANNED</text>
+<rect x="514" y="1116" width="590" height="59" rx="9" fill="#EAF5F0" stroke="#C3DFD1" />
+<text x="528" y="1140" font-size="18" font-weight="700" fill="#142C44" >Roe FDS</text>
+<rect x="666" y="1124" width="163" height="25" rx="12" fill="#EAF5F0" stroke="#C3DFD1" stroke-dasharray="none"/>
+<text x="676" y="1141" font-size="12.5" font-weight="700" fill="#247557" >IMPLEMENTED</text>
+<text x="528" y="1162" font-size="13.5" font-weight="400" fill="#5C7083" >PH secant / acoustic Harten / invalid-face rejection</text>
 <text x="515" y="1190" font-size="15" font-weight="400" fill="#5C7083" >Optional conservative fourth-difference filter · default OFF</text>
 </g>
 <path d="M1130 1074L1148 1074" fill="none" stroke="#D7E1EA" stroke-width="2" marker-end="url(#arrow)"/>

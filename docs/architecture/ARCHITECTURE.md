@@ -64,6 +64,7 @@ The structural protocols in [`solvers/fvm/contracts.py`](../../src/nozzle_hyperb
 | `face_conserved(W)`, `face_physical_flux(W)`, `face_speed_bounds(W)` | Physical face data for generic conservative fluxes |
 | `face_data(W)` | Alternative fused bundle of conserved state, physical flux, speed bounds, and opaque auxiliary data; avoids repeated expensive property evaluation |
 | `face_characteristics(...)` or `face_characteristics_from_data(...)` | Additional projectors, eigenvalues, and regularization widths required by the characteristic flux |
+| `face_roe_data(...)` or `face_roe_data_from_data(...)` | Optional Roe capability: conservative spectral projectors, eigenvalues, nonnegative entropy widths, and a boolean validity flag for every face |
 | `flux_to_conserved_frame(flux)` | Convert model face-frame flux into the cell storage frame |
 | `integrated_source(full)` | Physical/geometric source already integrated over each control volume |
 | `boundary_residual(full, time)` | One canonical definition of the physical endpoint equations, shape `(2, V)` |
@@ -87,11 +88,15 @@ Reconstruction and flux choice are independent `Scheme` settings. They apply to 
 | Characteristic flux / current FVS path | `flux="characteristic"` | Implemented; default; uses model-supplied characteristic projectors/eigenvalues and entropy regularization controlled by `delta_factor` |
 | Rusanov / local Lax–Friedrichs | `flux="rusanov"` | **Already implemented**; only conserved states, physical fluxes, and signal-speed bounds are needed |
 | HLL two-wave approximate Riemann flux | `flux="hll"` | **Already implemented**; uses model-supplied lower/upper signal-speed bounds |
-| Roe approximate Riemann / FDS flux | No production selector yet | **Planned**; not interchangeable with the present characteristic selector |
+| Roe approximate Riemann / FDS flux | `flux="roe"` | Implemented for nozzle/annular Euler; requires model-owned finite-jump Roe data, rather than the present characteristic averaging |
 
-HLL and Rusanov belong on the implemented branch of the architecture map, even if further model-specific verification and development of the approximate-Riemann/FDS family are planned. There is currently no `flux="roe"` option. Neither HLL nor Rusanov requires an EOS or eigensystem in the shared numerical layer.
+HLL, Rusanov and Roe are available alternatives to the default characteristic FVS path. HLL and Rusanov use signal bounds; Roe additionally needs a finite-jump linearization from the physical model. The generic Roe contraction supports any wave count, including a repeated speed represented by one higher-rank projector. A user-written model can provide this optional capability without introducing EOS or equation-specific branches into the solver.
 
-The optional conservative fourth-difference filter is selected by positive `filter_strength`; its default is zero. It requires additional model filter callbacks and widens the dependency stencil. Explicit timesteps account for wave, source, and filter restrictions together. A limiter/filter is a numerical option; it does not replace physical admissibility checks.
+The Euler Roe construction is shared by the physical models in [`models/euler_roe.py`](../../src/nozzle_hyperbolic/models/euler_roe.py). Both endpoints obtain density, sound speed and Gruneisen coefficient through `get_state(HmassP_INPUTS,h,p)`. Square-root-density velocity/total-enthalpy averages and a centered, dimensionless pressure-secant projection define the matrix. Annular states use transverse velocity at the same face radius, followed by the existing angular-momentum flux transformation. The generic [`numerics/roe.py`](../../src/nozzle_hyperbolic/numerics/roe.py) only contracts model-supplied eigenspaces with the conserved jump.
+
+Roe uses acoustic Harten regularization; the grouped contact/shear field retains the exact absolute value, with its mathematical kink at zero speed. At dimensionless thermodynamic jumps below $\epsilon^{1/3}$, symmetric provisional slopes avoid amplifying property/subtraction noise. A $C^2$ blend reaches the full secant projection above $2\epsilon^{1/3}$. The mixed normalized pressure-secant audit uses $4096\epsilon$ to accommodate the existing host PH inversion's numerical resolution. This is a face-data validity check, separate from physical-solver convergence tolerances. Invalid endpoints, nonpositive Roe sound-speed squared, nonfinite data or excessive secant defect are rejected without a replacement flux. Models expose the exact policy and reference scales in `roe_metadata`.
+
+The optional conservative fourth-difference filter is selected by positive `filter_strength`; its default is zero. It requires additional model filter callbacks and widens the dependency stencil. Explicit timesteps account for wave, source, and filter restrictions together. For Roe they also bound the selected interface dissipation speeds, which can exceed cell physical speeds after a large transverse-velocity jump. A limiter/filter is a numerical option; it does not replace physical admissibility checks.
 
 ## Boundary conditions
 
@@ -186,6 +191,12 @@ Boundary and global conservation defects must independently meet their default `
 
 Transient histories retain actual accepted/rejected attempts and integrator-consistent integrated boundary/source transfer. Their conservation budgets compare that transfer with changes in total conserved contents. They are distinct from steady spatial/global convergence criteria.
 
+The maintained [steady benchmark suite](../../development/roberto/benchmarking/README.md)
+loads physical YAML resources beside each model through
+[`nozzle_hyperbolic.verification`](../../src/nozzle_hyperbolic/verification/README.md).
+It records case/source identity, analytical field and conservative errors,
+independent grid refinement, and repeated old/current solve timings.
+
 ## Configuration example
 
 The following shows the separation of responsibilities. Supply a suitable JAXProp `fluid` object from the application; these snippets illustrate API configuration and are not a verified physical case definition.
@@ -249,7 +260,7 @@ Inspect `Solution.success`, `reason`, `metrics`, and `history`; reaching an iter
 
 ## Verification and limits
 
-Production verification is exercised by [`tests/`](../../tests/) and the [transient boundary-treatment study](../../development/roberto/transient_problems/README.md), which use the source implementations. Earlier studies are indexed in [`development/roberto/historical/`](../../development/roberto/historical/README.md). Canonical analytical references live beside their physical models in [`euler_nozzle/analytical/`](../../src/nozzle_hyperbolic/models/euler_nozzle/analytical/), [`euler_annular/analytical/`](../../src/nozzle_hyperbolic/models/euler_annular/analytical/), and [`scalar/analytical.py`](../../src/nozzle_hyperbolic/models/scalar/analytical.py), separately from evolution kernels. The [reference inventory and mathematical guide](../ANALYTICAL_REFERENCES.md) explains their assumptions, source attribution, and project-derived formulas. Older studies and low-level regression utilities should not be mistaken for the supported driver path.
+Production verification is exercised by [`tests/`](../../tests/) and the [transient boundary-treatment study](../../development/roberto/transient_problems/README.md), which use the source implementations. Earlier studies are indexed in [`development/roberto/historical/`](../../development/roberto/historical/README.md). Canonical analytical references live beside their physical models in [`euler_nozzle/analytical/`](../../src/nozzle_hyperbolic/models/euler_nozzle/analytical/), [`euler_annular/analytical/`](../../src/nozzle_hyperbolic/models/euler_annular/analytical/), and [`scalar/analytical.py`](../../src/nozzle_hyperbolic/models/scalar/analytical.py), separately from evolution kernels. The [source verification guide](../../src/nozzle_hyperbolic/verification/README.md) explains the packaged physical cases and reference assumptions. Older studies and low-level regression utilities should not be mistaken for the supported driver path.
 
 The architecture's important boundaries are:
 
@@ -257,6 +268,7 @@ The architecture's important boundaries are:
 - **Two-fluid extension:** intended direction, not an already validated plug-in. Its equations and boundary/source structure may require an explicit contract extension.
 - **Outflow physics:** finite-wave outlet generalization to a general EOS remains open; the acoustic alternative is general EOS. Sustained reverse inflow needs additional physical data.
 - **Numerical robustness:** matching final steady roots does not imply identical Newton trajectories across boundary treatments, reconstruction choices, or controller settings. Undamped Newton and local block pivoting have finite robustness limits.
+- **Roe/EOS scope:** the Euler construction assumes a smooth, thermodynamically consistent PH map on the selected branch. Stable endpoints do not prove a positive interface sound speed. The acoustic fix does not establish global positivity or entropy stability for arbitrary real-gas/nonconvex states; phase switches, independently interpolated inconsistent property tables and future two-fluid equations need separate assessment. See the [Roe study](../../development/roe_method/README.md).
 - **Coverage:** the existence of a selector is not proof of every model × flux × reconstruction × integrator × boundary combination. Check the relevant verification study before claiming accuracy, robustness, or speed.
 - **Physical accuracy:** convergence of the discrete residual, conservation, agreement with an analytical reference, and selection of the intended flow branch are separate checks. The previously observed sonic-limit accuracy discrepancy is not eliminated simply by reducing the nonlinear residual.
 
@@ -265,12 +277,12 @@ This documentation was produced by source inspection; no new flow simulations ar
 ## Extending the package
 
 1. Implement the structural model callbacks and declare equation count, fixed scales, source/boundary stencil reach, and coupling explicitly. Keep physical and EOS decisions out of the shared engine.
-2. Provide conserved states, physical fluxes, and valid signal-speed bounds for HLL/Rusanov. Add characteristic projectors/eigenvalues only if the characteristic flux is required. Reuse EOS data through `face_data` when helpful.
+2. Provide conserved states, physical fluxes, and valid signal-speed bounds for HLL/Rusanov. Add characteristic projectors/eigenvalues if the characteristic flux is required. To select Roe, supply its optional finite-jump matrix/eigenspaces and face validity; an arbitrary mean-state Jacobian is insufficient. Reuse EOS data through `face_data` when helpful.
 3. Define boundary equations once. Check the number of incoming conditions and the local trace Jacobian before using nonlinear elimination. Test coupled and segregated backward Euler against the original full residual.
 4. Supply admissibility checks for cells and reconstructed states; provide source stability information when an explicit method needs it. Validate zero-velocity and other limiting states without hidden clipping.
 5. Verify storage recovery, conservation, stencil declarations/colored versus dense AD, and meaningful limiting/reference cases. Then exercise the intended integrator, reconstruction, and physical boundary combinations.
 
-A future Roe flux belongs in generic numerical-flux infrastructure plus clearly specified model wave/averaging data. A future physical model belongs behind the model contract. Full FAS multigrid or a new sparse/Krylov backend would be separate numerical extensions, rather than physical-model code.
+Roe demonstrates the split between generic numerical-flux contraction and model-owned finite-jump averaging. A future physical model belongs behind the model contract. Full FAS multigrid or a new sparse/Krylov backend would be separate numerical extensions, rather than physical-model code.
 
 ## Source map
 
@@ -285,10 +297,11 @@ Paths below are relative to `src/nozzle_hyperbolic/` unless linked elsewhere.
 | [`solvers/fvm/elimination.py`](../../src/nozzle_hyperbolic/solvers/fvm/elimination.py), [`solvers/boundaries.py`](../../src/nozzle_hyperbolic/solvers/boundaries.py) | Converged trace completion and differentiable nonlinear elimination |
 | [`solvers/time_marching/`](../../src/nozzle_hyperbolic/solvers/time_marching/) | Shared Newton, conservative forward Euler, SSPRK3 |
 | [`solvers/residuals.py`](../../src/nozzle_hyperbolic/solvers/residuals.py), [`solvers/monitoring.py`](../../src/nozzle_hyperbolic/solvers/monitoring.py) | Fixed-scale convergence and optional engineering monitors |
-| [`numerics/reconstruction.py`](../../src/nozzle_hyperbolic/numerics/reconstruction.py), [`numerics/characteristic.py`](../../src/nozzle_hyperbolic/numerics/characteristic.py), [`numerics/fluxes.py`](../../src/nozzle_hyperbolic/numerics/fluxes.py), [`numerics/filters.py`](../../src/nozzle_hyperbolic/numerics/filters.py) | Reusable spatial arithmetic |
+| [`numerics/reconstruction.py`](../../src/nozzle_hyperbolic/numerics/reconstruction.py), [`numerics/characteristic.py`](../../src/nozzle_hyperbolic/numerics/characteristic.py), [`numerics/fluxes.py`](../../src/nozzle_hyperbolic/numerics/fluxes.py), [`numerics/roe.py`](../../src/nozzle_hyperbolic/numerics/roe.py), [`numerics/filters.py`](../../src/nozzle_hyperbolic/numerics/filters.py) | Reusable spatial arithmetic |
 | [`numerics/jacobians.py`](../../src/nozzle_hyperbolic/numerics/jacobians.py), [`numerics/linear.py`](../../src/nozzle_hyperbolic/numerics/linear.py) | Colored/dense AD and block-banded/dense correction solves |
 | [`models/euler_nozzle/`](../../src/nozzle_hyperbolic/models/euler_nozzle/), [`models/euler_annular/`](../../src/nozzle_hyperbolic/models/euler_annular/), [`models/scalar/`](../../src/nozzle_hyperbolic/models/scalar/) | Physical models and their model-specific helpers |
 | [`models/euler_outlet.py`](../../src/nozzle_hyperbolic/models/euler_outlet.py) | Shared Euler acoustic and finite-wave endpoint laws |
+| [`models/euler_roe.py`](../../src/nozzle_hyperbolic/models/euler_roe.py) | Shared physical Euler Roe averages, secant coefficients, grouped eigenspaces and validity policy |
 | [`models/closures/`](../../src/nozzle_hyperbolic/models/closures/) | Canonical wall and mixture closure correlations |
 | [`geometry/`](../../src/nozzle_hyperbolic/geometry/), [`thermodynamics/`](../../src/nozzle_hyperbolic/thermodynamics/) | Fixed geometric preprocessing and general-EOS adapters/helpers |
 

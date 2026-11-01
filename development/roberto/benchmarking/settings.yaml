@@ -1,0 +1,41 @@
+schema_version: 1
+cases: all
+backends: [current, legacy]
+reconstructions: [constant, muscl_van_leer]
+grids: [100, 200, 400]
+newton_caps: [10]
+repeats: 10
+refinement_repeats: 1
+legacy_refinement: false
+output: outputs/initial_baseline
+complete_solve_timeout_s: 300
+regression_threshold: 1.15
+scheme:
+  flux: characteristic
+  delta_factor: 0.1
+  time_integrator: euler-implicit
+  boundary_treatment: coupled
+  newton_backtracking: false
+  newton_update_tolerance: 1.0e-10
+  newton_residual_tolerance: 1.0e-12
+  max_backtracks: 20
+  jacobian_mode: colored
+  linear_solver: banded
+  filter_strength: 0.0
+steady:
+  cfl: 0.2
+  cfl_growth: 1.2
+  cfl_max: 1000000.0
+  cfl_shrink: 0.5
+  max_steps: 16000
+  max_retries: 14
+  stagnation_steps: 64
+residual:
+  norm: l2
+  weighting: volume
+  criterion: either
+  relative_tolerance: 1.0e-6
+  absolute_tolerance: 1.0e-9
+  boundary_tolerance: 1.0e-9
+  global_tolerance: 1.0e-9
+  initial_floor: 1.0e-14

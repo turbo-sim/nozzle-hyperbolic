@@ -1,5 +1,9 @@
 # Roberto: development verification and numerical studies
 
+The final [Roe formulation and verification](../roe_method/README.md) lives
+directly under `development/roe_method/`; its benchmark clients reuse the
+shared tooling in `benchmarking/`.
+
 Earlier studies and compatibility reference imports are now grouped in
 [`historical/`](historical/README.md). The archive retains their saved
 evidence and original numerical methods; some entry points use retired APIs.

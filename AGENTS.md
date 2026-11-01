@@ -121,6 +121,7 @@ Keep the single `development/` parent; do not recreate `development_new/` or
 
 | Study | Purpose |
 |---|---|
+| [roe_method](development/roe_method/README.md) | Final general-EOS model-owned Roe formulation, PH/flow verification and reproducible four-flux benchmark |
 | [euler_nozzle](development/roberto/historical/euler_nozzle/README.md) | Readable steady nozzle and unsteady Sod verification against analytic solutions |
 | [numerical_fixes](development/roberto/numerical_fixes/README.md) | Flux/projector/entropy-regularization and limiter repairs; legacy/corrected comparison |
 | [newton_solve](development/roberto/historical/newton_solve/README.md) | Retained Newton/PTC/implicit comparison and consolidated explanations of earlier failures |

@@ -91,6 +91,80 @@ $(N+1,K)$. Here $K$ is the number of characteristic families. With fused face
 data, `face_characteristics_from_data(left,right,delta_factor,aux_left,aux_right)`
 can reuse property evaluations. HLL and Rusanov require no eigenvectors.
 
+### Optional Roe capability
+
+Selecting `Scheme(flux="roe")` requires either of these model callbacks:
+
+```python
+face_roe_data(left, right, delta_factor)
+face_roe_data_from_data(left, right, delta_factor, aux_left, aux_right)
+```
+
+The second alternative requires `face_data`; its two auxiliary arguments are
+the opaque payloads returned for the reconstructed left and right states.
+It avoids duplicate EOS/property evaluations. The structural protocols
+`RoeModel` and `FusedRoeModel` describe these alternatives; inheritance is not
+required. A direct Roe model does **not** need `face_speed_bounds`, because its
+selected flux uses the supplied eigenspaces rather than HLL/Rusanov bounds.
+If the model supplies the fused `face_data` bundle, that bundle still includes
+the normal `speed_bounds` entry defined above.
+
+Return a dictionary with these required entries:
+
+| Entry | Shape and responsibility |
+|---|---|
+| `projectors` | $(N+1,K,V,V)$ conservative spectral projectors |
+| `eigenvalues` | $(N+1,K)$ real interface wave speeds, in matching order |
+| `width` | $(N+1,K)$ finite nonnegative entropy-regularization widths |
+| `valid` | Boolean $(N+1,)$ vector identifying admissible Roe data at each face |
+
+The wave-group count $K$ is independent of the equation count $V$. A repeated
+speed may use one higher-rank projector: annular Euler uses three groups for
+four equations, with contact and shear combined in its convective group.
+Additional diagnostic dictionary entries are permitted. For the Roe selector,
+`Operator.roe_data(full)` exposes the reconstructed model data for inspection.
+
+The model owns the finite-jump averaging/linearization rule, its real spectrum,
+entropy policy and supported physical domain. Its matrix must satisfy the Roe
+consistency and finite-jump identities in its stated domain to the documented
+floating-point/EOS resolution; evaluating an arbitrary mean-state Jacobian is
+insufficient. Verify projector completeness,
+idempotence and wave matching independently. The generic numerical layer only
+contracts the supplied data:
+
+$$
+\widehat F=\frac{F_L+F_R}{2}
+-\frac12\sum_{k=1}^{K}\psi(\lambda_k,\delta_k)P_k(Q_R-Q_L).
+$$
+
+Conserved states, physical fluxes and projectors must use the **same unweighted
+conservative face frame**. Evaluate both states at the same fixed face geometry
+(for example, the same annular face radius). The engine then calls
+`flux_to_conserved_frame` once and multiplies by face area once. Do not include
+either transformation or area weighting inside the Roe projectors/contraction.
+
+Positive widths select the Harten regularized absolute value. A zero width
+selects the exact absolute value, retaining its mathematical kink at zero;
+the implementation avoids dividing by zero in inactive AD branches. Euler
+regularizes its acoustic groups and leaves the contact/shear group unregularized.
+Other physical models supply their own explicit entropy-width policy.
+
+Set `valid=False` for unsupported/invalid interface averages, even if an
+inactive arithmetic placeholder permits finite tracing. The operator combines
+this flag with finite projector/speed checks and nonnegative width checks in
+its admissibility predicate. Invalid data reject the nonlinear candidate or
+explicit stage; they do not select a different flux or clip physical data.
+These checks do not establish positivity or entropy stability for arbitrary
+models/EOS. Physical admissibility and consistent thermodynamic derivatives
+remain model responsibilities.
+
+Explicit Roe timestep selection also bounds the actual interface dissipation
+$\max_k\psi(\lambda_k,\delta_k)$ on both faces adjacent to each cell, together
+with the existing model wave-speed bound. Interface Roe speeds can exceed
+cell physical speeds after large velocity/shear jumps. This restriction uses
+the callback data without interpreting physical variables; the implicit
+pseudo-time wave bound retains its existing definition.
+
 Dependency declarations are mathematical promises, not performance hints.
 The engine combines them with its reconstruction/filter reach when coloring
 the Jacobian. Underdeclared dependencies can discard derivatives. Declare
@@ -103,6 +177,7 @@ dense AD and a directional finite difference before relying on its declarations.
 
 | Callback | Purpose |
 |---|---|
+| `face_roe_data(left,right,delta_factor)` or fused `face_roe_data_from_data(...)` | Optional model-owned finite-jump Roe eigenspaces, entropy widths and per-face validity; required only for `flux="roe"` |
 | `cell_admissible(physical)` | Scalar boolean for safe local storage recovery |
 | `boundary_admissible(full)` | Scalar boolean for safe endpoint completion |
 | `boundary_wave_speed(full)` | Nonnegative $(2,)$ endpoint speeds included in the wave timestep |

@@ -15,6 +15,14 @@ Explore the [interactive architecture map](docs/architecture/ARCHITECTURE.html),
 [detailed architecture guide](docs/architecture/ARCHITECTURE.md).
 
 
+## Roe numerical flux
+
+The shared FVM engine supports `Scheme(flux="roe")` for nozzle and annular
+Euler, with model-owned general-EOS PH averaging. The generic numerical kernel
+contains no EOS assumptions. Characteristic FVS remains the default.
+See [the final Roe study](development/roe_method/README.md) for the implemented
+theory, verification results, limitations and reproducible benchmark/report commands.
+
 ## Cloning git repository and installing dependencies
 
 Install Python 3.12-3.13 and Poetry, then clone the repository and install the
