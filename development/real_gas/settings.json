@@ -12,7 +12,10 @@
   "fluxes": [
     "rusanov",
     "hll",
-    "roe"
+    "roe",
+    "stadtke",
+    "osher_gauss",
+    "osher_partitioned"
   ],
   "reconstructions": [
     "constant",
@@ -72,5 +75,26 @@
     "boundary_tolerance": 1e-09,
     "global_tolerance": 1e-09,
     "initial_floor": 1e-14
+  },
+  "flux_options": {
+    "stadtke": {
+      "flux": "stadtke",
+      "custom_jump_correction": true,
+      "custom_endpoint_envelope": true
+    },
+    "osher_gauss": {
+      "flux": "osher",
+      "quadrature_points": 5,
+      "integration": "gauss"
+    },
+    "osher_partitioned": {
+      "flux": "osher",
+      "quadrature_points": 5,
+      "integration": "sonic_partitioned"
+    }
+  },
+  "execution_limits": {
+    "default_wall_seconds": 180.0,
+    "osher_wall_seconds": 600.0
   }
 }

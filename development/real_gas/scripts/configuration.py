@@ -18,3 +18,18 @@ def case_settings(profile, fluid_case, regime, definitions=None):
 
 def case_settings_id(profile, fluid_case, regime):
     return identity(case_settings(profile, fluid_case, regime))
+
+
+def scheme_options(profile, method):
+    """Resolve a report method to its explicit production Scheme options."""
+    if method not in profile['fluxes']:
+        raise ValueError(f'Unknown benchmark flux: {method}')
+    options = dict(profile['scheme'], flux=method)
+    options.update(profile.get('flux_options', {}).get(method, {}))
+    return options
+
+
+def scheme_matches(profile, method, saved):
+    """Check all declared controls, allowing extra serialized default fields."""
+    return all(saved.get(key) == value
+               for key, value in scheme_options(profile, method).items())

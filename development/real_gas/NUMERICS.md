@@ -17,9 +17,45 @@ R_i=A_{i+1/2}\widehat F_{i+1/2}-A_{i-1/2}\widehat F_{i-1/2}
 $$
 
 Face states use constant reconstruction or linear MUSCL with the Van Leer
-limiter. Rusanov, HLL and Roe are the production numerical fluxes. The geometric
+limiter. Rusanov, HLL, Roe, corrected Stadtke and Osher are the production
+numerical flux families. The geometric
 source uses midpoint cell pressure. Reservoir and outlet equations are solved
 together with the cell equations by implicit Euler/Newton iteration.
+
+## Corrected Stadtke
+
+Both custom corrections are enabled: the conservative-jump correction and the
+endpoint characteristic-speed envelope. For model-provided mean projectors
+$P_k$, characteristic speeds $\lambda_k$, Harten absolute speeds $\phi_k$ and
+endpoint speeds $\lambda_{k,L},\lambda_{k,R}$, the resulting contraction is
+
+$$
+\widehat F=\frac{F_L+F_R}{2}
+-\frac12\sum_k\nu_kP_k(U_R-U_L),\qquad
+\nu_k=\max\left(\phi_k,|\lambda_{k,L}|,|\lambda_{k,R}|\right).
+$$
+
+These corrections are project additions to the original Stadtke FVS formula.
+The mean characteristic construction does not impose Roe's finite-jump secant
+condition. The exact options are saved in each stage's `scheme` object.
+
+## Osher path viscosity
+
+The model's primitive path is $W(s)=W_L+s(W_R-W_L)$, with $W=(p,u,h)$ and
+$0\le s\le1$. Storage differentiation supplies $dU(W(s))/ds$. The flux is
+
+$$
+\widehat F=\frac{F_L+F_R}{2}
+-\frac12\int_0^1\sum_k\phi_k(W(s))P_k(W(s))
+\frac{dU(W(s))}{ds}\,ds.
+$$
+
+The Gauss configuration applies a five-point rule to the whole path. The
+sonic-partitioned configuration applies a five-point rule on each panel bounded
+by captured characteristic zeroes and Harten-transition crossings. Quadrature
+and integration policy are independent of constant/MUSCL reconstruction.
+The production validity check rejects inadmissible sampled path states;
+finite sampling does not certify every point of an arbitrary EOS path.
 
 ## General-EOS Roe data
 

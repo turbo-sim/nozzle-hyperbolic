@@ -5,7 +5,7 @@ from itertools import product
 import numpy as np
 
 from .common import OUTPUT, identity, save, source_for_flux
-from .configuration import case_settings_id
+from .configuration import case_settings_id, scheme_matches
 
 
 def main():
@@ -49,6 +49,7 @@ def main():
         state = np.asarray(row["state"], dtype=float)
         tests = dict(
             same_source=row["source_sha256"] == identity(source_for_flux(metadata, row["flux"])),
+            same_flux_configuration=scheme_matches(settings, row['flux'], row['scheme']),
             same_case_settings=row["case_settings_sha256"] == case_settings_id(
                 settings,
                 row["case_id"][:-(len("adapted")+1)] if row["case_id"].endswith("_adapted")

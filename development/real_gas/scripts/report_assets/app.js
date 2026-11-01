@@ -12,9 +12,14 @@ if(embeddedData.dataset.encoding==="gzip-base64") {
 const campaign = JSON.parse(campaignText);
 campaignText="";
 const $ = id => document.getElementById(id);
-const FLUXES = ["rusanov", "hll", "roe"];
-const FLUX_NAME = {rusanov:"Rusanov",hll:"HLL",roe:"Roe"};
-const COLORS = {rusanov:"#6a00a8",hll:"#cc4778",roe:"#fca636"};
+const FLUXES = campaign.settings.fluxes;
+const FLUX_NAME = {rusanov:"Rusanov",hll:"HLL",roe:"Roe",stadtke:"Stadtke · corrected"};
+for(const method of FLUXES) {
+ const options=campaign.settings.flux_options?.[method];
+ if(options?.flux==="osher") FLUX_NAME[method]=`Osher · ${options.integration==="sonic_partitioned"?"sonic-partitioned":"Gauss"} ${options.quadrature_points??5}`;
+}
+const PALETTE = ["#6a00a8","#9b179e","#bd3786","#d8576b","#ed7953","#fca636"];
+const COLORS = Object.fromEntries(FLUXES.map((flux,index)=>[flux,PALETTE[index%PALETTE.length]]));
 const FIELD_INFO = {
  p:{label:"Pressure",unit:"MPa",scale:1e-6},rho:{label:"Density",unit:"kg/m³",scale:1},
  u:{label:"Velocity",unit:"m/s",scale:1},T:{label:"Temperature",unit:"K",scale:1},
@@ -56,7 +61,12 @@ function valueArray(f,key) {if(Array.isArray(f[key]))return f[key];if(key==="M_e
 function history(row,includeRejected=false) {return (row.history||[]).filter(h=>includeRejected||(h.accepted!==false&&h.phase!=="rejected"));}
 function stepCount(row) {const h=history(row);return Math.max(0,...h.map((x,i)=>Number(x.step??i)));}
 function rejectedCount(row) {return history(row,true).filter(h=>h.accepted===false||h.phase==="rejected").length;}
-function historyName(row) {return seriesName(row);}
+function historyName(row) {return seriesName(row)+(row._attemptLabel?` · ${row._attemptLabel}`:row.attempts?.length?" · final attempt":"");}
+function selectedHistoryRows() {
+ const selected=selectedRows();
+ if($("attempt-mode").value!=="all")return selected;
+ return selected.flatMap(row=>[...(row.attempts||[]).map((attempt,index)=>({...row,...attempt,_retained:true,_attemptLabel:`retained attempt ${index+1}`})),{...row,_attemptLabel:row.attempts?.length?"final attempt":""}]);
+}
 function error(row,field,norm="l1") {
  if(field==="mass_flow") {
   const v=row.audit?.conservation?.numerical_face_mass_flow_relative_reference_error;
@@ -77,7 +87,7 @@ function status(row) {
  if(row.success)return {label:row.audit?.passed===false?"Audit failed":"Native success",css:row.audit?.passed===false?"fail":"partial"};
  return {label:row.reason==="blocked"||row.blocked?"Blocked":"Not converged",css:"fail"};
 }
-function lineStyle(row) {return {color:COLORS[row.flux]||"#777",width:1.9,dash:row.reconstruction==="constant"?"dash":"solid"};}
+function lineStyle(row) {return {color:COLORS[row.flux]||"#777",width:row._retained?1:1.9,dash:row._retained?"dot":row.reconstruction==="constant"?"dash":"solid"};}
 function theme() {
  const css=getComputedStyle(document.documentElement);
  return {paper:css.getPropertyValue("--paper").trim(),ink:css.getPropertyValue("--ink").trim(),muted:css.getPropertyValue("--muted").trim(),grid:css.getPropertyValue("--grid").trim(),reference:css.getPropertyValue("--reference").trim()};
@@ -144,7 +154,7 @@ function acceptedHistoryTrace(row,key,mode) {
  return {type:"scatter",mode:"lines",name:historyName(row),x,y,line:lineStyle(row),hovertemplate:`${escape(historyName(row))}<br>Step %{x}<br>%{y:.5e}<extra></extra>`};
 }
 function renderHistory() {
- const selected=selectedRows(),mode=$("residual-mode").value;
+ const selected=selectedHistoryRows(),mode=$("residual-mode").value;
  const all=(key)=>selected.map(row=>acceptedHistoryTrace(row,key,mode)).filter(Boolean);
  const resLabel=mode==="relative"?"Largest relative equation norm":mode==="ratio"?"Largest equation stopping ratio":"Maximum equation RMS [fixed scale]";
  const residualLayout=baseLayout("Original spatial residual","Accepted stage step",resLabel);
@@ -204,8 +214,9 @@ function renderSummary() {
  $("kpi-error").textContent=percent(maxFinite(selected.map(r=>error(r,"mass_flow"))));
  const source=unique(selected.map(r=>r.source_cells??r.initialization?.source_cells).filter(finite));
  const notRun=selected.every(r=>r.reason==="not_completed"||r.reason==="not_run");
- $("kpi-multigrid").textContent=!notRun&&Number($("mesh").value)===50?"Cold start":"Coarse to fine";
- $("kpi-sequence").textContent=source.length?`${source.join(" / ")} to ${$("mesh").value} cells - transferred state`:`${$("mesh").value} cells - first sequence stage`;
+ const restarts=selected.filter(row=>row.attempts?.length).length;
+ $("kpi-multigrid").textContent=!notRun&&Number($("mesh").value)===50?"Cold start":restarts?"Grid sequence + retry":"Coarse to fine";
+ $("kpi-sequence").textContent=(source.length?`${source.join(" / ")} to ${$("mesh").value} cells - transferred state`:`${$("mesh").value} cells - cold initialization`)+(restarts?`; ${restarts} cold restart${restarts===1?"":"s"}`:"");
  const bad=selected.filter(r=>status(r).css!=="pass");
  $("selection-notice").style.display=bad.length||!selected.length?"block":"none";
  $("selection-notice").textContent=!selected.length?"No recorded run matches this selection. Choose another method or mesh.":notRun?"The selected mesh stages have not completed.":`${bad.length} selected run${bad.length===1?" is":"s are"} not independently verified. Inspect the status and audits.`;
@@ -222,8 +233,8 @@ function renderSummary() {
  const cold=campaign.settings?.cold_start;
  if(cold?.adapted==="table_mach_ramp")$("cold-start-note").textContent=`The adapted 50-cell stage uses a rough cold ramp: pressure and velocity vary linearly from the reservoir to the outlet guess, with inlet u/a₀ = ${number(cold.inlet_velocity_over_a0,3)}, target outlet table Mach ${number(cold.outlet_mach_table,3)}, and h = h₀ − u²/2. No analytic area–Mach solution, choked mass flow or shock location is used. Shock cases use the production default cold state. Finer grids receive the preceding successful mesh state through the production grid-sequence driver.`;
  const budgetRows=rows.filter(r=>r.execution_controls),budget=budgetRows[0]?.execution_controls;
- $("execution-note").innerHTML=budget?`<strong>Execution limits.</strong><p>The production step ceiling is 16,000. Declared study execution controls include a ${number(budget.wall_seconds,0)} s callback-checked wall budget and a ${number(budget.plateau_window,0)}-step collapsed-CFL progress check. A budget stop is unsuccessful. Convergence always requires the original spatial residual, boundary and global conservation tests to pass. Per-stage execution controls and measured solve times are included in the downloadable data.</p>`:"";
- $("selected-audits").textContent=JSON.stringify(selected.map(row=>({id:row.id,case_id:row.case_id,flux:row.flux,reconstruction:row.reconstruction,cells:row.cells,success:row.success,reason:row.reason,initialization:row.initialization,source_cells:row.source_cells,execution_controls:row.execution_controls,history_rows:row.history?.length||0,metrics:row.metrics,audit:row.audit,errors:row.errors})),null,2);
+ $("execution-note").innerHTML=budget?`<strong>Execution limits.</strong><p>The production step ceiling is 16,000. The execution profile permits ${number(campaign.settings.execution_limits?.osher_wall_seconds??budget.wall_seconds,0)} s per Osher attempt and ${number(campaign.settings.execution_limits?.default_wall_seconds??budget.wall_seconds,0)} s for other methods, checked at callbacks. A ${number(budget.plateau_window,0)}-step collapsed-CFL progress check also applies. A budget stop is unsuccessful. Convergence always requires the original spatial residual, boundary and global conservation tests to pass. Per-stage execution controls and measured solve times are included in the downloadable data.</p>`:"";
+ $("selected-audits").textContent=JSON.stringify(selected.map(row=>({id:row.id,case_id:row.case_id,flux:row.flux,reconstruction:row.reconstruction,cells:row.cells,scheme:row.scheme,success:row.success,reason:row.reason,initialization:row.initialization,source_cells:row.source_cells,execution_controls:row.execution_controls,history_rows:row.history?.length||0,attempts:(row.attempts||[]).map(a=>({reason:a.reason,success:a.success,elapsed_s:a.elapsed_s,history_rows:a.history?.length||0,metrics:a.metrics})),metrics:row.metrics,audit:row.audit,errors:row.errors})),null,2);
 }
 async function render() {
  const own=++renderNumber;lastPlots=[];renderSummary();
@@ -252,8 +263,8 @@ function downloadFields() {
 }
 function downloadHistory() {
  const out=[];
- for(const row of selectedRows())for(const h of history(row,true))out.push([row.case_id,row.flux,row.reconstruction,row.cells,h.step,h.phase,h.accepted,h.retry,h.cfl,h.dt,...(h.equation_norm||[null,null,null]),h.overall_relative,h.equation_max_ratio,h.boundary_max,maxFinite(h.global_defect||[]),h.inner_iterations]);
- download(`co2_${selectedCase().id}_${$("mesh").value}_history.csv`,"text/csv;charset=utf-8",csv(["case_id","flux","reconstruction","cells","step","phase","accepted","retry","cfl","dt_s","mass_equation_norm","momentum_equation_norm","energy_equation_norm","overall_relative","equation_max_ratio","boundary_max","global_defect_max","inner_iterations"],out));
+ for(const row of selectedHistoryRows())for(const h of history(row,true))out.push([row.case_id,row.flux,row.reconstruction,row.cells,row._attemptLabel||"final attempt",h.step,h.phase,h.accepted,h.retry,h.cfl,h.dt,...(h.equation_norm||[null,null,null]),h.overall_relative,h.equation_max_ratio,h.boundary_max,maxFinite(h.global_defect||[]),h.inner_iterations]);
+ download(`co2_${selectedCase().id}_${$("mesh").value}_history.csv`,"text/csv;charset=utf-8",csv(["case_id","flux","reconstruction","cells","attempt","step","phase","accepted","retry","cfl","dt_s","mass_equation_norm","momentum_equation_norm","energy_equation_norm","overall_relative","equation_max_ratio","boundary_max","global_defect_max","inner_iterations"],out));
 }
 function initialize() {
  const physical=unique(cases.map(phys));
@@ -268,14 +279,14 @@ function initialize() {
  $("campaign-state").textContent=`${verified} independently verified mesh stages`;
  const savedTheme=(()=>{try{return localStorage.getItem("co2-fvm-theme");}catch{return null;}})();
  document.documentElement.dataset.theme=savedTheme||"light";
- for(const id of ["physical-case","regime","mesh","reconstruction","methods","residual-mode","error-field"])$(id).addEventListener("change",render);
+ for(const id of ["physical-case","regime","mesh","reconstruction","methods","residual-mode","attempt-mode","error-field"])$(id).addEventListener("change",render);
  document.querySelectorAll(".tabs button").forEach(button=>button.addEventListener("click",()=>switchPage(button.dataset.page)));
  $("theme").addEventListener("click",()=>{const t=document.documentElement.dataset.theme==="dark"?"light":"dark";document.documentElement.dataset.theme=t;try{localStorage.setItem("co2-fvm-theme",t);}catch{}render();});
  $("download-data").addEventListener("click",()=>download("co2_fvm_report_data.json","application/json",JSON.stringify(campaign,null,2)+"\n"));
  $("download-fields").addEventListener("click",downloadFields);$("download-history").addEventListener("click",downloadHistory);
  render();
 }
-window.nozzleReport={campaign,selectedRows,selectedCase,switchPage,render,status,errorValue:error,downloadFields,downloadHistory,snapshot:()=>({page,renderNumber,rendered,plotIds:lastPlots,caseId:selectedCase()?.id,mesh:Number($("mesh").value),rows:selectedRows().length})};
+window.nozzleReport={campaign,selectedRows,selectedHistoryRows,selectedCase,switchPage,render,status,errorValue:error,downloadFields,downloadHistory,snapshot:()=>({page,renderNumber,rendered,plotIds:lastPlots,caseId:selectedCase()?.id,mesh:Number($("mesh").value),rows:selectedRows().length})};
 initialize();
 })().catch(error=>{
  window.nozzleReportLoadError=String(error?.message||error);

@@ -22,21 +22,23 @@ from .common import (STUDY, OUTPUT, clean, identity, save, source_manifest,
                      source_for_flux, require_current_source)
 from .problem import load_context
 from .audit import evaluate_solution
-from .execution import budgeted_solve, CONTROLS
-from .configuration import case_settings_id
+from .execution import budgeted_solve, controls_for
+from .configuration import case_settings_id, scheme_options, scheme_matches
 from nozzle_hyperbolic.solvers.fvm import drivers
 
 
 def main():
+    profile = json.loads((STUDY / "settings.json").read_text())
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--fluid-case", required=True)
     parser.add_argument("--regime", choices=("adapted", "shock"), required=True)
-    parser.add_argument("--flux", choices=("rusanov", "hll", "roe"), required=True)
+    parser.add_argument("--flux", choices=profile['fluxes'], required=True)
     parser.add_argument("--reconstruction", choices=("constant", "muscl_van_leer"), required=True)
     parser.add_argument("--grids", nargs="+", type=int)
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument('--retry-budget-stops', action='store_true',
+                        help='Recompute wall-budget stops, retaining their full attempts')
     args = parser.parse_args()
-    profile = json.loads((STUDY / "settings.json").read_text())
     grids = tuple(args.grids or profile["grids"])
     case_id = args.fluid_case + "_" + args.regime
     chain = "__".join((case_id, args.flux, args.reconstruction))
@@ -68,18 +70,20 @@ def main():
     case_settings_sha = case_settings_id(profile, args.fluid_case, args.regime)
     initial_solution, previous_cells = None, None
     records = []
-    remaining = list(grids)
+    saved = {}
     if args.resume or any(folder.glob("N*.json")):
         for cells in grids:
             path = folder / f"N{cells}.json"
             if not path.exists():
-                break
+                continue
             result = json.loads(path.read_text())
-            if result.get("case_settings_sha256") != case_settings_sha or result.get("source_sha256") != source_id:
+            if (result.get("case_settings_sha256") != case_settings_sha
+                    or result.get("source_sha256") != source_id
+                    or not scheme_matches(profile, args.flux, result['scheme'])):
                 raise RuntimeError("Refusing resume with changed settings or source")
-            records.append(result)
-            remaining.remove(cells)
-            previous_cells = cells
+            saved[cells] = result
+    remaining = [cells for cells in grids if cells not in saved or (
+        args.retry_budget_stops and saved[cells]['reason'] == 'study_wall_time_budget')]
     if not remaining:
         print(f"COMPLETE {chain}: all requested stages are saved", flush=True)
         return
@@ -87,17 +91,10 @@ def main():
     require_current_source(metadata, args.flux)
     source_files = source_manifest()
     context = load_context(args.fluid_case, args.regime)
-    scheme = Scheme(flux=args.flux, reconstruction=args.reconstruction, **profile["scheme"])
+    scheme = Scheme(reconstruction=args.reconstruction, **scheme_options(profile, args.flux))
     policy = ResidualPolicy(**profile["residual"])
     settings = SteadySettings(residual=policy, **profile["steady"])
     model_factory = lambda cells: context.model(cells, cold_start=profile.get("cold_start"))
-    if records and records[-1]["success"]:
-        result = records[-1]
-        model = model_factory(result["cells"])
-        initial_solution = SimpleNamespace(
-            success=True, state=np.asarray(result["state"]),
-            operator=SimpleNamespace(mesh=model.mesh),
-        )
 
     def on_stage(model, solution, stages):
         nonlocal previous_cells
@@ -123,7 +120,23 @@ def main():
             newton_corrections=sum(row.get("inner_iterations", 0) for row in history),
             rejected_newton_trials=sum(row.get("rejected_newton_trials", 0) for row in history),
         )
-        retained_attempt_time = sum(float(attempt.get("elapsed_s", 0)) for attempt in stage["attempts"])
+        attempts = [dict(attempt, execution_controls=controls_for(scheme))
+                    for attempt in stage['attempts']]
+        if cells in saved:
+            prior = saved[cells]
+            prior_attempts = [dict(attempt, execution_controls=attempt.get(
+                'execution_controls', prior.get('execution_controls')))
+                for attempt in prior.get('attempts', [])]
+            attempts = [*prior_attempts, dict(
+                initialization=prior['initialization']['method'],
+                success=prior['success'], reason=prior['reason'],
+                state=prior['state'], metrics=prior['metrics'], history=prior['history'],
+                elapsed_s=prior.get('final_attempt_elapsed_s', prior['elapsed_s']),
+                execution_controls=prior.get('execution_controls'),
+                source_sha256=prior['source_sha256'], scheme=prior['scheme'],
+                audit=prior['audit'],
+            ), *attempts]
+        retained_attempt_time = sum(float(attempt.get("elapsed_s", 0)) for attempt in attempts)
         result = dict(
             id=f"{chain}__N{cells}", case_id=case_id, flux=args.flux,
             reconstruction=args.reconstruction, cells=cells,
@@ -134,11 +147,11 @@ def main():
             chain_elapsed_s=perf_counter()-start,
             initialization=dict(method=stage["initialization"], source_cells=previous_cells
                                 if "prolongation" in stage["initialization"] else None),
-            attempts=stage["attempts"], state=solution.state, history=history,
+            attempts=attempts, state=solution.state, history=history,
             metrics=solution.metrics, work=work, scheme=asdict(scheme),
             case_settings_sha256=case_settings_sha, source_sha256=source_id,
             roe_metadata=getattr(model, "roe_metadata", None) if args.flux == "roe" else None,
-            execution_controls=CONTROLS,
+            execution_controls=controls_for(scheme),
             table_sha256=context.eos.table_sha256,
             **evaluation,
         )
@@ -150,8 +163,29 @@ def main():
     try:
         if remaining:
             with patch.object(drivers, "solve_single_grid", budgeted_solve):
-                solve_grid_sequence(model_factory, cells=remaining, scheme=scheme, settings=settings,
-                                    on_stage=on_stage, initial_solution=initial_solution)
+                index = 0
+                while index < len(grids):
+                    cells = grids[index]
+                    if cells not in remaining:
+                        result = saved[cells]
+                        records.append(result)
+                        previous_cells = cells if result['success'] else None
+                        if result['success']:
+                            model = model_factory(cells)
+                            initial_solution = SimpleNamespace(
+                                success=True, state=np.asarray(result['state']),
+                                operator=SimpleNamespace(mesh=model.mesh))
+                        else:
+                            initial_solution = None
+                        index += 1
+                        continue
+                    end = index
+                    while end < len(grids) and grids[end] in remaining:
+                        end += 1
+                    initial_solution, _ = solve_grid_sequence(
+                        model_factory, cells=grids[index:end], scheme=scheme, settings=settings,
+                        on_stage=on_stage, initial_solution=initial_solution)
+                    index = end
         completed_cells = [r["cells"] for r in records]
         save(folder / "chain.json", dict(chain=chain,
                                         completed=set(profile["grids"]).issubset(completed_cells),

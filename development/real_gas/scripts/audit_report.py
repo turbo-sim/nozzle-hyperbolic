@@ -99,7 +99,8 @@ async def exercise(websocket_url, html, output):
               passed:verified===Number(el.dataset.verified)&&selected.length===Number(el.dataset.total)};
           });
         })()""")
-        checks.append(dict(name="overall_per_flux_verification_counts", passed=len(flux_counts) == 3 and all(c["passed"] for c in flux_counts), detail=flux_counts))
+        expected_fluxes = await browser.evaluate('nozzleReport.campaign.settings.fluxes.length')
+        checks.append(dict(name="overall_per_flux_verification_counts", passed=len(flux_counts) == expected_fluxes and all(c["passed"] for c in flux_counts), detail=flux_counts))
         source_status = await browser.evaluate("""(()=>{
           const c=nozzleReport.campaign,m=c.metadata||{},assigned=m.source_by_flux||{};
           return {source_by_flux:assigned,
@@ -109,9 +110,9 @@ async def exercise(websocket_url, html, output):
         final_results = await browser.evaluate("""(()=>{
           const c=nozzleReport.campaign;
           const expected=c.cases.length*c.settings.fluxes.length*c.settings.reconstructions.length*c.settings.grids.length;
-          return c.results.length===expected&&c.results.every(r=>r.success&&r.audit?.passed===true);
+          return c.results.length===expected&&c.results.every(r=>r.reason!=='not_completed'&&r.verified===(r.success&&r.audit?.passed===true));
         })()""")
-        checks.append(dict(name="verified_final_configuration_matrix", passed=bool(final_results)))
+        checks.append(dict(name="complete_configuration_matrix_and_honest_statuses", passed=bool(final_results)))
         data_status = await browser.evaluate("""(()=>{
           const d=document.getElementById('data'),rows=nozzleReport.campaign.results;
           const final=rows.reduce((s,r)=>s+(r.history?.length||0),0);
@@ -150,9 +151,12 @@ async def exercise(websocket_url, html, output):
             await browser.settled()
             passed = await browser.evaluate("document.getElementById('reconstruction').value==='both'||nozzleReport.selectedRows().every(r=>r.reconstruction===document.getElementById('reconstruction').value)")
             checks.append(dict(name=f"reconstruction_{reconstruction}", passed=bool(passed)))
-        await browser.evaluate("document.querySelectorAll('#methods input').forEach(e=>e.checked=e.value==='roe');nozzleReport.render()")
-        await browser.settled()
-        checks.append(dict(name="single_flux_filter", passed=await browser.evaluate("nozzleReport.selectedRows().every(r=>r.flux==='roe')")))
+        methods = await browser.evaluate('nozzleReport.campaign.settings.fluxes')
+        for method in methods:
+            await browser.evaluate(f"document.querySelectorAll('#methods input').forEach(e=>e.checked=e.value==={json.dumps(method)});nozzleReport.render()")
+            await browser.settled()
+            passed = await browser.evaluate(f"nozzleReport.selectedRows().length>0&&nozzleReport.selectedRows().every(r=>r.flux==={json.dumps(method)})")
+            checks.append(dict(name=f'single_flux_filter_{method}', passed=bool(passed)))
         await browser.evaluate("document.querySelectorAll('#methods input').forEach(e=>e.checked=false);nozzleReport.render()")
         await browser.settled()
         checks.append(dict(name="empty_flux_selection", passed=await browser.evaluate("nozzleReport.selectedRows().length===0&&document.getElementById('selection-notice').style.display==='block'")))
@@ -170,6 +174,24 @@ async def exercise(websocket_url, html, output):
             await browser.evaluate(f"document.getElementById('residual-mode').value='{mode}';nozzleReport.switchPage('convergence')")
             await browser.settled()
             checks.append(dict(name=f"residual_view_{mode}", passed=True))
+        await browser.evaluate("""(()=>{
+          const c=nozzleReport.campaign;
+          const row=c.results.find(r=>r.attempts?.length);
+          if(row){const physical=c.cases.find(v=>v.id===row.case_id);
+            document.getElementById('physical-case').value=physical.fluid_case;
+            document.getElementById('regime').value=physical.regime;
+            document.getElementById('mesh').value=String(row.cells);}
+        })()""")
+        for scope in ('final', 'all'):
+            await browser.evaluate(f"document.getElementById('attempt-mode').value='{scope}';nozzleReport.switchPage('convergence')")
+            await browser.settled()
+            correct = await browser.evaluate("""(()=>{
+              const selected=nozzleReport.selectedRows();
+              const expected=selected.length+(document.getElementById('attempt-mode').value==='all'?selected.reduce((n,r)=>n+(r.attempts?.length||0),0):0);
+              return nozzleReport.selectedHistoryRows().length===expected;
+            })()""")
+            checks.append(dict(name=f'history_attempt_scope_{scope}', passed=bool(correct)))
+        await browser.evaluate("document.getElementById('attempt-mode').value='final'")
         error_fields = await browser.evaluate("[...document.getElementById('error-field').options].map(o=>o.value)")
         for field in error_fields:
             await browser.evaluate(f"document.getElementById('error-field').value={json.dumps(field)};nozzleReport.switchPage('refinement')")

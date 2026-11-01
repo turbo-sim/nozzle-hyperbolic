@@ -84,6 +84,50 @@ def harness_manifest():
     return {p.relative_to(STUDY).as_posix(): sha256(p.read_bytes()).hexdigest() for p in files}
 
 
+def synchronize_campaign(metadata, profile):
+    """Add methods while verifying the configuration of every saved stage."""
+    from .configuration import case_settings_id, scheme_matches
+    for path in (OUTPUT / 'runs').glob('*/N*.json'):
+        row = json.loads(path.read_text(encoding='utf-8'))
+        fluid, regime = row['case_id'].rsplit('_', 1)
+        if (row['flux'] not in profile['fluxes']
+                or fluid not in profile['fluid_cases'] or regime not in profile['regimes']
+                or row['cells'] not in profile['grids']
+                or row['reconstruction'] not in profile['reconstructions']
+                or row['case_settings_sha256'] != case_settings_id(profile, fluid, regime)
+                or not scheme_matches(profile, row['flux'], row['scheme'])
+                or row['source_sha256'] != metadata['source_by_flux'][row['flux']]):
+            raise RuntimeError(f'Saved stage configuration changed: {row["id"]}')
+    added = set(profile['fluxes']) - set(metadata['source_by_flux'])
+    if added:
+        files = source_manifest()
+        source_id = identity(files)
+        if source_id not in metadata['sources']:
+            number = 0
+            while (OUTPUT / f'source_{chr(65 + number)}').exists():
+                number += 1
+            name = f'source_{chr(65 + number)}'
+            folder = (OUTPUT / name).resolve()
+            if not folder.is_relative_to(OUTPUT.resolve()):
+                raise RuntimeError('Source snapshot outside campaign output')
+            for relative, expected in files.items():
+                destination = folder / relative
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(REPO / relative, destination)
+                if sha256(destination.read_bytes()).hexdigest() != expected:
+                    raise RuntimeError('Source changed during snapshot copy')
+            if source_manifest() != files:
+                raise RuntimeError('Source changed during snapshot copy')
+            save(folder / 'manifest.json', dict(source_sha256=source_id, files=files))
+            metadata['sources'][source_id] = dict(files=files, snapshot=name)
+        metadata['source_by_flux'].update({method: source_id for method in added})
+        metadata['execution_source_sha256'] = source_id
+    if set(metadata['source_by_flux']) != set(profile['fluxes']):
+        raise RuntimeError('Method removal requires a separate campaign')
+    metadata['settings_sha256'] = identity(profile)
+    return metadata
+
+
 def provenance():
     files = source_manifest()
     source_id = identity(files)

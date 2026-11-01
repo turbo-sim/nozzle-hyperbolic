@@ -8,7 +8,7 @@ import sys
 from time import perf_counter
 
 from .common import (STUDY, REPO, OUTPUT, identity, provenance, save,
-                     source_manifest, execution_source)
+                     source_manifest, execution_source, synchronize_campaign)
 
 
 def read_fields(path):
@@ -71,17 +71,18 @@ def assemble(metadata, profile):
 
 
 def main():
+    profile = json.loads((STUDY / "settings.json").read_text())
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--fluid-case", nargs="+", choices=("supercritical", "lettieri_equilibrium"))
     parser.add_argument("--regime", nargs="+", choices=("adapted", "shock"))
-    parser.add_argument("--flux", nargs="+", choices=("rusanov", "hll", "roe"))
+    parser.add_argument("--flux", nargs="+", choices=profile['fluxes'])
     parser.add_argument("--reconstruction", nargs="+", choices=("constant", "muscl_van_leer"))
     parser.add_argument("--grids", nargs="+", type=int)
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument('--retry-budget-stops', action='store_true')
     parser.add_argument("--assemble-only", action="store_true")
     parser.add_argument("--no-report", action="store_true")
     args = parser.parse_args()
-    profile = json.loads((STUDY / "settings.json").read_text())
     OUTPUT.mkdir(exist_ok=True)
     if not args.assemble_only:
         from .prepare_reference import prepare_reference
@@ -94,9 +95,7 @@ def main():
         if existing:
             raise RuntimeError("Existing campaign stages found; use --resume to preserve/reuse them")
         metadata = provenance()
-    save(metadata_file, metadata)
-    if metadata["settings_sha256"] != identity(profile):
-        raise RuntimeError("Saved campaign settings differ from settings.json")
+    metadata = synchronize_campaign(metadata, profile)
     reference_metadata = json.loads((OUTPUT / "reference_summary.json").read_text())["metadata"]
     metadata["reference_fingerprint"] = reference_metadata["reference_fingerprint"]
     save(metadata_file, metadata)
@@ -113,6 +112,8 @@ def main():
                 command += ["--grids", *map(str, args.grids)]
             if args.resume:
                 command.append("--resume")
+            if args.retry_budget_stops:
+                command.append('--retry-budget-stops')
             log = OUTPUT / "logs" / f"{chain}.log"
             log.parent.mkdir(exist_ok=True)
             started = perf_counter()
