@@ -66,7 +66,7 @@ def destination(name):
 def restore(report, output):
     output = Path(output).resolve()
     if not output.is_relative_to((STUDY / "outputs").resolve()):
-        raise ValueError("Restored evidence must stay beneath development/roe_method/outputs")
+        raise ValueError("Restored evidence must stay beneath development/flux_methods/roe/outputs")
     parser = EvidenceParser()
     parser.feed(Path(report).read_text(encoding="utf-8"))
     prefix = "data:application/zip;base64,"

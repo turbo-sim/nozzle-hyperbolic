@@ -1,7 +1,7 @@
 """Classify retained Sod results without changing any measurements/statuses.
 
 Run after verify_sod, including when its strict aggregate exit status is1:
-    poetry run python -B -m development.roe_method.scripts.summarize_sod
+    poetry run python -B -m development.flux_methods.roe.scripts.summarize_sod
 
 The original1e-8 analytic-transfer criterion and all original passed statuses
 remain intact. Discrete flux-budget conservation is reported independently.

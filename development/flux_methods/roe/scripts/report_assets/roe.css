@@ -1,0 +1,9 @@
+﻿/* Layout adjustments specific to Roe's broader verification population. */
+#roe-sod-profiles{margin-bottom:var(--space-5,20px)}
+#roe-sod-profiles>.panel-heading{padding:0 0 12px}
+#roe-sod-profiles .filterbar{padding:12px 0;margin-bottom:12px;border:0}
+#roe-sod-profiles .chart-grid{grid-template-columns:repeat(3,minmax(0,1fr));margin-bottom:0}
+#roe-sod-profiles .plot{height:360px}
+.page-tabs{overflow-x:auto}
+.theory-index{display:flex;flex-wrap:wrap;gap:12px 22px}
+@media(max-width:1000px){#roe-sod-profiles .chart-grid{grid-template-columns:1fr}}

@@ -59,7 +59,7 @@ def main():
     grids=sorted(set(args.grids or config["grids"]));reconstructions=args.reconstructions or config["reconstructions"]
     if not cases or any(case not in available_cases() for case in cases):raise ValueError("Unknown physical case")
     output=args.output.resolve()
-    if not output.is_relative_to((STUDY/"outputs").resolve()):raise ValueError("Verification outputs must stay under roe_method/outputs")
+    if not output.is_relative_to((STUDY/"outputs").resolve()):raise ValueError("Verification outputs must stay under development/flux_methods/roe/outputs")
     output.mkdir(parents=True,exist_ok=True);summary_path=output/"summary.json"
     protocol=dict(config,cases=cases,grids=grids,reconstructions=reconstructions,repeats=1,refinement_repeats=1,output=str(output),
                   verification_only=True,verification_solves_per_configuration=1,excluded_warmup_solves=0,

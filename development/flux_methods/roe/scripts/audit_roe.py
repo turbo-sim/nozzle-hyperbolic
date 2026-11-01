@@ -1,7 +1,7 @@
 """Reproduce general-EOS Roe algebra/property audits, without flow solves.
 
 Run from the repository root:
-    poetry run python -B -m development.roe_method.scripts.audit_roe
+    poetry run python -B -m development.flux_methods.roe.scripts.audit_roe
 
 Endpoint properties are explicitly evaluated with HmassP_INPUTS. PT calls only
 select physical enthalpies and the fixed reference state. All algebra under
@@ -35,7 +35,7 @@ from nozzle_hyperbolic.thermodynamics.adapters import as_jax_fluid
 
 
 STUDY = Path(__file__).resolve().parents[1]
-ROOT = STUDY.parents[1]
+ROOT = STUDY.parents[2]
 SEED, ENDPOINTS, PAIRS = 637, 150, 3000
 SHIFT, RADIUS = -7.3e5, 0.17
 EPS = np.finfo(np.float64).eps

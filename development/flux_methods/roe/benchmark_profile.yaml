@@ -2,7 +2,7 @@
 schema_version: 2
 cases: all
 backends: [current]
-fluxes: [roe, rusanov, hll, characteristic]
+fluxes: [roe, rusanov, hll, stadtke]
 reconstructions: [constant, muscl_van_leer]
 grids: [50, 100, 200, 400]
 newton_caps: [10]
@@ -13,6 +13,8 @@ output: outputs/roe_flux_v1
 complete_solve_timeout_s: 300
 regression_threshold: 1.15
 scheme:
+  custom_jump_correction: false
+  custom_endpoint_envelope: false
   delta_factor: 0.1
   time_integrator: euler-implicit
   boundary_treatment: coupled

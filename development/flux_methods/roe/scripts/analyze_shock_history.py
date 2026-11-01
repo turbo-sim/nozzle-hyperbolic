@@ -13,7 +13,7 @@ from pathlib import Path
 import statistics
 
 
-ROOT = Path(__file__).resolve().parents[3]
+ROOT = Path(__file__).resolve().parents[4]
 STUDY = Path(__file__).resolve().parents[1]
 CAMPAIGN = STUDY / "outputs/roe_steady_verification"
 DEFAULT_ID = "euler_annular__shock35__muscl_van_leer__n400__cap10__current__flux_roe"
@@ -185,7 +185,7 @@ def markdown(data):
               "Saved coarse FVS studies provide context only; there is no maintained same-case, same-grid, same-reconstruction, cap-10 "
               "FVS400 result for a matched comparison. Source/harness differences and resolution differences prevent a quantitative speed conclusion.", "",
               "## Reproduction", "", "```powershell",
-              "poetry run python -B -m development.roe_method.scripts.analyze_shock_history",
+              "poetry run python -B -m development.flux_methods.roe.scripts.analyze_shock_history",
               "```", "",
               "The companion JSON retains counts, exact input/settings hashes, raw-history verification and the verified Newton-source hash. "
               "All processing reads saved evidence only.", ""]

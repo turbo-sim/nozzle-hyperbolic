@@ -3,7 +3,7 @@
 This is the executable protocol for the implemented Roe method. The physical
 cases come from `nozzle_hyperbolic.verification`; the shared runner, assessment,
 auditor and offline renderer live in
-[`development/roberto/benchmarking`](../roberto/benchmarking/README.md).
+[`development/roberto/benchmarking`](../../roberto/benchmarking/README.md).
 No solver, geometry or analytical reference is copied into this study.
 
 The completed evidence contains **160 untimed Roe configurations**. All 160
@@ -29,8 +29,9 @@ flow. The expanded case list and original YAML bytes/hashes are recorded with
 each campaign; a future catalog addition must not silently alter a resumed run.
 
 [`benchmark_profile.yaml`](benchmark_profile.yaml) selects the current production
-backend with `roe`, `rusanov`, `hll` and `characteristic` (the current Städtke-type
-FVS), grids of 50/100/200/400 physical cells, and constant/Van Leer MUSCL
+backend with `roe`, `rusanov`, `hll` and `stadtke` (the original FVS, with
+`custom_jump_correction: false` and `custom_endpoint_envelope: false`), grids
+of 50/100/200/400 physical cells, and constant/Van Leer MUSCL
 reconstruction. The two algebraic endpoint traces are additional unknowns.
 This gives $20\times4\times4\times2=640$ configurations. Different fluxes can
 have different finite-grid roots; compare analytical accuracy and refinement
@@ -117,24 +118,24 @@ Run from the repository root using the existing Poetry environment. First
 generate the PH matrix audit; it checks state pairs, not flow convergence:
 
 ```powershell
-poetry run python -B -m development.roe_method.scripts.audit_roe
+poetry run python -B -m development.flux_methods.roe.scripts.audit_roe
 ```
 
 The numerical-only profile performs one cold solve for each of the 160 Roe
 configurations and deliberately collects no performance samples:
 
 ```powershell
-poetry run python -B -u -m development.roe_method.scripts.verify_steady --config development/roe_method/verification_profile.yaml --output development/roe_method/outputs/roe_steady_verification
-poetry run python -B -m development.roe_method.scripts.audit_steady --input development/roe_method/outputs/roe_steady_verification/summary.json
+poetry run python -B -u -m development.flux_methods.roe.scripts.verify_steady --config development/flux_methods/roe/verification_profile.yaml --output development/flux_methods/roe/outputs/roe_steady_verification
+poetry run python -B -m development.flux_methods.roe.scripts.audit_steady --input development/flux_methods/roe/outputs/roe_steady_verification/summary.json
 ```
 
 For the full four-flux campaign, use an idle machine and a fresh output name.
 The shared runner contains its outputs within the maintained benchmark study:
 
 ```powershell
-poetry run python -B -u -m development.roberto.benchmarking.scripts.run --config development/roe_method/benchmark_profile.yaml --output outputs/roe_flux_v1 --wait-for-idle
+poetry run python -B -u -m development.roberto.benchmarking.scripts.run --config development/flux_methods/roe/benchmark_profile.yaml --output outputs/roe_flux_v1 --wait-for-idle
 poetry run python -B -m development.roberto.benchmarking.scripts.audit --input outputs/roe_flux_v1/summary.json
-poetry run python -B -m development.roberto.benchmarking.scripts.report --input development/roberto/benchmarking/outputs/roe_flux_v1/summary.json --output development/roe_method/REPORT.html
+poetry run python -B -m development.roberto.benchmarking.scripts.report --input development/roberto/benchmarking/outputs/roe_flux_v1/summary.json --output development/flux_methods/roe/REPORT.html
 ```
 
 Add `--resume` to the run command only when the recorded identities match.

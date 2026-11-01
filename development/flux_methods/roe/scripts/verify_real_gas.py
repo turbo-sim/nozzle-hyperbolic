@@ -1,7 +1,7 @@
 """Untimed actual-CO2 steady Roe checks using installed production machinery.
 
 Run from the repository root:
-    poetry run python -B -m development.roe_method.scripts.verify_real_gas
+    poetry run python -B -m development.flux_methods.roe.scripts.verify_real_gas
 
 This is a finite-volume convergence/conservation check, not an analytical flow
 accuracy claim or a runtime comparison. Every failed attempt remains in output.

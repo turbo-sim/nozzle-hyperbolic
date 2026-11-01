@@ -1,7 +1,7 @@
 """Untimed production-Roe Sod verification and conservative refinement audit.
 
 Run from the repository root with the existing project environment:
-    poetry run python -B -m development.roe_method.scripts.verify_sod
+    poetry run python -B -m development.flux_methods.roe.scripts.verify_sod
 
 Physical inputs are reused from transient_problems/settings.yaml and fixture().
 Only the Roe flux and selected integrator/boundary treatment change. Reference
