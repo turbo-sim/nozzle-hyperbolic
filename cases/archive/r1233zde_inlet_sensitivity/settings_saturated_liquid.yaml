@@ -1,0 +1,251 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# CASE A — SATURATED LIQUID inlet
+# R1233zd(E) flashing expansion, Elliot nozzle, six-equation two-fluid model
+#
+#   reservoir  saturated liquid at 155 degC  ->  p0 = p_sat = 29.8309 bar
+#   inlet      liquid only; the vapour is a thin passive GHOST (alpha_g = 1e-3)
+#   outlet     p_out = 2 bar
+#   geometry   get_nozzle_elliot          grid  Nx = 200
+#   IC         stagnation (fluid at rest at reservoir conditions)
+#
+# One of three inlet-condition variants that share everything else:
+#   settings_saturated_liquid.yaml   <- this file:  saturated liquid, ghost vapour
+#   settings_subcooled_10K.yaml         liquid 10 K subcooled, ghost vapour
+#   settings_quality_5pct.yaml          5 % vapour quality, both phases at equilibrium
+# The three differ ONLY in the bc: reservoir/composition block and in alpha_eps.
+#
+#     python run_simulation.py                                    # this file
+#     SETTINGS_YAML=settings_subcooled_10K.yaml python run_simulation.py
+#
+# Single-component: BOTH phases are R1233zd(E), each with its own metastable
+# extension, and interphase mass transfer is ON.
+#
+# STATUS: this is the configuration that converged — 6259 steps, SSR 7.3e-7,
+# mass-flux RMS 0.142 %, exit M = 1.29 (choked, under-expanded, p_exit 3.94 bar).
+# ─────────────────────────────────────────────────────────────────────────────
+
+fluid:
+  name: R1233ZDE          # registered CoolProp alias of canonical "R1233zd(E)"
+
+# ── EOS tables ────────────────────────────────────────────────────────────────
+# p_max: critical  ->  resolved to the CoolProp critical pressure (36.2369 bar).
+#
+# CAUTION, enthalpy is REFERENCE-STATE dependent and the two CoolProp builds on
+# this machine disagree for R1233zd(E) by ~31.6 kJ/kg:
+#     CoolProp 7.2.0 (poetry venv, the one that runs this):  h_l,sat(155C)=416.0
+#     CoolProp 6.6.0 (base conda env):                       h_l,sat(155C)=447.6
+# The bounds below are in the 7.2.0 frame.  build_tables.py prints the version
+# and re-derives every bound from it, so a mismatch shows up as a failed check.
+eos:
+  gas:                            # metastable VAPOUR — the ghost that grows
+    fluid_name: R1233ZDE
+    backend: HEOS
+    h_min: 250000.0               # J/kg
+    h_max: 550000.0               # J/kg
+    p_min: 100000.0               # Pa  (0.1 MPa)
+    p_max: critical               # Pa  (critical pressure)
+    N_h: 90
+    N_p: 90
+    N_p_sat: 150
+    table_dir: fluid_tables       # relative to this case folder
+    metastable_phase: vapor
+    gradient_method: forward
+  liquid:                         # metastable LIQUID — the dominant flashing phase
+    fluid_name: R1233ZDE
+    backend: HEOS
+    h_min: 200000.0               # J/kg
+    h_max: 450000.0               # J/kg
+    p_min: 100000.0               # Pa  (0.1 MPa)
+    p_max: critical               # Pa  (critical pressure)
+    N_h: 90
+    N_p: 90
+    N_p_sat: 150
+    table_dir: fluid_tables
+    metastable_phase: liquid
+    gradient_method: forward
+
+# ── Grid ──────────────────────────────────────────────────────────────────────
+grid:
+  Nx: 200
+  x1: 0.0
+  x2: 0.31        # m — Elliot total length is 0.31966 m; 0.31 stays strictly
+                  #     inside the last (divergent) segment definition
+
+# ── Geometry ──────────────────────────────────────────────────────────────────
+geometry:
+  function: get_nozzle_elliot
+  roughness: 0.0
+
+# ── Interphase closure ────────────────────────────────────────────────────────
+sources:
+  # COMMON VALUE ACROSS ALL THREE INLET CASES (1e13).  A sensitivity study needs
+  # the same closure everywhere, or differences cannot be attributed to the inlet.
+  # Finding it required understanding that case A has TWO distinct failure modes,
+  # which is why a naive Nb scan looks non-monotonic:
+  #     A @ 1e12 -> THERMODYNAMIC failure: liquid reaches the spinodal (cell 93
+  #                 frozen).  Immovable - the internal expansion is set by the
+  #                 AREA RATIO because the nozzle chokes at any pressure ratio,
+  #                 so no back-pressure ladder can soften it (verified: even
+  #                 p_out = 28 bar still drops the interior to 17.7 bar).
+  #     A @ 1e14 -> NUMERICAL failure: ghost blow-up, h_g -> -2.1e5 kJ/kg with
+  #                 98 % odd-even on du while alpha never grew past 0.0017.
+  # The second is a void/ghost checkerboard mode, so eps_void 0.02 -> 0.2 (which
+  # case C needed anyway) removes it and opens the window.  Measured, all with
+  # eps_void = 0.2:
+  #     Nb     A                B                C
+  #     1e12   NaN step 58      converged        NaN step 816
+  #     1e13   CONVERGED        CONVERGED        CONVERGED      <-- the overlap
+  #     1e14   converged        NaN step 803     converged
+  #     1e15   converged        diverged         converged
+  # NOTE Nb is PHYSICS, not a numerical knob: moving 1e13 -> 1e15 changes mdot by
+  # ~9 % and the alpha profile by ~17 % (L2).  Calibrate against flashing data for
+  # R1233zd(E) if you have it; until then the three cases at least share it.
+  bubble_number:  1.0e13
+  droplet_number: 1.0e10
+  mass_transfer: true             # single component WITH phase change
+
+# ── Numerics (the flashing-certified stack) ───────────────────────────────────
+numerics:
+  CFL: 2.0
+  newton_iter: 5
+  delta_factor: 1.0e-6
+  recon: muscl_van_albada
+  k_vm: 0.5
+  jacobian: colored
+  linear_solve: normal_eq_banded
+  eos_rows: true                  # E3-augmented system
+  eos_rows_banded: true           # O(N) banded twin
+  jac_lag: 1
+  eos_project: false              # obsolete under E3
+  proj_s_ref: 2.0e-2
+  nc_form: wb                     # well-balanced non-conservative term
+  nc_scale: 1.0
+  lowmach_diss: 1.0               # transonic — full acoustic dissipation
+  lowmach_diss_bc: null
+  eps_void: 0.2                   # 0.2 for ALL cases (see bubble_number note)
+  eps_void_ucut: null             # ungated
+  eps_void_uwidth: 12.0
+  eps_void_scale: frozen
+  eps_ghost: 0.0
+  eps_ghost_acut: 3.0e-3
+  eps_ghost_awidth: 0.25
+  eps_ghost_k2: 0.0
+  eps_ghost_alo: 1.0e-5
+  w_char: auto
+  pin_ghost: true                 # ghost-vapour saturation pin
+  pin_ghost_momentum: true        # ghost momentum pin (u_g -> u_l)
+  # Solver void clip floor.  'match_void' ties it to bc.void_fraction, which is
+  # REQUIRED: with alpha_eps far below the inlet void the solver re-thins the
+  # ghost to the floor mid-march and re-arms the h_g = E_g/(alpha rho_g)
+  # amplifier — measured here at 1e-6: alpha collapsed 1e-3 -> 1e-6 in two steps,
+  # h_g hit 7.6e4 kJ/kg with 99.98 % odd-even, dead at step 3.
+  alpha_eps: match_void
+  ssr_mode: mass                  # mass-weighted convergence
+  du_blend_lo: 5.0
+  du_blend_hi: 20.0
+
+# ── Initial condition ─────────────────────────────────────────────────────────
+ic:
+  type: stagnation                # uniform field at rest at reservoir conditions
+
+# ── Boundary conditions ───────────────────────────────────────────────────────
+bc:
+  inlet:  stagnation
+  outlet: characteristic
+
+  # ── Reservoir (stagnation) state ────────────────────────────────────────────
+  # One pressure shared by both phases plus a per-phase temperature — the same
+  # keys as dev_scripts/settings_*.yaml.
+  #
+  # p0 accepts a number in Pa, or the keyword `saturation`, which resolves to
+  # p_sat(T_l0).  Use the keyword when you mean "the liquid sits exactly on the
+  # saturation line" — writing the number by hand is fragile, because a value a
+  # few Pa off flips the reservoir to subcooled or two-phase.
+  p0:   saturation                # -> p_sat(T_l0) = 29.8309 bar
+  T_g0: 428.15                    # K  (155.00 degC)
+  T_l0: 428.15                    # K  (155.00 degC)
+  #
+  # How the reservoir enthalpies are obtained (the driver reports which branch it
+  # used for each phase):
+  #   T <  T_sat(p0)  -> subcooled liquid   : ordinary (p,T) flash
+  #   T >  T_sat(p0)  -> superheated vapour : ordinary (p,T) flash
+  #   T == T_sat(p0)  -> ON the saturation line, where a (p,T) flash is AMBIGUOUS
+  #                      (both branches are valid roots) -> the liquid is taken
+  #                      from Q=0 and the vapour from Q=1.
+  # Separately, for a SUBCOOLED reservoir the (p,T) flash returns the LIQUID
+  # branch for the gas phase too, putting h_g below the vapour table floor; the
+  # driver then falls back to saturated vapour at p0 (same fix as main).
+
+  # ── Composition ─────────────────────────────────────────────────────────────
+  # Give EITHER quality (gas MASS fraction) OR void_fraction (gas VOLUME
+  # fraction); the other follows from the slip relation
+  #     alpha = 1 / (1 + ((1-x)/x) * (rho_g/rho_l) * S)
+  # Setting both is an error.  Here "liquid only + thin ghost" is most naturally
+  # said as a void fraction; quality: 2.948e-4 would be the equivalent.
+  quality:       null
+  void_fraction: 1.0e-3           # alpha_g at inlet ("liquid only" + ghost)
+  slip:          1.0              # S = u_g/u_l
+  dom_phase:     auto             # auto (mass fraction) | gas | liquid
+
+  p_out: 2.0e5                    # Pa — 2 bar back-pressure
+  # Outlet back-pressure under-relaxation:
+  #     p_ghost = p_last + w * p_out_relax * (p_out - p_last)
+  # The STEADY STATE is unchanged by this (at convergence p_last -> p_out makes
+  # the blend exact); it only sets the startup path, which is the whole
+  # difficulty here.  The liquid must FLASH to shed enough enthalpy to stay on
+  # the live side of the spinodal as p falls, and flashing is finite-rate:
+  #     1.0   -> NaN at step 2   (exit cell dropped 29.83->2 bar in one step)
+  #     0.05  -> NaN at step 7   (startup rarefaction front past the spinodal)
+  #     0.002 -> marches cleanly, dt holds at the CFL cap
+  # Note it is applied per STEP, not per unit time: if the controller starts
+  # halving dt the boundary forcing per unit PHYSICAL time goes up, a feedback
+  # it cannot win.  dt holding at the cap is the signal the value is right.
+  p_out_relax: 0.002
+
+# ── Back-pressure continuation ────────────────────────────────────────────────
+# Stages are marched to steady state in order, each warm-started from the last;
+# every stage costs one retrace (p_out is a compile-time constant in the solver).
+#
+# A SINGLE stage at the design back-pressure is correct here, and this is
+# counter-intuitive: intermediate back-pressures are HARDER than the target.  The
+# two-phase Wood speed is tiny (tens of m/s at alpha ~ 0.7) so the nozzle chokes
+# at essentially any pressure ratio — p_out = 25 bar (p0/p_out = only 1.19)
+# already gives a choked flow with a standing SHOCK in the divergent and
+# condensation behind it, the hardest regime this solver handles.  At 2 bar the
+# nozzle runs supersonic at the exit with no shock to hold.  A ladder would just
+# force the solution through the hard states on the way to the easy one.
+continuation:
+  stages: []                      # intermediate back-pressures; bc.p_out is appended
+  ssr_tol_stage: 1.0e-5           # looser tolerance for intermediate stages
+  n_steps_stage: 2000
+
+# ── Time-step control ─────────────────────────────────────────────────────────
+time_control:
+  adaptive_dt: true
+  max_halvings: 8
+  dp_max: 0.20
+  dh_max: 0.05
+  du_max: 0.20
+  da_max: 0.10
+  dt_grow: 1.20
+  dt_floor_frac: 1.0e-3           # floor dt = this * CFL cap
+  floor_stall_steps: 500          # consecutive floored steps w/o SSR progress -> bail
+
+# ── Run control ───────────────────────────────────────────────────────────────
+run:
+  n_steps: 20000
+  print_every: 50
+  ssr_tol: 1.0e-8
+  t_end: null
+  plateau_window: 600
+  plateau_ratio: 1.01
+  visualize_ic: false
+  debug_newton: false
+  src_scale: 1.0                  # physical source scaling (1 = on)
+  area_src: true                  # quasi-1D area source
+  dom_only_dt: true               # gate adaptive dt on the DOMINANT phase only
+
+# ── Output ────────────────────────────────────────────────────────────────────
+save_options:
+  repo_main: results
+  repo_run: r1233zde_saturated

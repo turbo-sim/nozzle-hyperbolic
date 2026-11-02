@@ -1,0 +1,5 @@
+# SCAFFOLD -- every row below is status=placeholder and holds no real measurement.
+# Replace with values read from NUREG/CR-1864 before using for validation.
+# Units are SI and stated in the column names; see ../../SCHEMA.md
+case_id,nozzle_id,fluid,p0_Pa,p0_Pa_unc,T0_K,T0_K_unc,subcooling_K,p_back_Pa,p_exit_Pa,mdot_kg_s,G_throat_kg_m2_s,choked,profile_p,profile_T,figure_ref,status,notes
+run_003,nozzle_a,Water,5.0e5,,4.100e2,,25.0,1.0e5,,,,true,ab81_a_003_p,,TODO,placeholder,"structural example only -- numbers are round by construction, not measured"

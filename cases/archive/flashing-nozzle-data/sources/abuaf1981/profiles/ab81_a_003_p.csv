@@ -1,0 +1,14 @@
+# SCAFFOLD -- placeholder pressure profile for cases.csv row case_id=run_003.
+# Replace with the digitised axial static pressure from the report.
+# x = 0 at the throat, positive downstream (see ../meta.yaml x_origin).
+# original units: x [mm], p [bar, absolute] -> converted to m and Pa here.
+# p_Pa_unc: leave empty unless the report states an instrument uncertainty; do not guess.
+x_m,p_Pa,p_Pa_unc
+-0.1000,4.95e5,
+-0.0500,4.80e5,
+-0.0100,4.10e5,
+0.0000,3.40e5,
+0.0100,2.60e5,
+0.0500,1.90e5,
+0.1000,1.50e5,
+0.2000,1.20e5,
