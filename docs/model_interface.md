@@ -82,6 +82,15 @@ must not introduce undeclared cross-face coupling. Source and endpoint callbacks
 may use neighbors within their declared reach. Endpoint flux overrides preserve
 internal faces and include their state dependencies in the boundary declaration.
 
+The engine always uses exact local
+Jacobians of the complete face-flux map and cell conserved storage, sharing
+them across differentiation seeds. It does not interpret EOS properties or
+geometry, and it recomputes derivatives at each linearization point. Sources,
+boundary equations, reconstruction and endpoint flux overrides keep their
+original differentiation paths. This is an internal numerical optimization,
+not a `Scheme` input. Direct AD is retained only as an independent reference
+in tests and development studies. Callback locality is a required model contract.
+
 For expensive properties, replace the three independent face callbacks with
 `face_data(states)`. Return a dictionary with `conserved`, `physical_flux`,
 `speed_bounds=(lower,upper)` and `auxiliary`. Auxiliary data is an opaque JAX

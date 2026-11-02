@@ -52,6 +52,7 @@ from nozzle_hyperbolic.numerics.characteristic import (
 )
 from nozzle_hyperbolic.numerics.osher import OsherFlux
 from nozzle_hyperbolic.numerics.jacobians import make_block_operators
+from nozzle_hyperbolic.numerics.local_derivatives import local_jvp
 from nozzle_hyperbolic.numerics.reconstruction import reconstruct_faces
 from nozzle_hyperbolic.numerics.fluxes import rusanov, hll
 from nozzle_hyperbolic.numerics.roe import roe, roe_absolute
@@ -372,8 +373,7 @@ class Operator:
                 )
             return model.face_characteristics(left, right, scheme.delta_factor)
 
-        def face_flux(full):
-            left, right = reconstruct(full)
+        def flux_from_states(left, right):
             if fused_data:
                 left_data, right_data = model.face_data(left), model.face_data(right)
                 ql, qr = left_data["conserved"], right_data["conserved"]
@@ -428,6 +428,16 @@ class Operator:
                 numerical = rusanov if scheme.flux == "rusanov" else hll
                 flux = numerical(fl, fr, qr - ql, (low_l, high_l), (low_r, high_r))
             flux = model.flux_to_conserved_frame(flux)
+            return flux
+
+        # The model contract makes this map face-local, including its frame
+        # conversion and opaque geometry/EOS context. Reconstruction, filters
+        # and endpoint overrides stay outside the local differentiation map.
+        local_face_flux = local_jvp(flux_from_states)
+
+        def face_flux(full):
+            left, right = reconstruct(full)
+            flux = local_face_flux(left, right)
             if scheme.filter_strength > 0:
                 flux = fourth_difference_flux(
                     flux,
@@ -442,8 +452,10 @@ class Operator:
         def source(full):
             return model.integrated_source(full)
 
+        local_storage = local_jvp(model.cell_conserved)
+
         def storage(physical):
-            return volumes[:, None] * model.cell_conserved(physical)
+            return volumes[:, None] * local_storage(physical)
 
         def spatial(full):
             flux = face_flux(full)

@@ -162,12 +162,24 @@ The shared numerical path uses **JAX JIT and automatic differentiation**, with 6
 | Component | Default | Alternatives / details |
 |---|---|---|
 | Jacobian assembly | `jacobian_mode="colored"` | Compressed forward JVPs via `jax.linearize` and `jax.vmap`; `"dense"` is available for reference/debugging |
+| Local derivative reuse | Always enabled | Exact per-face and per-cell storage Jacobians reused across seed directions; direct AD is an independent test/development reference |
 | Linear correction | `linear_solver="banded"` | Variable-size block-banded storage and grouped block Thomas elimination; `"dense"` is available |
 | Newton correction | `newton_backtracking=False` | Full undamped corrections; `True` enables admissibility-aware Armijo backtracking |
 | Newton iteration cap | `newton_iterations=10` | Maximum corrections, not a forced count; user configurable |
 | Newton convergence | Update tolerance `1e-10`, residual tolerance `1e-12` | Both enabled criteria must pass; either can be disabled by setting it to zero, but not both |
 
 Colored differentiation exploits the declared local dependency radius $r$: independent block columns share seed directions, with up to $V(2r+1)$ directions. The banded solve avoids constructing a dense global Jacobian. Constant versus MUSCL/filter reconstruction and the physical source/boundary declarations determine $r$.
+
+Local derivative reuse exploits the existing face/cell locality contracts. The
+complete numerical face flux, including its model-owned frame conversion, is
+linearized with $2V$ local directions; cell conserved storage uses $V$ directions.
+The resulting small matrices are reused across the global coloring seeds and
+refreshed at every linearization point. Geometry and EOS remain opaque model
+callbacks. Reconstruction, filters, sources and endpoint overrides remain
+outside the local map. This changes differentiation assembly, not physical
+fluxes, BC equations, nonlinear tolerances, coloring or the linear solver.
+This is internal assembly behavior, not a public `Scheme` input. Independent
+direct-AD comparisons live in tests and development studies.
 
 Supported backend combinations are colored/banded, colored/dense, and dense/dense. Dense differentiation with the banded backend is rejected. A model declaring global endpoint coupling must use dense/dense so that nonlocal blocks are not silently discarded. This safeguard is not a periodic-problem implementation.
 
