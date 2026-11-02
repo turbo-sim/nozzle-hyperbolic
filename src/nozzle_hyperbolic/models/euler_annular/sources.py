@@ -24,7 +24,10 @@ def integrated_source(
     No derivative is inferred from neighboring cell samples. Shear removes
     momentum and supplies a radius-weighted angular torque. A stationary
     adiabatic wall has no total-energy sink; heat alone changes total energy.
-    The optional closure evaluates physical ``(W,r,fluid)->(tau,q)`` and can
+    A directional closure supplies ``directional_stress(W,r,fluid)`` returning
+    signed ``(tau_m,tau_theta,q)`` in Pa, Pa and W/m^2; positive stresses are
+    subtracted from the respective momentum balances. Otherwise the optional
+    closure evaluates physical ``(W,r,fluid)->(tau,q)`` and can
     expose a smooth ``drag_coefficient`` to resolve the laminar zero-speed
     limit. Prescribed stress defines zero directional drag exactly at rest.
     """
@@ -39,14 +42,19 @@ def integrated_source(
     speed_squared = vm**2 + vtheta**2
     safe_speed = jnp.sqrt(jnp.where(speed_squared > 0.0, speed_squared, 1.0))
     wall_measure = 2 * volume / jnp.asarray(height)
-    if wall_closure is None:
-        shear = shear_stress_wall(W, r, fluid, prescribed=tau_w)
-        heat = heat_flux_wall(W, r, fluid, prescribed=q_w)
+    directional = getattr(wall_closure, "directional_stress", None)
+    if callable(directional):
+        tau_m, tau_theta, heat = directional(W, r, fluid)
     else:
-        shear, heat = wall_closure(W, r, fluid)
-    coefficient = getattr(wall_closure, "drag_coefficient", None)
-    drag = coefficient(W, r, fluid) if callable(coefficient) else shear / safe_speed
-    momentum = momentum - wall_measure * drag * vm
-    torque = -r * wall_measure * drag * vtheta
+        if wall_closure is None:
+            shear = shear_stress_wall(W, r, fluid, prescribed=tau_w)
+            heat = heat_flux_wall(W, r, fluid, prescribed=q_w)
+        else:
+            shear, heat = wall_closure(W, r, fluid)
+        coefficient = getattr(wall_closure, "drag_coefficient", None)
+        drag = coefficient(W, r, fluid) if callable(coefficient) else shear / safe_speed
+        tau_m, tau_theta = drag * vm, drag * vtheta
+    momentum = momentum - wall_measure * tau_m
+    torque = -r * wall_measure * tau_theta
     heating = wall_measure * heat
     return jnp.stack((jnp.zeros_like(momentum), momentum, torque, heating), axis=-1)

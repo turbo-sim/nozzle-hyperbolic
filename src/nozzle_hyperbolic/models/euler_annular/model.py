@@ -41,7 +41,9 @@ class AnnularModel:
     reservoir's EOS values. Supersonic inlet data contains a complete ``state``.
     ``initial_state`` is a full array or callable of ``mesh.points``. The wall
     closure interface is ``(W,r,fluid)->(tau_w,q_w)``; shear is a magnitude and
-    heat flux is positive into the fluid. Geometry remains fixed in time.
+    heat flux is positive into the fluid. A closure may instead supply
+    ``directional_stress(W,r,fluid)->(tau_m,tau_theta,q_w)`` for independent
+    signed meridional/tangential stresses. Geometry remains fixed in time.
     ``outlet_regime='auto'`` supports transient pressure/choking/outgoing
     transitions without selecting a static final outlet Mach regime.
     """

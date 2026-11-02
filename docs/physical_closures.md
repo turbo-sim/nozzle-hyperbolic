@@ -96,3 +96,36 @@ Run the production closure checks with:
 ```powershell
 poetry run python -B -m pytest tests/test_physical_closures.py -q
 ```
+
+## Directional annular loads and optional NozzleX import
+
+An annular wall policy can supply
+`directional_stress(physical, radius, fluid) -> (tau_m, tau_theta, q_w)`.
+The two stresses are signed components in Pa, subtracted from meridional
+momentum and radius-weighted angular momentum respectively. Heat is in W/m²,
+positive into the fluid. This takes precedence over the scalar callable
+interface; existing scalar and Haaland policies keep their behavior.
+
+`models.euler_annular.closures.NozzleXWall` is an optional adapter to the
+separately installed NozzleX package. It imports the existing friction and
+heat factories and the shared `evaluate_wall_sources` function; it does not
+copy correlations or make NozzleX a required dependency of the base package.
+Bind it to the same native mesh as the model, and supply NozzleX's
+`model_options` mapping and `alpha_in_deg`. The bound geometry and inlet
+context stay fixed. The EOS must support HP and HS evaluations with density,
+entropy, temperature, viscosity, conductivity and heat capacity.
+
+The adapter supports zero friction, constant Fanning friction, Aungier wall,
+diffusion and curvature losses, adiabatic walls and Reynolds-analogy heating.
+Diffusion and curvature losses act only meridionally. Curvature uses the
+nonnegative magnitude; Reynolds analogy uses local stagnation temperature
+and wall friction alone. Existing NozzleX Reynolds floors, entrance correction
+and hard-coded transition behavior remain explicit imported approximations.
+The empirical policies assume forward meridional flow. No universal explicit
+source-timestep bound is supplied by this adapter; the verification uses
+implicit pseudo-time marching.
+
+See [the annular verification study](../cases/verification_annular/README.md)
+for installation, exact configurations, shared geometry, reference-equation
+corrections and measured coverage. Optional adapter tests skip when NozzleX
+is not installed; they do not make it a production installation requirement.
