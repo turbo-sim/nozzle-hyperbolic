@@ -1,0 +1,21 @@
+{
+  "doi": "10.1115/1.4038082",
+  "publication_year": 2018,
+  "online_date": "2017-11-07",
+  "primary_repository": "https://hdl.handle.net/1721.1/114689",
+  "inspected_author_copy": "https://www.researchgate.net/publication/320208117_Characterization_of_Nonequilibrium_Condensation_of_Supercritical_Carbon_Dioxide_in_a_de_Laval_Nozzle",
+  "access_date": "2026-11-02",
+  "pressure_source": "Appendix Table 2, first repeat for each case, pressure in bar",
+  "reservoir_source": "Appendix Table 3, matching first repeat, total pressure in bar and total temperature in K",
+  "tap_positions_note": "Nominal positions inferred by rounding BOTH independent upstream L1/L5 digitizations to the shared 7 mm spacing. Primary text does not tabulate exact tap coordinates. These are approximate plotting/comparison coordinates, not newly recovered measurements.",
+  "nominal_tap_x_mm": [-28, -21, -14, -7, 0, 7, 14, 21, 28, 35, 42, 49, 56],
+  "pressure_uncertainty_bar": null,
+  "tap_coordinate_uncertainty_mm": null,
+  "cases": {
+    "L1": {"publication_case": 1, "repeat": 1, "p0_bar": 58.96, "T0_K": 314.67, "onset_mm": 3.748, "pressure_bar": [58.08,57.48,54.97,48.40,34.54,32.82,29.89,28.01,25.87,23.51,21.89,20.59,19.50], "upstream_excel": "Case1.xlsx", "upstream_cfd": "Case1_CFD.xlsx"},
+    "L2": {"publication_case": 2, "repeat": 1, "p0_bar": 65.35, "T0_K": 311.99, "onset_mm": 1.660, "pressure_bar": [64.38,63.85,61.14,54.01,41.12,39.41,35.48,32.91,30.07,27.31,25.28,23.75,22.43], "upstream_excel": null, "upstream_cfd": null},
+    "L3": {"publication_case": 3, "repeat": 1, "p0_bar": 73.53, "T0_K": 313.60, "onset_mm": -0.505, "pressure_bar": [72.44,71.97,68.89,62.67,52.24,42.11,38.11,35.81,32.74,29.84,27.63,25.89,24.39], "upstream_excel": null, "upstream_cfd": null},
+    "L4": {"publication_case": 4, "repeat": 1, "p0_bar": 79.99, "T0_K": 313.94, "onset_mm": -3.462, "pressure_bar": [78.77,78.46,75.94,69.42,53.96,45.90,41.90,39.71,36.07,32.99,30.55,28.63,26.92], "upstream_excel": null, "upstream_cfd": null},
+    "L5": {"publication_case": 5, "repeat": 1, "p0_bar": 84.74, "T0_K": 313.88, "onset_mm": -4.675, "pressure_bar": [83.47,82.80,80.49,74.10,57.99,49.71,45.35,43.03,38.95,35.58,32.90,30.91,28.98], "upstream_excel": "Case5.xlsx", "upstream_cfd": "Case5_CFD.xlsx"}
+  }
+}

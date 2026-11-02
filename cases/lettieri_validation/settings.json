@@ -1,0 +1,35 @@
+{
+  "andrea_revision": "bcfe6ae1ec8abd71528e57b218ac8291dc9461fa",
+  "geometry": {
+    "workbook": "Lettieri_nozzle.xlsx",
+    "width_m": 0.00648,
+    "width_origin": "Andrea 6.48 mm; consistent with primary reported 20 mm2 throat area divided by Table4 full throat height 3.0862 mm",
+    "publication_throat_area_m2": 0.000020,
+    "interpolation": "scipy.interpolate.CubicSpline, not-a-knot",
+    "inlet_half_height_m": 0.00635,
+    "inlet_correction_source": "Lettieri Appendix Table 4; upstream workbook has 0.00638 m",
+    "coordinate_transform": "x=-z from publication Table 4"
+  },
+  "properties": {
+    "fluid_name": "CO2", "backend": "HEOS",
+    "h_min": 50000.0, "h_max": 850000.0,
+    "p_min": 10000.0, "p_max": 30000000.0,
+    "N_h": 200, "N_p": 200,
+    "table_name": "lettieri_equilibrium_CO2_200x200"
+  },
+  "property_domain": {"h_min": 300000.0, "h_max": 550000.0, "p_min": 1000000.0, "p_max": 10000000.0},
+  "scheme": {
+    "flux": "hll", "reconstruction": "constant",
+    "time_integrator": "euler-implicit", "boundary_treatment": "coupled",
+    "newton_iterations": 10, "newton_backtracking": true,
+    "newton_update_tolerance": 1e-10, "newton_residual_tolerance": 1e-12,
+    "max_backtracks": 20, "jacobian_mode": "colored", "linear_solver": "banded",
+    "filter_strength": 0.0
+  },
+  "steady": {"cfl": 0.2, "cfl_growth": 1.2, "cfl_max": 1000000.0, "cfl_shrink": 0.5, "max_steps": 4000, "max_retries": 14, "stagnation_steps": 12},
+  "residual": {"criterion": "both", "relative_tolerance": 1e-6, "absolute_tolerance": 1e-9, "boundary_tolerance": 1e-9, "global_tolerance": 1e-9},
+  "outlet": "supersonic extrapolation, checked in final model audit",
+  "initialization": "NozzleModel cold Mach ramp; outlet pressure guess = 0.25*p0, not a measured outlet condition",
+  "wall_friction": 0.0,
+  "wall_heat": 0.0
+}
