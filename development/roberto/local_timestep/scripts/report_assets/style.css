@@ -1,0 +1,10 @@
+/* Local layout refinements over the shared flux-report visual system. */
+.section-heading{display:block}
+.section-heading .eyebrow{margin-bottom:8px}
+.section-heading h2{margin-bottom:10px}
+.toolbar{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));align-items:start}
+.toolbar label{min-width:0;max-width:100%}
+.toolbar select{width:100%;min-width:0}
+.toolbar .choice-set{grid-column:1/-1}
+@media(max-width:1000px){.toolbar{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:650px){.toolbar{grid-template-columns:1fr}}
