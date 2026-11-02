@@ -54,6 +54,9 @@ class Scheme:
             "constant",
             "muscl_van_leer",
             "muscl_van_leer_smooth",
+            "muscl_minmod",
+            "muscl_superbee",
+            "muscl_van_albada",
         ):
             raise ValueError("Unsupported reconstruction")
         if self.flux not in ("stadtke", "rusanov", "hll", "roe", "osher"):

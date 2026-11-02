@@ -1,4 +1,4 @@
-"""Unchanged definitions relocated from fvm_solver.fvm."""
+"""Coordinate-aware generic MUSCL reconstruction and retained NumPy helpers."""
 
 import numpy as np
 import jax.numpy as jnp
@@ -25,6 +25,8 @@ def reconstruct_faces(
     gradients = (full[1:] - full[:-1]) / (points[1:] - points[:-1])[:, None]
     if method == "muscl_van_leer":
         interior = _van_leer_jax_safe(gradients[:-1], gradients[1:])
+    elif method in _JAX_LIMITERS:
+        interior = _JAX_LIMITERS[method](gradients[:-1], gradients[1:])
     elif method == "muscl_van_leer_smooth":
         length = faces[-1] - faces[0]
         gradient_scale = jnp.asarray(variable_scales) / length
@@ -108,6 +110,55 @@ def _van_leer_jax_regularized(a, b, epsilon):
         product_squared + epsilon_squared * epsilon_squared
     )
     return (2.0 * product * total / (total * total + epsilon_squared)) * product_weight
+
+
+def _same_sign(a, b):
+    """Strict same-sign test without a potentially overflowing product."""
+    return ((a > 0) & (b > 0)) | ((a < 0) & (b < 0))
+
+
+def minmod(a, b):
+    """JAX minmod slope; zero at extrema, homogeneous and odd in the inputs."""
+    a, b = jnp.asarray(a), jnp.asarray(b)
+    return jnp.where(_same_sign(a, b), jnp.sign(a) * jnp.minimum(jnp.abs(a), jnp.abs(b)), 0.0)
+
+
+def superbee(a, b):
+    """JAX Superbee, selecting the larger magnitude for either slope sign.
+
+    A signed maximum of the two minmod candidates is wrong for negative
+    gradients. This fixes Andrea's active JAX implementation.
+    """
+    a, b = jnp.asarray(a), jnp.asarray(b)
+    aa, bb = jnp.abs(a), jnp.abs(b)
+    magnitude = jnp.maximum(jnp.minimum(2 * aa, bb), jnp.minimum(aa, 2 * bb))
+    return jnp.where(_same_sign(a, b), jnp.sign(a) * magnitude, 0.0)
+
+
+def van_albada(a, b):
+    """Sign-preserving Van Albada slope, with safe inactive JAX arithmetic.
+
+    For like signs, sigma=ab(a+b)/(a*a+b*b); otherwise sigma=0. This explicit
+    extrema gate differs from the retained ungated NumPy formula. Normalizing
+    before squaring avoids underflow/overflow and needs no dimensional epsilon.
+    The origin remains mathematically nonsmooth; AD selects a finite branch.
+    """
+    a, b = jnp.asarray(a), jnp.asarray(b)
+    active = _same_sign(a, b)
+    scale = jnp.maximum(jnp.abs(a), jnp.abs(b))
+    safe_scale = jnp.where(active, scale, 1.0)
+    an = jnp.where(active, a, 0.0) / safe_scale
+    bn = jnp.where(active, b, 0.0) / safe_scale
+    denominator = jnp.where(active, an * an + bn * bn, 1.0)
+    numerator = jnp.where(active, an, 0.0) * jnp.where(active, bn, 0.0) * (an + bn)
+    return safe_scale * numerator / denominator
+
+
+_JAX_LIMITERS = {
+    "muscl_minmod": minmod,
+    "muscl_superbee": superbee,
+    "muscl_van_albada": van_albada,
+}
 
 
 def _superbee(a, b):

@@ -5,6 +5,8 @@ For experiment layout, verification, timing and report packaging, follow the
 
 All development work is grouped under this single directory:
 
+- [limiters/](limiters/README.md): reproducible perfect-gas shock comparison of
+  Van Leer, Minmod, Superbee and Van Albada, with analytical errors and retained convergence histories.
 - [alberto/](alberto/README.md): legacy research drivers, settings, sensitivity
   studies and shared helpers. Its [execution audit](alberto/RUN_REPORT.md)
   records the previous run results and their limitations.
