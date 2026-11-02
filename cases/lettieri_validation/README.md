@@ -1,5 +1,24 @@
 # Lettieri equilibrium HEM validation
 
+The modernized [REPORT.html](REPORT.html) is a portable offline Plotly report.
+Its five operating-case cards and shared selectors choose L1–L5, mesh, grid
+geometry, audited/preflight scope and individual saved attempts. Pressure,
+liquid fraction, residuals, CFL, mass-flow diagnostics and mesh sensitivity use
+the selected data. The campaign overview also retains all thirteen attempts
+and a five-panel finest-grid pressure comparison.
+
+This presentation update reran no numerical case, property preparation or
+residual verification. All 49 saved numerical/reference input files retain
+their pre-edit hashes. The original NPZ/JSON records, workbooks and settings are
+embedded in the evidence download. Recorded verification results are displayed
+at their original source epoch, not relabeled as fresh audits of today's code.
+The existing static exports and numerical [REPORT.md](REPORT.md) tables remain.
+
+Application/data checks passed for all five cases, mesh and attempt filters,
+quality masks, reference availability, themes and keyboard navigation. Browser
+preview was unavailable because the browser access host could not be reached;
+this limitation is separate from the automated application checks.
+
 This case uses the shared `NozzleModel` and generic FVM solver, equilibrium
 JAXProp CO2 bicubic properties, and exactly zero wall shear and heat transfer.
 It is separate from the nonequilibrium two-fluid port. The experiment contains
@@ -25,6 +44,17 @@ run retains settings, source hashes, table hash/preparation cost, accepted and
 rejected history, final state and original residual checks in `outputs/`.
 Preparation is recorded separately from solve time. A failed run remains failed;
 its pressure errors are diagnostics of an unfinished state, not validation.
+
+For presentation work only, run the final two `scripts.report` and
+`scripts.audit_report` commands. Do not run `verify_results` or the campaign
+commands to rebuild the HTML. The generator imports only saved-data readers,
+NumPy and the shared offline report helpers; it does not evaluate an EOS.
+
+Renderer assets are in `scripts/report_assets/`. Audit records and the previous
+static report are retained under `outputs/report_presentation/`. The HTML data
+ZIP includes the original inputs, plotted arrays, source identities and renderer
+code. On a fresh checkout, restore `original/` under this case directory and
+`input_manifest.json` under `outputs/report_presentation/` before rebuilding.
 
 ## Property preparation and admissibility
 

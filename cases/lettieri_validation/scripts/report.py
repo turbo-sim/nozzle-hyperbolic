@@ -1,293 +1,62 @@
-"""Build the small validation report from saved runs; never invokes a solver."""
+"""Offline Lettieri explorer from saved runs, fields and experimental data."""
 
-import base64
-import html
 import json
+from pathlib import Path
 
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import numpy as np
 
+from development.flux_methods.shared.offline_report import prepare_inputs, render
 from .data import ROOT, cfd, definitions, experiment
 
+ASSETS = Path(__file__).resolve().parent / "report_assets"
 
-def markdown_table(header, rows):
-    return ("| " + " | ".join(header) + " |\n|" + "|".join(["---"]*len(header)) + "|\n" +
-            "\n".join("| " + " | ".join(row) + " |" for row in rows))
-
-
-def html_table(header, rows):
-    return ("<table><thead><tr>" + "".join(f"<th>{html.escape(v)}</th>" for v in header) +
-            "</tr></thead><tbody>" + "".join("<tr>" + "".join(f"<td>{html.escape(v)}</td>" for v in row) +
-                                             "</tr>" for row in rows) + "</tbody></table>")
+SECTIONS = dict(
+    TITLE="Lettieri equilibrium HEM validation",
+    EYEBROW="NOZZLE HYPERBOLIC / EXPERIMENTAL VALIDATION",
+    LEAD="Five CO₂ nozzle operating points. Inspect saved equilibrium solutions, measured pressures and the gap between a converged numerical model and delayed experimental condensation.",
+    OVERVIEW_TITLE="Numerical convergence and experimental agreement are different results.",
+    SCOPE="Thirteen constant-reconstruction HLL attempts cover L1–L5, including a domain-unaudited preflight and a stretched L1 mesh. Default comparisons use audited 96-cell uniform solutions. No case was rerun for this presentation.",
+    CONTROLS='''<label>Operating case<select id="case"></select></label><label>Mesh level<select id="cells"></select></label><label>Grid geometry<select id="grid-kind"><option value="all">All available grids</option><option value="uniform">Uniform</option><option value="stretched">Stretched only</option></select></label><label>Attempt scope<select id="attempt-scope"><option value="audited">Property-domain audited</option><option value="all">All attempts, including preflight</option></select></label>
+<fieldset class="choice-set"><legend>Saved solutions in the selected scope</legend><div id="runs" class="choices"></div><div class="choice-tools"><button id="runs-all" type="button">All available</button><button id="runs-none" type="button">Clear</button><label><input id="show-cfd" type="checkbox" checked> Upstream reference CFD, where supplied</label><label><input id="show-onset" type="checkbox" checked> Measured condensation onset</label></div></fieldset>''',
+    OVERVIEW='''<div id="case-cards" class="case-grid"></div><div class="prose-grid"><article class="panel prose"><h3>What the saved results show</h3><div id="findings"></div></article><article class="panel prose"><h3>Interpretation</h3><p>The five finest audited uniform solutions satisfy the saved original-equation checks. That establishes a numerically converged equilibrium calculation, not agreement with delayed condensation in the experiment.</p><p>Mesh refinement changes the pressure predictions, but the experimental discrepancy remains several bar. Discretization, geometry, property representation, equilibrium modeling and measurement differences all contribute. Two levels do not prove grid independence.</p><p>The visible onset line is a measured condensation location. Equilibrium phase appearance is physically different; no threshold-derived predicted onset or experimental liquid-fraction samples are invented.</p></article></div><article class="panel plot-panel"><div id="gallery-plot" class="plot gallery"></div><p class="caption">One panel per operating case: finest property-audited uniform HEM solution, measured pressure taps, and the supplied L1/L5 reference CFD. This campaign-wide gallery is independent of the explorer filters.</p></article><article class="panel"><h3>All retained attempts</h3><div class="table-wrap"><table><thead><tr><th>Case / attempt</th><th>Cells</th><th>Stretch</th><th>Recorded root</th><th>Property domain</th><th>Saved audit</th><th>RMSE [bar]</th></tr></thead><tbody id="all-rows"></tbody></table></div></article>''',
+    EXPLORER='''<p id="reference-notice" class="notice warning"></p><div class="plot-grid"><article class="panel plot-panel"><div id="pressure-plot" class="plot"></div><p class="caption">Pressure at 13 measured taps. Exact digitized positions exist for L1/L5; L2–L4 use explicitly approximate nominal coordinates. No uncertainty bars are supplied.</p></article><article class="panel plot-panel"><div id="quality-plot" class="plot"></div><p class="caption">Liquid mass fraction = 1−Q only where saved raw quality is finite and 0≤Q≤1. Sentinels and interpolation overshoots remain gaps, never clipped. The vertical line is measured onset.</p></article><article class="panel plot-panel"><div id="residual-plot" class="plot"></div><p class="caption">Actual accepted trajectories with separate mass, momentum and energy fixed-scale L2 norms. Dashed threshold: the original 10⁻⁹ absolute target.</p></article><article class="panel plot-panel"><div id="cfl-plot" class="plot"></div></article><article class="panel plot-panel"><div id="massflow-plot" class="plot"></div><p class="caption">Saved cell ρuA is a finite-grid diagnostic. The separately plotted conserved numerical face-flow value is the physical-budget quantity. Experimental mass flow was not supplied.</p></article><article class="panel plot-panel"><div id="mesh-plot" class="plot"></div><p class="caption">All property-audited uniform meshes for this operating point, plus the available stretched L1 run. These are sensitivity observations, not a grid-independence certificate.</p></article></div><article class="panel"><h3>Selected saved numerical checks and experimental error</h3><div class="table-wrap"><table><thead><tr><th>Attempt</th><th>Mass / momentum / energy L2</th><th>BC / global max</th><th>Saved audit</th><th>RMSE [bar]</th><th>Masked Q</th><th>Numerical flow [kg/s]</th></tr></thead><tbody id="selected-rows"></tbody></table></div></article>''',
+    DISCUSSION='''<div class="prose-grid"><article class="panel prose"><h3>Equilibrium HEM versus delayed condensation</h3><p>The shared Euler/HEM model assumes phase equilibrium and uses JAXProp CO₂ bicubic properties. The experiment contains delayed condensation. A converged HEM pressure profile therefore need not reproduce the measured nonequilibrium transition.</p><p>The observed discrepancy is a physical validation result. These saved results alone do not isolate how much comes from equilibrium modeling versus discretization, contour reconstruction or experimental data limitations.</p></article><article class="panel prose"><h3>Liquid fraction is a diagnostic, not an onset detector</h3><p>Saved raw quality Q is mapped to 1−Q only on the finite interval [0,1]. Single-phase sentinels such as −1 and overshoots outside that range become gaps. Mask counts and raw ranges remain in the selected details.</p><p>The only liquid-fraction reference curves available are the upstream L1/L5 CFD series. They are not experimental liquid-fraction measurements. No computed threshold onset is asserted from interpolated equilibrium quality.</p></article><article class="panel prose"><h3>Geometry, depth and conservation</h3><p>The measured half-height spline uses x = −z from Appendix Table 4. Its raw workbook inlet half-height is 6.38 mm; the publication-corrected value is 6.35 mm. Hardware depth is 6.48 mm, consistent with the nominal 20 mm² throat area and 3.0862 mm full throat height.</p><p>Conservative numerical face mass flow is used in the physical budget. Cell ρuA may vary at finite resolution. Full-channel kg/s and half-channel flow per unit depth in kg/(s m) are different quantities, retained separately in the saved audits.</p></article><article class="panel prose"><h3>Experimental provenance and limits</h3><p>Appendix Tables 2/3 supply first-repeat reservoir conditions and pressure values for all five cases. Original L1/L5 Excel and reference CFD bytes come from Andrea revision bcfe6ae1ec8abd71528e57b218ac8291dc9461fa.</p><p>L2–L4 exact tap coordinates, original workbooks and reference CFD remain unavailable. Their nominal tap coordinates are approximate; no measurement uncertainty or missing CFD curve is fabricated.</p><p>Primary source: Lettieri et al., <a href="https://doi.org/10.1115/1.4038082">DOI 10.1115/1.4038082</a> (2018 issue, online 2017).</p></article></div>''',
+    PROTOCOL='''<div class="prose-grid"><article class="panel prose"><h3>Numerical model and properties</h3><p>Shared NozzleModel and generic FVM, equilibrium JAXProp CO₂ bicubic properties, zero wall shear and heat transfer. The saved runs use HLL, constant reconstruction, coupled backward Euler with Newton backtracking, colored AD and banded linear algebra.</p><p>The selected Andrea table has 200×200 nodes over 50–850 kJ/kg and 0.1–300 bar. The exposed operating rectangle is 300–550 kJ/kg and 10–100 bar, with supporting interpolation data audited separately.</p><p>The renderer reads NPZ field arrays and original JSON records. It never imports the flow model, rebuilds the property table, evaluates an EOS or advances a solution.</p></article><article class="panel prose"><h3>Original checks and recorded epochs</h3><p>Stored verification records independently re-evaluated each saved field at their recorded source epoch. This presentation only displays those existing results. It does not claim a fresh check against today's edited source.</p><p>The recorded equation policy requires both relative 10⁻⁶ and absolute 10⁻⁹ convergence, with separate 10⁻⁹ boundary/global targets. All physical branch and admissibility checks remain distinct. Preflight and unfinished attempts stay available. Elapsed/preparation costs are recorded metadata, not a repeated timing ranking.</p></article></div>''')
 
 
 def main():
-    output = ROOT / "outputs"
-    output.mkdir(exist_ok=True)
+    prepare_inputs(ROOT, [ROOT / "settings.json", *(ROOT / "data").glob("*"),
+        *(ROOT / "outputs").glob("*/result.json"), *(ROOT / "outputs").glob("*/verification.json"),
+        *(ROOT / "outputs").glob("*/solution.npz"), *(ROOT / "outputs").glob("*.json")])
+    doc = definitions()
+    cases = []
+    for name, definition in doc["cases"].items():
+        x, p, origin = experiment(name)
+        upstream = cfd(name)
+        cases.append(dict(id=name, definition=definition, experiment=dict(x_m=x, pressure_pa=p, origin=origin), upstream_cfd=upstream))
     records = []
-    for path in sorted(output.glob("*/result.json")):
-        data = json.loads(path.read_text(encoding="utf-8"))
-        check = path.with_name("verification.json")
-        if check.exists():
-            data["fresh_verification"] = json.loads(check.read_text(encoding="utf-8"))
-        records.append((path.parent, data))
-    fig, axes = plt.subplots(5, 1, figsize=(8.2, 14), sharex=True, layout="constrained")
-    for ax, case in zip(axes, definitions()["cases"]):
-        x, p, origin = experiment(case)
-        label = "Experiment (approximate tap x)" if "approximate" in origin else "Experiment (upstream digitized x)"
-        ax.plot(x * 1e3, p / 1e5, "ks", ms=4, label=label)
-        ax.axvline(definitions()["cases"][case]["onset_mm"], color="0.25", linestyle=":", linewidth=1,
-                   label="Measured condensation onset")
-        reference = cfd(case)
-        if reference:
-            xp, pp = reference["pressure"].T
-            keep = (xp >= -0.032013) & (xp <= 0.066355)
-            ax.plot(xp[keep]*1e3, pp[keep]/1e5, "--", color="0.4", label="Upstream reference CFD")
-        runs = [(folder, r) for folder, r in records if r["case_id"] == case]
-        colors = plt.cm.plasma(np.linspace(0.2, 0.8, max(1, len(runs))))
-        for color, (folder, run) in zip(colors, runs):
-            file = folder / "solution.npz"
-            if file.exists():
-                state = np.load(file)
-                suffix = "converged" if run["success"] else f"UNFINISHED: {run['reason']}"
-                if not run.get("property_domain_audited"):
-                    suffix = "preflight, property domain unaudited"
-                mesh_label = "" if run["stretch"] == 1 else f", stretch={run['stretch']:g}"
-                ax.plot(state["x_m"]*1e3, state["p"]/1e5, color=color,
-                        linestyle="-" if run["stretch"] == 1 else ":",
-                        label=f"HEM N={run['cells']}{mesh_label}, {suffix}")
-        ax.set_ylabel("Pressure (bar)")
-        ax.set_title(case, loc="left")
-        ax.grid(alpha=0.2)
-        ax.legend(fontsize=8)
-    axes[-1].set_xlabel("Axial position relative to throat (mm)")
-    axes[-1].set_xlim(-32.013,66.355)
-    fig.savefig(output / "pressure_profiles.png", dpi=160)
-    fig.savefig(output / "pressure_profiles.pdf")
-    plt.close(fig)
-
-    rows = []
-    for folder, run in records:
-        comparison = run.get("comparison", {})
-        metrics = run.get("metrics", {})
-        norm = metrics.get("equation_norm", [])
-        maximum = max(norm) if norm and all(v is not None for v in norm) else None
-        rmse = comparison.get("pressure_rmse_bar")
-        status = "converged" if run["success"] else run["reason"]
-        if not run.get("property_domain_audited"):
-            status += " (preflight; domain unaudited)"
-        rows.append([run["case_id"], str(run["cells"]), str(run["stretch"]), status,
-                     "—" if maximum is None else f"{maximum:.3e}",
-                     "—" if rmse is None else f"{rmse:.5f}",
-                     str(len([h for h in run.get("history",[]) if h.get("accepted") and h.get("phase") != "initial"]))])
-    header = ["Case", "Cells", "Stretch", "Status", "Max equation L2", "Pressure RMSE (bar)", "Accepted updates"]
-    table_md = markdown_table(header, rows)
-    if not rows:
-        table_md += "\nNo completed attempts are present."
-    final_rows, refinement_rows, finest = [], [], []
-    for case in definitions()["cases"]:
-        candidates = [(folder, r) for folder, r in records if r["case_id"] == case and r.get("property_domain_audited") and r["stretch"] == 1]
-        if not candidates:
-            continue
-        folder, run = max(candidates, key=lambda pair: (pair[1]["cells"], pair[0].name))
-        finest.append(run)
-        verification = folder / "verification.json"
-        if verification.exists():
-            checked = json.loads(verification.read_text(encoding="utf-8"))
-            norms = checked["equation_l2"]
-            final_rows.append([case, str(run["cells"]), "passed" if checked["verified"] else "FAILED",
-                               *[f"{v:.2e}" for v in norms], f"{checked['boundary_max']:.2e}",
-                               f"{max(checked['global_defect']):.2e}",
-                               f"{checked['mass_flow']['numerical_inlet_kg_s']:.6f}",
-                               f"{checked['mass_flow']['half_channel_per_depth_kg_s_m']:.4f}",
-                               f"{checked['endpoint_mach'][-1]:.4f}"])
-        coarse = [(f,r) for f,r in candidates if r["cells"] < run["cells"]]
-        if coarse:
-            small, old = max(coarse, key=lambda pair: (pair[1]["cells"], pair[0].name))
-            fine_field, coarse_field = np.load(folder / "solution.npz"), np.load(small / "solution.npz")
-            x, _, _ = experiment(case)
-            pressure_change = np.interp(x, fine_field["points_m"], fine_field["state"][:,0]) - np.interp(x, coarse_field["points_m"], coarse_field["state"][:,0])
-            refinement_rows.append([case, f"{old['cells']} to {run['cells']}", f"{np.max(np.abs(pressure_change))/1e5:.5f}",
-                                    f"{old['comparison']['pressure_rmse_bar']:.5f}", f"{run['comparison']['pressure_rmse_bar']:.5f}"])
-    budget_header = ["Case", "Cells", "Fresh audit", "Mass L2", "Momentum L2", "Energy L2", "BC max", "Global max", "Numerical flow (kg/s)", "Half-channel per depth (kg/(s m))", "Outlet Mach"]
-    refinement_header = ["Case", "Cells", "Max pressure change at taps (bar)", "Coarse RMSE (bar)", "Fine RMSE (bar)"]
-    budgets_md = markdown_table(budget_header, final_rows)
-    refinement_md = markdown_table(refinement_header, refinement_rows)
-    if finest:
-        errors = [r.get("comparison", {}).get("pressure_rmse_bar") for r in finest]
-        errors = [v for v in errors if v is not None]
-        findings = f"{sum(bool(r['success']) for r in finest)} of {len(finest)} finest-grid cases converged."
-        if errors:
-            findings += f" Their pressure RMSE spans {min(errors):.3f}–{max(errors):.3f} bar."
-        findings += " These errors measure agreement with the experiment; the residual tolerances measure the discrete root."
-    else:
-        findings = "No completed flow attempts are available."
-    fig, axes = plt.subplots(5, 1, figsize=(8.2, 12), sharex=True, layout="constrained")
-    quality_diagnostics = {}
-    for ax, case in zip(axes, definitions()["cases"]):
-        candidates = [(folder, r) for folder,r in records if r["case_id"] == case and r.get("property_domain_audited") and r["stretch"] == 1]
-        if candidates:
-            folder, run = max(candidates, key=lambda pair: pair[1]["cells"])
-            state = np.load(folder / "solution.npz")
-            quality = state["quality"]
-            valid = np.isfinite(quality) & (quality >= 0) & (quality <= 1)
-            fraction = np.where(valid, 1-quality, np.nan)
-            ax.plot(state["x_m"]*1e3, fraction, color=plt.cm.plasma(.8), label=f"Equilibrium HEM N={run['cells']}")
-            quality_diagnostics[case] = dict(cells=run["cells"], quality_min=float(np.nanmin(quality)),
-                                             quality_max=float(np.nanmax(quality)), masked_samples=int(np.sum(~valid)),
-                                             mapping="liquid_mass_fraction=1-Q only where raw Q is finite and 0<=Q<=1; otherwise gap",
-                                             onset_prediction_mm=None,
-                                             onset_reason="No threshold-based prediction claimed from interpolated equilibrium quality")
-        reference = cfd(case)
-        if reference:
-            xq, liquid = reference["liquid_fraction"].T
-            ax.plot(xq*1e3, liquid, "--", color="0.4", label="Upstream reference CFD")
-        onset = definitions()["cases"][case]["onset_mm"]
-        ax.axvline(onset, color="0.25", linestyle=":", linewidth=1.3,
-                   label=f"Measured condensation onset: {onset:g} mm")
-        ax.set_title(case,loc="left")
-        ax.set_ylabel("Liquid mass fraction (–)")
-        ax.set_ylim(-.01,.35)
-        ax.grid(alpha=.2)
-        ax.legend(fontsize=8)
-    axes[-1].set_xlabel("Axial position relative to throat (mm)")
-    axes[-1].set_xlim(-32.013,66.355)
-    fig.savefig(output / "liquid_fraction_profiles.png", dpi=160)
-    fig.savefig(output / "liquid_fraction_profiles.pdf")
-    plt.close(fig)
-    (output / "quality_diagnostics.json").write_text(json.dumps(quality_diagnostics,indent=2),encoding="utf-8")
-    quality_summary = "; ".join(
-        f"{case}: N={info['cells']}, {info['masked_samples']} masked samples, raw Q range {info['quality_min']:.6f} to {info['quality_max']:.6f}"
-        for case,info in quality_diagnostics.items()) + "."
-    fig, axes = plt.subplots(5, 1, figsize=(8.2, 12), sharex=True, layout="constrained")
-    for ax, case in zip(axes, definitions()["cases"]):
-        candidates = [r for _,r in records if r["case_id"] == case and r.get("property_domain_audited") and r["stretch"] == 1]
-        if candidates:
-            chosen = max(candidates, key=lambda r: r["cells"])
-            history = [r for r in chosen.get("history",[]) if r.get("accepted") and "equation_l2" in r]
-            if history:
-                steps = [r["step"] for r in history]
-                norms = np.asarray([r["equation_l2"] for r in history])
-                for i,(label,color) in enumerate(zip(("Mass", "Momentum", "Energy"), plt.cm.plasma([.2,.5,.8]))):
-                    ax.semilogy(steps, np.where(norms[:,i] > 0, norms[:,i], np.nan), color=color, label=label)
-                ax.axhline(1e-9, color="0.4", linestyle="--", label="Absolute target")
-            ax.set_title(f"{case}, N={chosen['cells']}",loc="left")
-        ax.set_ylabel("Fixed-scale L2")
-        ax.grid(alpha=.2)
-        ax.legend(fontsize=8, ncol=4)
-    axes[-1].set_xlabel("Accepted update (initial state is step 0)")
-    fig.savefig(output / "residual_histories.png", dpi=160)
-    fig.savefig(output / "residual_histories.pdf")
-    plt.close(fig)
-    text = """# Lettieri HEM validation results
-
-Generated from saved outputs on 2 November 2026. All cases use the shared Euler/HEM
-model, zero wall friction/heating, measured contour, and equilibrium JAXProp bicubic
-properties. See [README.md](README.md) for sources, units and reproduction.
-
-""" + findings + """
-
-The data/geometry audit checks five 13-point pressure profiles, exact L1/L5
-publication agreement, byte-exact upstream workbooks, uniform/nonuniform spline
-volumes and pressure/geometry cancellation. It does not certify the flow solutions.
-
-""" + table_md + """
-
-Pressure errors for unsuccessful runs describe unfinished states and are not
-validation conclusions. Convergence requires every transported equation, boundary
-equation, global budget and the physical outlet audit to pass the unchanged fixed
-targets. Exact final residuals, failure reasons and all attempted steps are retained
-in each `outputs/<case>/result.json`. Preparation costs/table hashes are retained in
-`outputs/properties.json` and in each result, separately from solve time.
-
-## Fresh residual and physical-budget audit
-
-The following audit re-evaluates the saved fields without advancing them, using
-the original spatial equations and independently reducing volume-weighted L2
-norms. The numerical flux telescoping identity, physical inlet/outlet regime and
-admissibility are checked separately. These are dimensionless fixed-scale
-residuals; thresholds are $10^{-9}$, with no relaxed acceptance rule.
-
-""" + budgets_md + r"""
-
-Mass flow in this table comes from the conservative numerical face flux.
-The saved cell quantity $\rho u A$ varies at finite resolution and is a separate
-physical diagnostic. The per-depth column means half-channel flow per unit
-depth, not the mass flow through half of the 6.48 mm hardware depth.
-
-## Mesh sensitivity
-
-""" + refinement_md + r"""
-
-These two resolutions are a sensitivity check, not proof of grid independence.
-Pressure comparisons linearly interpolate saved primitive states to the
-measurement positions. The reported errors combine discretization, geometry,
-equilibrium-model and measurement differences; they are not uncertainty-weighted
-scores. The nonuniform L1 run is an additional geometry/solver check.
-
-![Five-case pressure profiles](outputs/pressure_profiles.png)
-
-## Liquid fraction and measured condensation onset
-
-![Equilibrium liquid fraction and measured onset](outputs/liquid_fraction_profiles.png)
-
-The dotted lines show the measured condensation locations from Appendix Table 3,
-not a computed onset. The only liquid-fraction reference curves available are
-L1/L5 CFD; no experimental liquid-fraction samples are invented. The HEM curve
-uses the saved raw JAXProp quality $Q$ and plots $1-Q$ only for finite
-$0\le Q\le1$. Single-phase sentinels such as $Q=-1$, and interpolation overshoots
-outside that interval, are left as gaps rather than clipped.
-
-""" + quality_summary + r"""
-
-This affects only this diagnostic plot, not the solver or EOS.
-The exact per-run diagnostic counts are in `outputs/quality_diagnostics.json`.
-No threshold-based numerical onset is claimed from this interpolated
-equilibrium field. HEM phase appearance and delayed experimental condensation
-are physically distinct; the measured onset remains an independent reference.
-
-![Finest-grid per-equation residual histories](outputs/residual_histories.png)
-
-The original L1/L5 Excel and reference CFD series are preserved. L2–L4 pressures
-and reservoir inputs were recovered from Appendix Tables 2/3; their exact tap
-coordinates, original workbooks and reference CFD files remain unavailable.
-Nominal tap coordinates are explicitly approximate, with no invented uncertainty.
-The 6.48 mm depth reproduces Andrea's convention and agrees with the primary
-20 mm² throat area divided by the 3.0862 mm full throat height. Experimental
-mass flow is not supplied. Full-channel and half-channel-per-depth
-mass flows are reported separately in the machine-readable results.
-
-The experiment measures nonequilibrium condensation. Equilibrium HEM is not
-expected to reproduce delayed condensation identically. The report therefore
-keeps numerical convergence separate from experimental agreement. No reference
-CFD data were used to initialize the numerical solver.
-
-The generated PNG pressure/residual plots were visually inspected. Structural
-checks cover embedded images, internal navigation targets and the downloadable
-JSON in the standalone HTML. Interactive browser verification could not be
-completed because the browser access host was unavailable.
-"""
-    (ROOT / "REPORT.md").write_text(text, encoding="utf-8")
-    table_html = html_table(header, rows)
-    budgets_html = html_table(budget_header, final_rows)
-    refinement_html = html_table(refinement_header, refinement_rows)
-    image = base64.b64encode((output / "pressure_profiles.png").read_bytes()).decode()
-    residual_image = base64.b64encode((output / "residual_histories.png").read_bytes()).decode()
-    fraction_image = base64.b64encode((output / "liquid_fraction_profiles.png").read_bytes()).decode()
-    download = base64.b64encode(json.dumps([r for _,r in records]).encode()).decode()
-    document = f"""<!doctype html><html lang="en"><meta charset="utf-8"><title>Lettieri HEM validation</title>
-<style>body{{font:16px system-ui,sans-serif;max-width:1200px;margin:2rem auto;padding:0 1rem;color:#202124;background:#fff}}nav a{{margin-right:1rem}}table{{border-collapse:collapse;width:100%;font-size:14px}}th,td{{border-bottom:1px solid #bbb;text-align:left;padding:.4rem}}img{{max-width:100%;height:auto}}code{{overflow-wrap:anywhere}}section{{margin:2rem 0}}.scroll{{overflow-x:auto}}</style>
-<h1>Lettieri equilibrium HEM validation</h1><nav><a href="#results">Results</a><a href="#profiles">Pressure and convergence</a><a href="#fractions">Liquid fraction and onset</a><a href="#limits">Limits and provenance</a></nav>
-<section id="results"><h2>Saved run status</h2><p>Shared Euler/HEM model, zero wall friction and heating, equilibrium bicubic JAXProp properties. Generated 2 November 2026. Unsuccessful attempts remain unfinished; their errors are not validation conclusions.</p><p>{html.escape(findings)}</p>{table_html}
-<p><a download="lettieri_results.json" href="data:application/json;base64,{download}">Download settings, histories and results (JSON)</a></p><h2>Fresh residual and physical-budget audit</h2><div class="scroll">{budgets_html}</div><p>Each transported equation is checked separately. Numerical face mass flow is used for the budget; cell rho*u*A is a separate finite-grid diagnostic. The half-depth flow is per unit depth, in kg/(s m).</p><h2>Mesh sensitivity</h2>{refinement_html}<p>Two levels provide a sensitivity check, not proof of grid independence. Pressure errors use interpolation to measurement positions.</p></section>
-<section id="profiles"><h2>Pressure profiles</h2><img alt="Pressure comparisons for all five Lettieri cases, with run status in each legend" src="data:image/png;base64,{image}"><h2>Finest-grid residual histories</h2><img alt="Separate mass, momentum and energy residuals against accepted updates" src="data:image/png;base64,{residual_image}"></section>
-<section id="fractions"><h2>Liquid fraction and measured condensation onset</h2><img alt="Equilibrium liquid mass fraction for all five cases, reference CFD for L1 and L5, and measured condensation onset markers" src="data:image/png;base64,{fraction_image}"><p>The dotted lines show measured condensation locations, not computed onset. Only L1/L5 have reference CFD liquid-fraction curves; no experimental fraction samples are supplied. The saved raw JAXProp quality Q is mapped to 1−Q only when finite and between 0 and 1. Sentinels such as −1 and out-of-range interpolation values remain gaps, without clipping.</p><p>{html.escape(quality_summary)}</p><p>No threshold-based predicted onset is claimed from these interpolated equilibrium diagnostics.</p></section>
-<section id="limits"><h2>Limits and provenance</h2><p>The source is Lettieri et al., <a href="https://doi.org/10.1115/1.4038082">DOI 10.1115/1.4038082</a>, 2018 issue, online 2017. Appendix Tables 2/3 supply first-repeat conditions and pressures for all five cases. Original L1/L5 Excel and CFD series came from Andrea revision bcfe6ae1ec8abd71528e57b218ac8291dc9461fa. L2–L4 exact tap coordinates and CFD series remain unavailable; nominal tap coordinates are explicitly approximate. No measurement uncertainty is invented.</p>
-<p>The measured half-height spline uses x=-z from Appendix Table 4; its inlet half-height is corrected from the workbook's 6.38 mm to the publication's 6.35 mm. Depth is 6.48 mm as in Andrea, consistent with the primary 20 mm² throat area divided by the full throat height. Full-channel mass flow is 2 times depth times the half-channel per-depth flow; their units are kg/s and kg/(s m), respectively. Experimental mass flow is not supplied.</p><p>HEM imposes phase equilibrium; the experiment contains delayed condensation. Solver convergence, physical budgets and experimental agreement are separate checks. No CFD field was used as initialization.</p></section></html>"""
-    (ROOT / "REPORT.html").write_text(document, encoding="utf-8")
-    print(f"Wrote reports for {len(records)} saved attempts.")
+    for file in sorted((ROOT / "outputs").glob("*/result.json")):
+        row = json.loads(file.read_text(encoding="utf-8"))
+        saved = file.with_name("solution.npz")
+        fields = {}
+        if saved.is_file():
+            with np.load(saved) as z:
+                fields = {key: z[key] for key in z.files}
+        verification = file.with_name("verification.json")
+        checked = json.loads(verification.read_text(encoding="utf-8")) if verification.exists() else None
+        q = np.asarray(fields.get("quality", []), dtype=float)
+        valid = np.isfinite(q) & (q >= 0) & (q <= 1)
+        fraction = np.where(valid, 1 - q, np.nan)
+        diagnostic = dict(masked_samples=int(np.count_nonzero(~valid)), samples=len(q),
+                          raw_min=float(np.min(q[np.isfinite(q)])) if np.isfinite(q).any() else None,
+                          raw_max=float(np.max(q[np.isfinite(q)])) if np.isfinite(q).any() else None)
+        records.append(dict(row, id=file.parent.name, input_file=file.relative_to(ROOT).as_posix(),
+                            fields=fields, displayed_liquid_fraction=fraction, quality_diagnostic=diagnostic,
+                            saved_verification=checked))
+    data = dict(study="lettieri", cases=cases, records=records,
+                settings=json.loads((ROOT / "settings.json").read_text(encoding="utf-8")),
+                publication=doc)
+    render(ROOT, data, SECTIONS, ASSETS / "app.js", files=[Path(__file__), ASSETS / "app.js", Path(__file__).with_name("data.py"), ROOT / "README.md", ROOT / "REPORT.md"])
 
 
 if __name__ == "__main__":

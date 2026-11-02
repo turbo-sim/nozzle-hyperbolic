@@ -1,5 +1,10 @@
 # Lettieri HEM validation results
 
+The [interactive HTML report](REPORT.html) has been modernized with Plotly,
+operating-case/mesh/attempt selectors, light/dark themes, and interpretation.
+The original numerical tables and static exports below remain unchanged.
+No cases, property evaluations or saved-field residual checks were rerun.
+
 Generated from saved outputs on 2 November 2026. All cases use the shared Euler/HEM
 model, zero wall friction/heating, measured contour, and equilibrium JAXProp bicubic
 properties. See [README.md](README.md) for sources, units and reproduction.
@@ -107,7 +112,8 @@ expected to reproduce delayed condensation identically. The report therefore
 keeps numerical convergence separate from experimental agreement. No reference
 CFD data were used to initialize the numerical solver.
 
-The generated PNG pressure/residual plots were visually inspected. Structural
-checks cover embedded images, internal navigation targets and the downloadable
-JSON in the standalone HTML. Interactive browser verification could not be
-completed because the browser access host was unavailable.
+The original PNG pressure/residual exports are retained. The modern HTML uses
+Plotly and embeds its runtime, plotted values and original input downloads.
+Structural and application checks cover selectors, navigation, themes, arrays,
+reference availability and exact quality masking. Actual browser preview could
+not be completed because the browser access host was unavailable.

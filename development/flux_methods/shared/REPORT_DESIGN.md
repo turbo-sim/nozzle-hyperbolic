@@ -74,3 +74,19 @@ stay at each study root; raw campaign data and QA records stay in ignored
 `outputs/` directories. Numerical-data, physical-case, source and execution
 client hashes are checked separately from the generated HTML and presentation
 audit outputs.
+
+## Additional saved-data case explorers
+
+The limiter and Lettieri reports use `offline_report.py` with the same theme
+and the smaller `assets/study_explorer.*` shell. Their study-specific readers
+and applications preserve different evidence semantics: analytical nozzle
+verification for the limiters, and equilibrium HEM versus experimental CO2
+pressures for Lettieri. Neither renderer imports a flow solver.
+
+Each report has Overview, Case explorer, Interpretation & model, and Protocol &
+data pages. Input manifests protect original JSON/NPZ/reference bytes, downloads
+carry those original inputs plus renderer code, and `audit_offline_report.py`
+checks packaging and exact array preservation. `audit_saved_explorers.mjs`
+exercises the embedded controls and data wiring with an instrumented DOM/Plotly
+adapter. Actual browser layout is a separate check; a failed browser-host
+preview must not be reported as a successful visual inspection.
