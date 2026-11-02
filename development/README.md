@@ -16,6 +16,9 @@ All development work is grouped under this single directory:
   nozzle, annular and CO2 target cases.
 - [roberto/](roberto/README.md): current Euler verification examples, numerical
   fixes, Newton/PTC, implicit-integration and boundary-condition studies.
+- [benchmark_production/](benchmark_production/README.md): saved production flux and
+  grid-sequencing timings with an offline Plotly case explorer, fixed-work
+  component costs, analytical errors and source-bound evidence.
 
 The implemented shared solver's residual definitions, convergence policy and
 monitoring API are documented in

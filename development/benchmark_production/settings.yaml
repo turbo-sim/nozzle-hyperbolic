@@ -1,0 +1,75 @@
+schema_version: 1
+cases:
+  - euler_nozzle/shock_35
+  - euler_nozzle/shock_70
+  - euler_nozzle/adapted
+  - euler_annular/shock35
+  - euler_annular/shock70
+  - euler_annular/supersonic_expansion
+reconstructions: [constant, muscl_van_leer]
+repeats:
+  euler_nozzle: 10
+  euler_annular: 3
+kernel_repeats: 20
+complete_solve_timeout_s: 1200
+output: outputs/initial_20261102
+methods:
+  - id: single_stadtke
+    label: Vanilla Stadtke, single grid
+    flux: stadtke
+    grids: [400]
+    custom_jump_correction: false
+    custom_endpoint_envelope: false
+  - id: multigrid_stadtke
+    label: Vanilla Stadtke, grid sequencing
+    flux: stadtke
+    grids: [50, 100, 200, 400]
+    custom_jump_correction: false
+    custom_endpoint_envelope: false
+  - id: multigrid_stadtke_modified
+    label: Modified Stadtke, grid sequencing
+    flux: stadtke
+    grids: [50, 100, 200, 400]
+    custom_jump_correction: true
+    custom_endpoint_envelope: true
+  - id: multigrid_hll
+    label: HLL, grid sequencing
+    flux: hll
+    grids: [50, 100, 200, 400]
+    custom_jump_correction: false
+    custom_endpoint_envelope: false
+  - id: multigrid_rusanov
+    label: Rusanov, grid sequencing
+    flux: rusanov
+    grids: [50, 100, 200, 400]
+    custom_jump_correction: false
+    custom_endpoint_envelope: false
+scheme:
+  delta_factor: 0.1
+  time_integrator: euler-implicit
+  boundary_treatment: coupled
+  newton_iterations: 10
+  newton_backtracking: false
+  newton_update_tolerance: 1.0e-10
+  newton_residual_tolerance: 1.0e-12
+  max_backtracks: 20
+  jacobian_mode: colored
+  linear_solver: banded
+  filter_strength: 0.0
+steady:
+  cfl: 0.2
+  cfl_growth: 1.2
+  cfl_max: 1000000.0
+  cfl_shrink: 0.5
+  max_steps: 16000
+  max_retries: 14
+  stagnation_steps: 64
+residual:
+  norm: l2
+  weighting: volume
+  criterion: either
+  relative_tolerance: 1.0e-6
+  absolute_tolerance: 1.0e-9
+  boundary_tolerance: 1.0e-9
+  global_tolerance: 1.0e-9
+  initial_floor: 1.0e-14
