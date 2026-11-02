@@ -1,0 +1,90 @@
+{
+  "repository": "https://github.com/alber-berg/twophase-nozzle-nicfd2026",
+  "revision": "2dc04ad9d474afb727857139df89537fcadb5769",
+  "retrieved_on": "2026-11-02",
+  "license": "CC-BY-4.0",
+  "files": {
+    "LICENSE": {
+      "sha256": "9ba9550ad48438d0836ddab3da480b3b69ffa0aac7b7878b5a0039e7ab429411",
+      "git_blob": "da6ab6cc8f333d7e89a99812866df8f24374d47c"
+    },
+    "README.md": {
+      "sha256": "0cb1637c2c70853d675ca8b74098cc72b6fc533e54867bc6126c6a4067ccadd4",
+      "git_blob": "142ce2cd8ecf148504b31345814c22afd65cf9d2"
+    },
+    "data/phase_change/subsonic/settings.yaml": {
+      "sha256": "e05db66158b0f1c9e8bddbf578ac308b90fea91f980bb098371822c88f53999b",
+      "git_blob": "bdcf1cb45ceb0c47ea39d6160bd1339a915a74e6"
+    },
+    "data/phase_change/subsonic/solution.csv": {
+      "sha256": "aeabd6052ad6af0ca95e76bbb278ea036a3734050f456aba2298c8e789f6bc99",
+      "git_blob": "a1d7efec682d8410a630a27fc4d87e9c77c6997c"
+    },
+    "data/phase_change/supersonic_adapted/settings.yaml": {
+      "sha256": "5a059799cc060e45165055f8e8ea2430cbf833ca4b702efc39bb4aff12c20093",
+      "git_blob": "f654dbcd71c8f4a03376a8a549d6f41c5de74092"
+    },
+    "data/phase_change/supersonic_adapted/solution.csv": {
+      "sha256": "a3543bc25b2a4db0a0885ee2e45e40a81c75948c076ccdbedc1d3b98d6fc9f99",
+      "git_blob": "8d0cf3b241c7d259f3f5f51ad00702d802b3b7e2"
+    },
+    "data/phase_change/supersonic_shock/settings.yaml": {
+      "sha256": "931e5739d8aa6eb972abbc2ed9759a77e89f6429fbe04d7f5f1ed594b02df96b",
+      "git_blob": "17b18b952ddc4d80a888a96e03ee90ef487dc575"
+    },
+    "data/phase_change/supersonic_shock/solution.csv": {
+      "sha256": "9028c574b1873e51951992333040fb26ca4347816bef634204a97614eedd7d86",
+      "git_blob": "a70f22dccacf84b708141a094fd1dfcee7259e96"
+    },
+    "data/two_component/subsonic/settings.yaml": {
+      "sha256": "499e381ef24c36d40061d1102a9d85b68853bdc92aa874540b473b05ab5b1e0a",
+      "git_blob": "292248136ebd80339f7ef1e1a45b662c8cc16fb7"
+    },
+    "data/two_component/subsonic/solution.csv": {
+      "sha256": "b3fd701b4d56f03e5c9270b38c6df6d016a50554547a5ac7608dca403ea3e02d",
+      "git_blob": "dc0753b98ce5940e083e8bbe0e37948f30625f5a"
+    },
+    "data/two_component/supersonic_adapted/settings.yaml": {
+      "sha256": "8c3b9564ac85799168e5317dc212242eb75aeb192133b841fc07b0e6ca41dc63",
+      "git_blob": "68a23a57f72d5ac3781bedf57dba25e1279ab361"
+    },
+    "data/two_component/supersonic_adapted/solution.csv": {
+      "sha256": "e401c30ccf25d201b31b129a29928c3d6b8a0c4935ba798e156a047af3522b86",
+      "git_blob": "5f4c65fc5009420540becba959e20146e3f32364"
+    },
+    "data/two_component/supersonic_shock/settings.yaml": {
+      "sha256": "51645264a5d41e949db065b06ea90a83dc5c7bd493653195db881ec89088f9d1",
+      "git_blob": "2a420d2cb5620fdaee4503ef6b85c285d1aca095"
+    },
+    "data/two_component/supersonic_shock/solution.csv": {
+      "sha256": "73cd91ca4913441940e813821a653c226ed933c04de7c1c47e6d6e8fae0f9e40",
+      "git_blob": "ebd32f71758643b7f17ec7cc435fcacce3590211"
+    },
+    "scripts/figure_common.py": {
+      "sha256": "ff30aaa2c3f03c2921b20d0cf27cba1edebfbd217773d2116639cb2578e8cf84",
+      "git_blob": "3667c85b7703d80426e9c8079b1969e20a64ead7"
+    },
+    "scripts/make_all_figures.py": {
+      "sha256": "ef302005c8c93fcef1f5f21271383eb63165cc62101cba95d12056b9868c3c35",
+      "git_blob": "7c2820e1c448cc4bf86c7b9d348b11b7a5c0ee81"
+    },
+    "scripts/nozzle_silhouette.py": {
+      "sha256": "1ee804698a002ba4a316c991bd18fabc0571cc622dd4dab8bce25e0fb4584ce9",
+      "git_blob": "689f3e1622d088f149741a77bbae3bb67c8920b3"
+    },
+    "scripts/plot_phase_change.py": {
+      "sha256": "7f0b99f461a6d078aba69db614b3a7a19a0708fb77a823c092ec00f14f440119",
+      "git_blob": "03c649804869f9f4a5250632ab56f9e94b358c99"
+    },
+    "scripts/plot_two_component.py": {
+      "sha256": "51eb759ab2476809010b894b690c113cb60665a731ca58a7b064f28bd868b18c",
+      "git_blob": "131a9e8ec5b713bffdaf77e13cf5dc676ab12679"
+    }
+  },
+  "paper": {
+    "title": "A non-equilibrium time-marching model for two-phase supersonic nozzle flows",
+    "source": "https://orbit.dtu.dk/en/publications/a-non-equilibrium-time-marching-model-for-two-phase-supersonic-no/",
+    "supplied_pdf_sha256": "17b37635ba0f392543f6dcae7e25cd2d391244c944edf3c69b7932bca0337bce",
+    "redistributed": false
+  }
+}

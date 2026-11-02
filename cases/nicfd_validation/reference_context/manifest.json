@@ -1,0 +1,15 @@
+{
+  "repository": "https://github.com/turbo-sim/nozzle-hyperbolic",
+  "revision": "e185f571f8ea0512a7a16ce53a4b2458f72c33c2",
+  "purpose": "Resolve NICFD physical closure selector omitted from supplementary YAML; never import original solver",
+  "files": {
+    "sources_nicfd.py": {
+      "source_path": "nozzle_hyperbolic/fvm_solver/two_fluid/sources.py",
+      "sha256": "fa600da307b30d748ba2e970d21c3de6c05700677a2ecd79a5fe8a571f7eacda"
+    },
+    "closures_nicfd.py": {
+      "source_path": "nozzle_hyperbolic/fvm_solver/source_two_fluid.py",
+      "sha256": "2d63bfc4cc0c1855f2598711fe36247775d0d16d6863c288ca26a3e8c2b3d4c3"
+    }
+  }
+}

@@ -1,0 +1,123 @@
+# =============================================================================
+# two_component/subsonic
+#
+# Two-component nitrogen + water in the Elliot converging-diverging nozzle.
+# =============================================================================
+
+case:
+  id: two_component/subsonic
+  family: two-component (nitrogen + water), no phase change
+  regime: subsonic
+
+# --- Equation of state ------------------------------------------------------
+# Ordinary single-phase bicubic tables
+eos:
+  gas:
+    fluid_name: nitrogen
+    backend: HEOS
+    h_min: 50000.0              # J/kg
+    h_max: 400000.0             # J/kg
+    p_min: 10000.0              # Pa
+    p_max: 6000000.0            # Pa
+    N_h: 145
+    N_p: 200
+    table_dir: fluid_tables
+    gradient_method: forward
+  liquid:
+    fluid_name: water
+    backend: HEOS
+    h_min: 1000.0               # J/kg
+    h_max: 140000.0             # J/kg
+    p_min: 10000.0              # Pa
+    p_max: 6000000.0            # Pa   (matches the gas: the pressure is shared)
+    N_h: 145
+    N_p: 200
+    table_dir: fluid_tables
+    gradient_method: forward
+
+# --- Grid and geometry ------------------------------------------------------
+grid:
+  Nx: 500
+  x1: 0.0
+  x2: 0.31 # m
+
+geometry:
+  function: get_nozzle_elliot
+  roughness: 0.0
+
+# --- Interphase closure -----------------------------------------------------
+sources:
+  bubble_number: 1.0e11         # 1/m3
+  droplet_number: 1.0e11        # 1/m3
+  mass_transfer: false          # two-component: no phase change
+
+# --- Boundary conditions ----------------------------------------------------
+# A stagnation reservoir drives the inlet: total state, composition and slip are
+# imposed. The outlet blends between imposed back-pressure (subsonic) and 
+# extrapolation (supersonic) according to the local mixture Mach number.
+bc:
+  inlet: stagnation
+  outlet: characteristic
+  p0: 2000000.0                 # Pa - 20 bar, shared by both phases
+  T_g0: 295.15                  # K
+  T_l0: 295.15                  # K
+  quality: 0.5                  # gas mass fraction at inlet
+  slip: 1.0                     # S = u_g / u_l
+  p_out: 1600000.0              # Pa - back-pressure
+  p_out_relax: 1.0
+
+# --- Numerics --------------------------------------------------------------
+numerics:
+  CFL: 2.0
+  newton_iter: 5
+  delta_factor: 1e-6            # Harten entropy fix
+  recon: muscl_van_albada
+  k_vm: 0.5                     # virtual mass coefficient
+  jacobian: colored
+  linear_solve: normal_eq_banded
+  eos_rows: true                # E3-augmented system (removes null-space drift)
+  eos_project: false
+  nc_form: wb                   # well-balanced non-conservative term: the area
+                                # source and the face fluxes are made discretely
+                                # consistent, which removes a spurious mode
+  nc_scale: 1.0
+  lowmach_diss: 1.0             # full acoustic dissipation
+  lowmach_diss_bc: 0.0
+  eps_void: 0.05                # 4th-order JST filter on the void fraction: it
+                                # damps the 2 dx mode without changing the
+                                # resolved solution
+  eps_void_scale: frozen        # filter strength from the single-phase sound
+                                # speeds
+  eps_void_ucut: null           # ungated: the filter is active everywhere
+  eps_void_uwidth: 12.0
+  du_blend_lo: 5.0              # m/s - blend to the zero-slip flux branch where
+  du_blend_hi: 20.0             # the slip crosses zero and the full branch is
+                                # ill-conditioned
+  w_char: auto                  # state-derived column scaling
+
+# --- Time-step control ------------------------------------------------------
+# Steady state is reached by time marching; dt adapts to bound the per-step
+# change in each variable.
+time_control:
+  adaptive_dt: true
+  max_halvings: 8
+  dp_max: 0.20
+  dh_max: 0.05
+  du_max: 0.20
+  da_max: 0.10
+  dt_grow: 1.20
+
+# --- Initial condition ------------------------------------------------------
+ic:
+  type: restart
+
+# --- Run control ------------------------------------------------------------
+run:
+  n_steps: 20000
+  print_every: 10
+  ssr_tol: 1.0e-8
+  t_end: null
+  plateau_window: 4000
+  plateau_ratio: 1.01
+  visualize_ic: false           # runtime switches: they control what the solver
+  debug_newton: false           # prints and plots, not what it computes

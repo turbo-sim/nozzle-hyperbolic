@@ -1,0 +1,3 @@
+# Frozen reference bytes must match their SHA-256 manifests on every platform.
+upstream/** -text
+reference_context/** -text

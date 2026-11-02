@@ -7,6 +7,7 @@ and refactoring checks live in [`development/`](../development/README.md).
 
 | Directory | Contents |
 |---|---|
+| [nicfd_validation/](nicfd_validation/README.md) | Published NICFD nitrogen–water inputs/profiles, shared two-fluid reproduction clients and figure comparisons |
 | [lettieri_validation/](lettieri_validation/README.md) | Five-case equilibrium HEM comparison, measured contour, original L1/L5 Excel/CFD and transcribed published L2–L4 pressure data |
 | [validation/](validation/notes.md) | Literature data from Barana, Simoneau, Spinelli, and Zhu/Elbel, plus data processing and plotting scripts |
 | [validation_shock_fvs/](validation_shock_fvs/) | Lettieri nozzle FVS shock comparison, settings and nozzle geometry |
