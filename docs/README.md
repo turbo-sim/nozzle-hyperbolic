@@ -9,6 +9,7 @@ Numerical source remains the authority for defaults and callback signatures.
 | [Architecture](architecture/ARCHITECTURE.md) | Models, numerical fluxes, reconstruction, boundaries, integration and solver hierarchy; [offline viewer](architecture/ARCHITECTURE.html) and [SVG](architecture/ARCHITECTURE.svg) |
 | [Physical model interface](model_interface.md) | Required callbacks, shapes, frames, stencil declarations and optional Stadtke/Osher/Roe capabilities |
 | [Physical closures](physical_closures.md) | Wall policies, Haaland/Darcy conventions, transport properties and retained mixture correlations |
+| [Acoustic backpressure derivation](backpressure_acoustic_derivation.md) | General-EOS characteristics, frozen impedance, entropy extrapolation and the relation to finite-wave outlets |
 | [Residual monitoring](residual_monitoring.md) | Fixed-scale spatial, boundary and global checks, stopping criteria and physical monitors |
 | [Migration](migration.md) | Breaking changes from the model-specific factories to the shared FVM API |
 | [Analytical references](analytical_references.md) | Reference assumptions, invariants, source attribution and conservative cell projections |
