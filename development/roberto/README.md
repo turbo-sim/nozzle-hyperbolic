@@ -10,6 +10,7 @@ timing repetitions and controller settings belong to the benchmark profile.
 | Study | Purpose |
 |---|---|
 | [`local_timestep/`](local_timestep/README.md) | Experimental HLL timing comparison: limited/inconsistent gains; local stepping is not recommended as a production default |
+| [`cfl_carryover/`](cfl_carryover/README.md) | Interactive HLL timing study: reset versus carried CFL over 50/100/200/400-cell shock cases; carryover supports the adopted default |
 | [`benchmarking/`](benchmarking/README.md) | Twenty steady nozzle/annular cases, constant/MUSCL, independent grid refinement, analytical errors and current-code timings |
 | [`../benchmark_legacy/`](../benchmark_legacy/README.md) | Six representative shock/supersonic cases comparing original Stadtke in current and frozen native code |
 | [`../flux_methods/`](../flux_methods/README.md) | Production Stadtke corrections, Osher path rules and general-EOS Roe theory, verification and offline reports |
