@@ -1,0 +1,3 @@
+# Keep the self-contained generated report and hashed UI assets byte-for-byte.
+REPORT.html binary
+scripts/report_assets/* -text whitespace=cr-at-eol

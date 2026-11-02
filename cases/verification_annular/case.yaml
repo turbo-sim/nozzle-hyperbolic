@@ -1,0 +1,31 @@
+name: radial_axial_bend_verification
+nozzlex_case: examples/vaneless_diffuser/case_radial_axial_bend.yaml
+# Physical geometry and inlet state are imported from the NozzleX case above.
+variants:
+  inviscid:
+    friction_model: {type: zero_friction}
+    heat_model: {type: adiabatic}
+  constant_wall:
+    friction_model: {type: constant_friction_factor, Cf: 0.005}
+    heat_model: {type: adiabatic}
+  aungier:
+    friction_model: {type: aungier, roughness: 1.0e-6, Re_transition: 2300.0, Re_width: 500.0}
+    heat_model: {type: adiabatic}
+  aungier_cooled:
+    friction_model: {type: aungier, roughness: 1.0e-6, Re_transition: 2300.0, Re_width: 500.0}
+    heat_model: {type: reynolds_analogy, T_wall: 260.0}
+  aungier_heated:
+    friction_model: {type: aungier, roughness: 1.0e-6, Re_transition: 2300.0, Re_width: 500.0}
+    heat_model: {type: reynolds_analogy, T_wall: 340.0}
+numerics:
+  grids: [50, 100, 200, 400]
+  flux: hll
+  reconstruction: muscl_van_leer
+  time_integrator: euler-implicit
+  mesh_stretch: 1.5
+  reference_tolerances: [1.0e-8, 1.0e-10, 1.0e-12]
+  geometry_map_points: 2049
+  max_steps: 1500
+  cfl: 0.2
+  cfl_growth: 1.3
+  cfl_max: 1000000.0
