@@ -13,7 +13,7 @@ def __getattr__(name):
 
         return AnnularQuantities
     if name in ("heat_flux_wall", "shear_stress_wall"):
-        from .. import closures
+        from ..euler_nozzle import closures
 
         return getattr(closures, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

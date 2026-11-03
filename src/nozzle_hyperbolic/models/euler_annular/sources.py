@@ -1,7 +1,7 @@
 """Integrated geometry, wall-torque and heating sources for annular Euler."""
 
 import jax.numpy as jnp
-from ..closures import heat_flux_wall, shear_stress_wall
+from .closures.wall import heat_flux_wall, shear_stress_wall
 from .state import state_property, thermodynamic_state
 
 

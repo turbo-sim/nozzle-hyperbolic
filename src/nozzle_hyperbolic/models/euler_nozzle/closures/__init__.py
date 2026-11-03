@@ -1,4 +1,8 @@
-"""Reusable constitutive laws; physical models own their source assembly."""
+"""Nozzle wall and mixture laws, reusable by other physical models.
+
+Annular Euler imports the same wall implementations. Each model supplies its
+physical geometry and assembles momentum, torque and energy source terms.
+"""
 
 from .mixture import (
     LM_condensation, LM_gronnerud, f_HEM_purdue, richardson,

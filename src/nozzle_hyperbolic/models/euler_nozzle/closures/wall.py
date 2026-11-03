@@ -1,4 +1,7 @@
-"""EOS-independent stationary-wall policies and friction correlations.
+"""Nozzle-owned stationary-wall policies reusable by annular Euler.
+
+Constitutive correlations use hydraulic diameter and physical fluid data.
+The calling model supplies wall measures and velocity directions for sources.
 
 Haaland and the laminar 64/Re law return *Darcy* factors. Wall stress is
 ``tau=f_D*rho*speed**2/8``. A stationary adiabatic wall removes momentum but
