@@ -76,3 +76,9 @@ demo_nozzlex/
 # Deliberate, reviewable numerical regression references.
 !/tests/regression/data/physical_*/*.npz
 !/tests/regression/data/physical_*/source.zip
+
+# Generated output and result directories at any depth
+output/
+outputs/
+result/
+results/
