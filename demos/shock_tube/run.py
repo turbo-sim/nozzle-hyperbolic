@@ -15,23 +15,23 @@ END_TIME = None  # Seconds; None selects the physical default.
 VERBOSE_JAX = False  # One final compile/load status line.
 FIGURE_DPI = 300  # Static PNGs; PDFs are vector graphics.
 
-# More recorded states give smooth slow motion without interpolating flow data.
-# 601 frames at 20 fps plus the holds below produce about 35 seconds of video.
+# Equal physical-time intervals at a fixed frame rate give constant-speed playback.
+# 601 frames at 20 fps produce about 30 seconds of video, with no endpoint pauses.
 NUMBER_OF_FRAMES = 601
 VIDEO_FPS = 20
 VIDEO_DPI = 160  # 1600 x 1000 H.264 MP4.
-INITIAL_HOLD_SECONDS = 2.0
-FINAL_HOLD_SECONDS = 3.0
+INITIAL_HOLD_SECONDS = 0.0  # Set a positive value only for an intentional pause.
+FINAL_HOLD_SECONDS = 0.0
 
 # Dimensional shock-tube data: pressures [Pa], densities [kg/m^3], lengths [m].
 DOMAIN_LENGTH = 1.0
 DIAPHRAGM_POSITION = 0.5
 LEFT_PRESSURE, RIGHT_PRESSURE = 1e5, 1e4
 LEFT_DENSITY, RIGHT_DENSITY = 1.0, 0.125
-EARLY_FRAME_FRACTION = 0.4
 
 import os
 import shutil
+import subprocess
 
 import jax
 
@@ -136,9 +136,9 @@ def main():
     )
     end_time = 3.0 * tail_exit if END_TIME is None else END_TIME
 
-    # Forty percent of the movie resolves the early, fully comparable waves.
-    # The remaining frames show the long washout until the waves leave.
-    times = recording_times(end_time, first_interaction)
+    # Each moving frame advances the same amount of physical time. The solver
+    # still selects its own internal timesteps and records actual solved states.
+    times = recording_times(end_time)
     print(
         f"First boundary interaction: {1e3 * first_interaction:.4f} ms; "
         f"estimated fan-tail exit: {1e3 * tail_exit:.4f} ms; "
@@ -149,7 +149,7 @@ def main():
         fan_tail_exit_estimate_s=tail_exit,
         first_boundary_interaction_s=first_interaction,
         right_shock_speed_m_per_s=shock_speed,
-        output_time_spacing="piecewise linear; 40% of frames before first boundary interaction",
+        output_time_spacing="uniform physical-time intervals",
         boundary_note="Transmissive traces approximate open boundaries. The unbounded exact reference is a strict comparison only before first boundary interaction.",
     )
     data, history, diagnostics, summary = solve_problem(model, times, notes)
@@ -226,21 +226,13 @@ def configure_video_encoder():
     OUTPUT_DIRECTORY.mkdir(parents=True, exist_ok=True)
 
 
-def recording_times(end_time, focus_time):
-    """Spend more movie time on the early wave motion, using real saved states."""
+def recording_times(end_time):
+    """Return uniformly spaced physical times for constant-speed playback."""
     if NUMBER_OF_FRAMES < 5 or VIDEO_FPS <= 0:
         raise ValueError("Use at least five output frames and positive VIDEO_FPS.")
-    if not 0 < EARLY_FRAME_FRACTION < 1 or end_time <= 0:
-        raise ValueError("Need a positive end time and 0 < EARLY_FRAME_FRACTION < 1.")
-    if end_time <= focus_time:
-        return np.linspace(0.0, end_time, NUMBER_OF_FRAMES)
-
-    early_count = max(
-        1, min(NUMBER_OF_FRAMES - 2, round(EARLY_FRAME_FRACTION * NUMBER_OF_FRAMES))
-    )
-    early = np.linspace(0.0, focus_time, early_count, endpoint=False)
-    late = np.linspace(focus_time, end_time, NUMBER_OF_FRAMES - early_count)
-    return np.concatenate((early, late))
+    if not np.isfinite(end_time) or end_time <= 0:
+        raise ValueError("Need a positive finite end time.")
+    return np.linspace(0.0, end_time, NUMBER_OF_FRAMES)
 
 
 def solve_problem(model, times, notes):
@@ -367,7 +359,18 @@ def plot_history(data, history, diagnostics):
 
 
 def render_movie(data, title, reference=None, reference_valid_until=None):
-    """Render slow playback of actual saved frames, with fixed axes and units."""
+    """Render actual uniformly timed states to MP4 and GIF with fixed axes."""
+    times = np.asarray(data["times"])
+    spacing = np.diff(times)
+    if (
+        not np.all(np.isfinite(times))
+        or len(spacing) == 0
+        or np.any(spacing <= 0)
+        or not np.allclose(spacing, spacing[0], rtol=1e-10, atol=1e-14)
+    ):
+        raise ValueError(
+            "Rerun the solve with uniformly spaced animation output times."
+        )
     figure, axes = plt.subplots(
         2, 2, figsize=(10, 6.25), sharex=True, layout="constrained"
     )
@@ -474,13 +477,34 @@ def render_movie(data, title, reference=None, reference_valid_until=None):
                 figure.savefig(OUTPUT_DIRECTORY / f"{stem}.pdf", bbox_inches="tight")
     plt.close(figure)
 
+    # The GIF uses the MP4's same frame timing. A shared palette keeps the
+    # scientific line plots legible while reducing the shareable file's size.
+    subprocess.run(
+        [
+            matplotlib.rcParams["animation.ffmpeg_path"],
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            str(OUTPUT_DIRECTORY / "transient.mp4"),
+            "-filter_complex",
+            "scale=960:-1:flags=lanczos,split[frames][colors];"
+            "[colors]palettegen[palette];[frames][palette]paletteuse=dither=none",
+            "-loop",
+            "0",
+            str(OUTPUT_DIRECTORY / "transient.gif"),
+        ],
+        check=True,
+    )
+
 
 def check_completed(summary):
     """Keep failure visible after exporting the time and states actually reached."""
     if not summary["success"] or summary["frames"] != summary["requested_frames"]:
         raise RuntimeError("The integration failed; its actual outputs remain saved.")
     print(
-        f"Saved figures and a {summary['video_playback_s']:.1f} s video to {OUTPUT_DIRECTORY.resolve()}"
+        f"Saved figures, GIF and a {summary['video_playback_s']:.1f} s video to {OUTPUT_DIRECTORY.resolve()}"
     )
 
 

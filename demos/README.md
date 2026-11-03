@@ -57,19 +57,19 @@ algebraic defects. Bottom crosses mark rejected attempts without inventing
 residual values. Exact zero defects stay zero in saved data and are omitted
 from logarithmic curves.
 
-Transients save ?transient.mp4?, ?history.png/.pdf?, selected ?frame_*.png/.pdf?,
-?solution.npz? and JSON histories/outcomes. Failed runs retain the actual
+Transients save `transient.mp4`, `history.png/.pdf`, selected `frame_*.png/.pdf`,
+`solution.npz` and JSON histories/outcomes. The shock-tube demo also exports
+`transient.gif` with the same physical-time spacing. Failed runs retain the actual
 reached time and state, then raise an error.
 
-## Slower videos and analytical reference
+## Playback timing and analytical reference
 
-The defaults record **601 actual simulation states** at **20 fps**, with a
-two-second initial hold and three-second final hold: about **35 s** of playback.
-Frames are concentrated during early wave motion. Titles show actual physical
+The defaults record **601 actual simulation states** at **20 fps**. The shock
+tube uses **uniform physical-time intervals** and no endpoint pauses, producing
+about **30 s** of constant-speed MP4/GIF playback. Titles show actual physical
 time; no intermediate flow states are invented by video interpolation.
 
-The shock-tube movie uses 40% of its moving frames before the first boundary
-interaction. An independent perfect-gas Riemann reference is shown throughout.
+The shock-tube movie includes an independent perfect-gas Riemann reference throughout.
 Before interaction it is an exact comparison. Afterward it is grey and labelled
 as an **unbounded-domain comparison**, since approximate transmissive boundaries
 need not reproduce that infinite-domain solution after interaction.
@@ -81,7 +81,8 @@ The simulation still runs to about **0.06685 s**, three estimated fan-tail exit
 times, so the resolved waves leave. Initial velocities remain zero.
 
 The nozzle movie allocates 60% of its moving frames to the first two acoustic
-transit times, making the pressure release easier to follow.
+transit times, making the pressure release easier to follow. It retains a
+two-second initial hold and three-second final hold, giving about **35 s** total.
 
 ## Reusing JAX executables
 

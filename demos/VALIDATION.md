@@ -254,3 +254,27 @@ execution logs contained exactly one `[JAX]` line. **Three reporter tests
 passed**, including quiet single-line output, actual disk reuse, same-process
 reuse and failure cleanup. The earlier full-suite results above are historical;
 a new full package suite was not needed for these presentation/client changes.
+
+## Uniform-time shock-tube animation
+
+The shock-tube example was subsequently rerun with **601 uniformly spaced
+physical output times**, fixed 20 fps and zero endpoint holds. Its physical end
+time remains 0.06684924584 s; adjacent saved states differ by
+$1.1141540973\times10^{-4}$ s. Every encoded frame therefore advances physical
+time at the same rate. The earlier concentration of frames before boundary
+interaction was removed. The nozzle transient retains its previous playback.
+
+The new run reached its target with **10,827 accepted steps, zero rejections**,
+zero sampled boundary defect and final normalized content-budget error
+$6.68\times10^{-12}$. The final pressure span/mean is $1.83\times10^{-10}$;
+the waves still leave to numerical accuracy. The method, CFL and physical
+initial/boundary data were retained; output-time clipping changes accepted steps.
+
+Both exports contain **601 frames and 30.05 seconds of playback**. The MP4 is
+1600 by 1000 pixels and decoded completely without errors. The GIF is 960 by
+600 pixels, with **50 ms duration verified for every frame**. Both use the
+actual computed states, and the renderer rejects nonuniform saved time grids.
+The updated outputs are `shock_tube/outputs/transient.mp4` and `transient.gif`;
+array, timing and decoder checks are recorded in `uniform_timing_audit.json`.
+Black passes for the modified script. This client/animation change did not
+require rerunning the full package test suite.
