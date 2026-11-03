@@ -4,8 +4,8 @@
 
 The optional diagnostic client observes the production implicit Newton algorithm
 with JAX debug callbacks. It records corrections, linear defects, admissibility,
-evaporation-pin gate changes and source fingerprints without changing production
-solver settings or implementation:
+evaporation-pin gate changes and source fingerprints. Settings overrides are
+explicit and saved with each probe; the production implementation is unchanged:
 
 ```bash
 poetry run python -B -m cases.NICFD2026.scripts.diagnose_convergence --help
@@ -20,7 +20,39 @@ with `--limit-s` controlling its diagnostic wall-time limit. Records go to
 `single_component/outputs/convergence_diagnosis/`. Compilation and debug callbacks
 affect elapsed times, so these runs are diagnostics rather than performance
 benchmarks or independent cold-start validation. Actual convergence and regime
-checks remain in the saved outcomes.
+checks remain in the saved outcomes. Only existing settings are exposed:
+`--iterations`, `--backtracks`, `--reconstruction`, `--solve-cfl`, `--growth`
+and `--cfl-max`. No Newton correction-size cap is added to the solver.
+
+The 400-cell subsonic probes distinguish a successful implicit step from a
+steady CFD solution. Starting at CFL 0.02 or 0.2 makes the first step converge,
+while CFL 2 and the tested larger values fail their first Newton solve.
+Starting at 0.02 with growth 1.2, with slower growth 1.02 and maximum 0.2,
+or with fixed maximum 0.02 and 80 inner iterations still ends in stagnation.
+The original spatial residual remains large as the controller reduces the
+timestep enough for zero-correction inner solves. Lower CFL alone has not
+resolved the failure. These observations concern this published-profile-seeded
+subsonic probe, not a complete sensitivity campaign for all three regimes.
+The first-order trial with 80 Newton corrections, 40 backtracks, CFL 0.02,
+growth 1.02 and maximum 0.2 stops at its 300 s diagnostic solve limit after
+21 accepted steps. Its maximum equation norm decreases from 0.03168 to
+0.02113, but repeated retries reduce the CFL and it does not pass the
+unchanged steady checks. It is not used to initialize a MUSCL continuation.
+
+The first failed CFL-2 Newton trace has no evaporation-pin gate switches.
+Its largest relative linear defect is below $4\times10^{-12}$; central finite
+differences agree with the automatic derivative at sufficiently small steps.
+This points to strong local nonlinearity rather than an inaccurate linear
+solve, without proving the cause of every subsequent failure. Saved probe
+summaries appear under **Convergence & work** in the corresponding HTML report;
+the benchmark timings and opening verdict remain based on the original campaign.
+
+For example, this uses only supported reconstruction and nonlinear/controller
+settings, with unchanged final checks:
+
+```bash
+poetry run python -B -m cases.NICFD2026.scripts.diagnose_convergence --regime subsonic --cells 400 --solve-cfl 0.02 --growth 1.02 --cfl-max 0.2 --iterations 80 --backtracks 40 --reconstruction constant --max-steps 3000 --limit-s 300 --label first_order_conservative
+```
 
 ## Published-case reports
 

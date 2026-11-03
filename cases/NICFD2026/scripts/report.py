@@ -93,12 +93,133 @@ def table(headers, rows):
     )
 
 
+def load_diagnostics(family, regime):
+    """Summarize saved probes without invoking a solver or EOS."""
+    directory = ROOT / family / "outputs/convergence_diagnosis"
+    records = []
+    for path in sorted(directory.glob(f"{regime}_N*.json")):
+        probe = json.loads(path.read_text(encoding="utf-8"))
+        before, after = probe["source_before"], probe["source_after"]
+        if not probe["source_unchanged"] or before != after:
+            raise ValueError(f"Numerical sources changed during probe: {path}")
+        row = dict(
+            name=path.stem,
+            cells=probe["cells"],
+            effective=probe["effective"],
+            source_file=str(path.relative_to(ROOT)).replace("\\", "/"),
+            sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
+            source_unchanged=True,
+            numerical_sources=before,
+            diagnostic_sha256=probe["diagnostic_sha256"],
+        )
+        for key in ("scan", "newton_info", "derivative_checks"):
+            if key in probe:
+                row[key] = probe[key]
+        if "newton_info" in probe:
+            row["directions"] = [
+                event for event in probe["events"] if event["kind"] == "direction"
+            ]
+            row["max_gate_changes"] = max(
+                (event.get("gate_changes", 0) for event in probe["events"]),
+                default=0,
+            )
+        if "solve" in probe:
+            result = probe["solve"]
+            row.update(
+                settings=probe.get("selected_settings")
+                or dict(cfl=probe["selected_cfl"], cfl_growth=None, cfl_max=None),
+                solve={
+                    key: result[key] for key in ("success", "reason", "audit", "regime")
+                },
+                accepted_steps=sum(
+                    item["phase"] == "accepted" for item in result["history"]
+                ),
+                final_controller=result["history"][-1],
+            )
+        records.append(row)
+    return records
+
+
+def diagnostic_content(records):
+    if not records:
+        return ""
+    text = "<h2>Settings-only convergence investigation</h2><p>These additional probes start independently from the published profile. They retain the existing production solver, EOS and strict outer checks. Their compilation and diagnostic overhead are excluded from benchmark comparisons. Unfinished states are not continuation seeds.</p>"
+    scans = [item for record in records for item in record.get("scan", [])]
+    if scans:
+        text += table(
+            [
+                "First-step CFL",
+                "Inner Newton converged",
+                "Inner RMS",
+                "Spatial norm / initial",
+            ],
+            [
+                [
+                    item["cfl"],
+                    item["newton"]["converged"],
+                    fmt(item["newton"]["residual_norm"]),
+                    fmt(item.get("spatial_ratio")),
+                ]
+                for item in scans
+            ],
+        )
+    rows = []
+    for record in records:
+        if "solve" not in record:
+            continue
+        settings, scheme, result = (
+            record["settings"],
+            record["effective"]["scheme"],
+            record["solve"],
+        )
+        rows.append(
+            [
+                record["name"],
+                scheme["reconstruction"],
+                " / ".join(
+                    fmt(settings[key]) for key in ("cfl", "cfl_growth", "cfl_max")
+                ),
+                f'{scheme["newton_iterations"]} / {scheme["max_backtracks"]}',
+                record["accepted_steps"],
+                result["reason"],
+                fmt(max(result["audit"]["equation_norm"])),
+                bool(
+                    result["success"]
+                    and result["audit"]["passed"]
+                    and result["regime"]["passed"]
+                ),
+            ]
+        )
+    text += table(
+        [
+            "Probe",
+            "Reconstruction",
+            "CFL initial / growth / maximum",
+            "Newton / backtrack caps",
+            "Accepted steps",
+            "Termination",
+            "Final max equation norm",
+            "Case checks pass",
+        ],
+        rows,
+    )
+    traces = [record for record in records if "newton_info" in record]
+    for trace in traces:
+        defect = max(event["relative_linear_defect"] for event in trace["directions"])
+        text += f'<p>The traced {trace["cells"]}-cell first step stops after {trace["newton_info"]["iterations"]} Newton corrections; the maximum relative linear defect is {fmt(defect)} and the evaporation-pin gate changes in at most {trace["max_gate_changes"]} cells per trial. Small-step finite differences, retained in the embedded case data, agree with the automatic derivative. These observations point to strong local nonlinearity; they do not establish the cause of every later failure.</p>'
+    text += '<p class="note">A lower CFL can make the first implicit step converge without producing a steady solution. In failed runs the controller can collapse to very small timesteps, allowing zero-correction inner solves while the original spatial residual remains large. Such outcomes remain failures. The trials do not establish that a settings-only cure exists.</p>'
+    return text
+
+
 def load_case(family, regime):
     directory = ROOT / family / regime
     path = directory / "outputs/result.json"
     data = json.loads(path.read_text(encoding="utf-8"))
     property_path = directory / "outputs/property_audit.json"
     data["property_audit"] = json.loads(property_path.read_text(encoding="utf-8"))
+    diagnostics = load_diagnostics(family, regime)
+    if diagnostics:
+        data["convergence_diagnostics"] = diagnostics
     if "verdict" not in data:
         raise ValueError(f"Case execution has not finished: {path}")
     if not data["property_audit"]["usable_on_published_profile"]:
@@ -213,6 +334,7 @@ def content(data):
     )
     if family == "single_component":
         start += '<p class="note">The published single-component configuration enables the saturation-energy pin. This intentionally changes selected energy equations. The independent audit also retains unmodified physical equation and global defects in the downloadable data; passing selected pinned equations is not a claim that unmodified energy balances vanish.</p>'
+    start += diagnostic_content(data.get("convergence_diagnostics", []))
     start += (
         '</section><section class="page" id="timings" hidden><h2>What was timed</h2><p>'
         + esc(protocol["timing_note"])
@@ -593,6 +715,7 @@ def main():
             indent=2,
         ),
         encoding="utf-8",
+        newline="\n",
     )
 
 

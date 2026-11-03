@@ -173,6 +173,14 @@ def main():
     parser.add_argument("--regime", choices=REGIMES, default="subsonic")
     parser.add_argument("--cells", type=int, default=400)
     parser.add_argument("--cfl", type=float, default=2.0)
+    parser.add_argument("--iterations", type=int, default=20)
+    parser.add_argument("--backtracks", type=int, default=20)
+    parser.add_argument(
+        "--reconstruction",
+        choices=("constant", "muscl_van_albada"),
+        default="muscl_van_albada",
+    )
+    parser.add_argument("--void-strength", type=float)
     parser.add_argument("--scan", action="store_true")
     parser.add_argument("--solve-best", action="store_true")
     parser.add_argument("--solve-cfl", type=float)
@@ -188,6 +196,8 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     destination = out / f"{args.regime}_N{args.cells}_CFL{args.cfl:g}.json"
     config = specification("single_component", args.regime)
+    if args.void_strength is not None:
+        config["numerics"]["eps_void"] = args.void_strength
     fluids, metadata = prepare_fluids(config, "single_component")
     model, scheme, settings, effective = build_case(
         config,
@@ -195,10 +205,12 @@ def main():
         args.cells,
         family="single_component",
         initialization="reference",
-        newton_iterations=20,
-        reconstruction="muscl_van_albada",
+        newton_iterations=args.iterations,
+        reconstruction=args.reconstruction,
         cfl=args.cfl,
     )
+    scheme = replace(scheme, max_backtracks=args.backtracks)
+    effective["scheme"] = asdict(scheme)
     workspace = SteadyWorkspace(model, scheme, settings.residual)
     op = workspace.operator
     initial = model.initial_state()

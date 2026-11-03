@@ -122,6 +122,27 @@ async def exercise(url):
                             ),
                         )
                     )
+                if (
+                    item["family"] == "single_component"
+                    and item["regime"] == "subsonic"
+                ):
+                    checks.append(
+                        dict(
+                            name=tag + ":settings_diagnostics",
+                            passed=await b.evaluate(
+                                """(()=>{
+                                  const records=nicfdReport.data.convergence_diagnostics;
+                                  return records.length>=6 && records.every(r=>r.source_unchanged)
+                                    && records.some(r=>r.solve && r.effective.scheme.reconstruction==='constant')
+                                    && document.getElementById('convergence').innerText.includes('Settings-only convergence investigation');
+                                })()"""
+                            ),
+                        )
+                    )
+                    await b.evaluate(
+                        "nicfdReport.showPage('convergence');Array.from(document.querySelectorAll('h2')).find(h=>h.innerText==='Settings-only convergence investigation').scrollIntoView()"
+                    )
+                    await b.screenshot(OUT / (tag + "_settings_diagnostics.png"))
                 await b.evaluate(
                     "nicfdReport.showPage('profiles');document.getElementById('field-group').value='flow';document.getElementById('theme-light').click()"
                 )
@@ -323,7 +344,7 @@ def main():
                     )
                 result = asyncio.run(exercise(target["webSocketDebuggerUrl"]))
                 (OUT / "audit.json").write_text(
-                    json.dumps(result, indent=2), encoding="utf-8"
+                    json.dumps(result, indent=2), encoding="utf-8", newline="\n"
                 )
                 print(
                     json.dumps(
