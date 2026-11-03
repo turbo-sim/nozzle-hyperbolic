@@ -49,6 +49,8 @@ class ConvergenceTable:
     R is the largest initial-relative norm among active equations, not a
     tolerance ratio. Integral monitors remain in saved diagnostics, not here.
     More than four equations are printed in labelled groups of four.
+    G is the maximum absolute entry in the solver's ``global_defect`` vector.
+    Older callers may supply the scalar ``conservation_max`` instead.
     """
 
     def __init__(self, equation_names, monitor_names=(), *, stream=None, every=1):
@@ -109,6 +111,10 @@ class ConvergenceTable:
                        else float("nan")) if selected else None
         except (TypeError, ValueError, OverflowError):
             overall = None
+        conservation = row.get("conservation_max")
+        if "global_defect" in row:
+            defects = np.asarray(row["global_defect"])
+            conservation = np.max(np.abs(defects)) if defects.size else None
         for start in range(0, max(1, len(self.equations)), 4):
             end = min(start+4, len(self.equations))
             headers = ["Iter", "CFL", "dt", "Nwt", "R",
@@ -120,7 +126,7 @@ class ConvergenceTable:
             values = [self._count(step, 6), self._number(row.get("cfl")), self._number(row.get("dt")),
                       self._count(row.get("inner_iterations"), 3), self._number(overall),
                       *[self._number(relative[i]) if active[i] else "--" for i in range(start, end)],
-                      self._number(row.get("boundary_max")), self._number(row.get("conservation_max")),
+                      self._number(row.get("boundary_max")), self._number(conservation),
                       "initial" if initial else "accept" if accepted else "retry"]
             print(" ".join(value.rjust(width) for value, width in zip(values, widths)),
                   file=self.stream, flush=True)
