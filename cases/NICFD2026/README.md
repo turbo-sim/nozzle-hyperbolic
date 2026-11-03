@@ -1,5 +1,29 @@
 # NICFD 2026 published-solution reproduction
 
+## Convergence diagnostics
+
+The optional diagnostic client observes the production implicit Newton algorithm
+with JAX debug callbacks. It records corrections, linear defects, admissibility,
+evaporation-pin gate changes and source fingerprints without changing production
+solver settings or implementation:
+
+```bash
+poetry run python -B -m cases.NICFD2026.scripts.diagnose_convergence --help
+poetry run python -B -m cases.NICFD2026.scripts.diagnose_convergence --regime subsonic --cells 400 --cfl 2
+poetry run python -B -m cases.NICFD2026.scripts.diagnose_convergence --regime subsonic --cells 400 --scan
+```
+
+The client uses the flashing-water family and explicitly starts from the published
+reference profile. `--scan` compares existing implicit steps at fixed CFL values;
+`--solve-best` additionally attempts a steady solve from that same initial state,
+with `--limit-s` controlling its diagnostic wall-time limit. Records go to
+`single_component/outputs/convergence_diagnosis/`. Compilation and debug callbacks
+affect elapsed times, so these runs are diagnostics rather than performance
+benchmarks or independent cold-start validation. Actual convergence and regime
+checks remain in the saved outcomes.
+
+## Published-case reports
+
 Open [REPORT.html](REPORT.html) for the six-case index. Each standalone case
 report begins with an overall statement about agreement, then provides old/new
 profiles, absolute differences, convergence, actual nonlinear work, timings,
