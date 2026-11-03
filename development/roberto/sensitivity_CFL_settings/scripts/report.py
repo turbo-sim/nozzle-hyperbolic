@@ -25,7 +25,7 @@ from .report_data import (CASE_ORDER, PAGES, STUDY, TITLES, audit_saved, digest,
                           fingerprints, load_saved, payload, study_runs)
 
 ASSETS = Path(__file__).resolve().parent/"report_assets"
-SHARED = STUDY.parent/"BC_residual/scripts/report_assets"
+SHARED = STUDY.parent/"sensitivity_backpressure/scripts/report_assets"
 
 
 def json_safe(value):
@@ -150,6 +150,9 @@ def render(output,destination):
     output,destination=output.resolve(),destination.resolve()
     if not output.is_relative_to(STUDY.resolve()) or destination.parent!=STUDY.resolve():
         raise ValueError('Read study-local output data and place the HTML directly at the study root')
+    if json.loads((output/'summary.json').read_text(encoding='utf-8')).get('schema') == 'shared_fvm_sensitivity_v1':
+        from .current_report import render as render_current
+        return render_current(output)
     before=fingerprints(output)
     summary,loaded=load_saved(output)
     evidence=audit_saved(summary,loaded)

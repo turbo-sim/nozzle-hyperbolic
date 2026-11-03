@@ -2,7 +2,7 @@
 
 This study asks two separate questions: how much inner nonlinear work is useful,
 and how much the timestep controller determines progress. It reuses the same
-five [EulerNozzle physical cases](../euler_nozzle/README.md), perfect-gas backend,
+five [packaged nozzle cases](../../../../../src/nozzle_hyperbolic/verification/README.md), perfect-gas backend,
 201-point mesh, original cold initialization, corrected FVS flux, and safe
 ordinary Van Leer reconstruction as the Newton/PTC comparison.
 
