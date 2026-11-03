@@ -33,7 +33,9 @@ build/
 
 # Jupyter
 .ipynb_checkpoints/
-*.ipynb
+
+# Generated documentation
+/docs/_build/
 
 # OS artefacts
 Thumbs.db
@@ -53,14 +55,13 @@ Thumbs.db
 # HPC
 *.out
 *.err
-*.sh
 
-# Config files
-# *.yaml
-
-# debugging files
-debug_*
-check_*
+# Private environment files; keep shareable examples and templates
+.env
+.env.*
+!.env.example
+!.env.template
+!.env.sample
 
 # Generated result/output directories at any depth (directory names by prefix)
 results*/
@@ -71,10 +72,6 @@ old_*
 
 implementation_notes/
 demo_nozzlex/
-
-
-# Preserve the existing tracked cluster launcher after thematic relocation.
-!/development/alberto/hpc/run_job.sh
 
 # Deliberate, reviewable numerical regression references.
 !/tests/regression/data/physical_*/*.npz

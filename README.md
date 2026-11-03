@@ -6,7 +6,7 @@
 - [demos/](demos/README.md): standalone, commented physical-model scripts with
   inline configuration, convergence plots and transient MP4s.
 - [cases/](cases/README.md): physical applications and literature datasets,
-  including [validation data](cases/validation/notes.md).
+  including [validation data](cases/archive/validation/notes.md).
 - [development/](development/README.md): Alberto's legacy research scripts and
   Roberto's controlled verification and numerical studies.
 - [tests/](tests/README.md): organized production tests, analytical checks and saved numerical regressions.
@@ -58,12 +58,12 @@ integrator's established treatment. The
 [transient comparison](development/roberto/transient_problems/README.md)
 includes Sod and nozzle pressure-release animations. Steady verification and
 runtime regression monitoring live in
-[`development/roberto/benchmarking/`](development/roberto/benchmarking/README.md).
+[`development/benchmark_production/`](development/benchmark_production/README.md).
 
 The [two-fluid migration guide](docs/notes/two_fluid_migration.md) records Alberto's
 frozen physical reference, eight-state/six-balance/two-EOS formulation,
 explicit `model_compatibility` flux, closure policies and verification limits.
-The [limiter comparison](development/limiters/README.md) covers Minmod, Superbee
+The [limiter comparison](development/flux_limiters/README.md) covers Minmod, Superbee
 and Van Albada. [Lettieri validation](cases/lettieri_validation/README.md) uses
 the separate shared Euler/HEM model with zero wall friction.
 
@@ -74,8 +74,8 @@ curves, retaining perfect-gas closed forms for that backend. The
 from stagnant and numerical adapted starts, including bicubic CO2 cases.
 
 Versioned physical YAML cases are packaged beside the
-[nozzle](src/nozzle_hyperbolic/models/euler_nozzle/cases/README.md) and
-[annular](src/nozzle_hyperbolic/models/euler_annular/cases/README.md) models.
+[nozzle](src/nozzle_hyperbolic/models/euler_nozzle/cases) and
+[annular](src/nozzle_hyperbolic/models/euler_annular/cases) models.
 [`nozzle_hyperbolic.verification`](src/nozzle_hyperbolic/verification/README.md)
 loads these definitions and builds cold physical cases with independent
 analytical projections. Numerical methods, meshes, timing repetitions and
@@ -126,9 +126,10 @@ the neighboring `jaxprop`, `pysolver_view`, and `nurbspy` repositories. Enable a
 local entry in place of its published-version entry, then regenerate the lockfile.
 
 `AnnularModel` solves quasi-1D curvilinear annular Euler flow with swirl,
-general JAXProp thermodynamics and algebraic boundary equations. The earlier
-[annular study](development/roberto/historical/euler_annular/README.md) preserves the physical
-derivations and historical verification; the maintained benchmark verifies the current production path.
+general JAXProp thermodynamics and algebraic boundary equations. Use the
+[packaged physical cases](src/nozzle_hyperbolic/verification/README.md),
+[model notes](docs/notes/euler_annular) and
+[NozzleX comparison](cases/verification_annular/README.md).
 
 ## Version bumping and publishing
 

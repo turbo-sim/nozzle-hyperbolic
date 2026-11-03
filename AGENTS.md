@@ -33,6 +33,7 @@ The user's current scope and corrections take precedence over these conventions.
 | Physical cases and analytical comparisons | [Verification API](src/nozzle_hyperbolic/verification/README.md), [reference assumptions](docs/notes/analytical_references.md) |
 | Test organization, regression data and CI | [Test suite](tests/README.md) |
 | Numerical experiment, timing or report | [Study conventions](docs/notes/numerical_studies.md), then the relevant [study README](development/README.md) |
+| Production benchmarks | [Benchmark](development/benchmark_production/README.md) |
 
 Read relevant guides when their topic is involved; small edits do not require
 reviewing the full documentation set. Check historical instructions against the
