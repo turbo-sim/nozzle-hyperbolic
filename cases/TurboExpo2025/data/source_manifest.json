@@ -1,0 +1,98 @@
+{
+  "repository": "https://github.com/turbo-sim/nozzle-hyperbolic",
+  "revision": "6961d73a1aa6ce3ee409b2042fb5b0874ac8a15d",
+  "revision_subject": "turbo expo 2025 version",
+  "license": "MIT repository license retained in LICENSE_UPSTREAM.txt; experimental/CFD sources retain their original scholarly attribution",
+  "files": {
+    "perfect_gas_nozzle.xlsx": {
+      "source_path": "dev_scripts/main/nozzles points.xlsx",
+      "git_blob": "297fab81f83c17113869526ee59f2fc34517f387",
+      "sha256": "5c49edeb2bd19c603dca193abf2eb3bf7a3e0c418cd7bb17275bfe36cbcf350a",
+      "bytes": 12009
+    },
+    "Spinelli_nozzles.xlsx": {
+      "source_path": "dev_scripts/main/Spinelli_nozzles.xlsx",
+      "git_blob": "741450166e16b1ee11ecc500f3c60e22ccfc77cc",
+      "sha256": "347da76a51820739e3f5a04a4f1828bc8b2cb7e837ba1ed6fc3b2a582fe33463",
+      "bytes": 28256
+    },
+    "Lettieri_nozzle.xlsx": {
+      "source_path": "dev_scripts/main/Lettieri_nozzle.xlsx",
+      "git_blob": "37fe0f81414dbf4ca38f19dc70e17ab9f9140760",
+      "sha256": "c29d33e961dde3851fb2e2703d29d686216c3c82b06d9b06c0bb27a4a5d3c8f9",
+      "bytes": 7465
+    },
+    "Spinelli_S1.xlsx": {
+      "source_path": "validation_cases/Spinelli2019/profiles/case_m15_z63.xlsx",
+      "git_blob": "e3af78f8a1791b01de74f8d206ddf6038ce54dbf",
+      "sha256": "d2b9daafb61f574684f7ad3a82de538c0c1ebb1ac223cde7aa7abca95b60af4c",
+      "bytes": 6376
+    },
+    "Spinelli_S2.xlsx": {
+      "source_path": "validation_cases/Spinelli2019/profiles/case_m15_z80.xlsx",
+      "git_blob": "ca72c34c37f23a10e1a07dd714e14ed423caa24e",
+      "sha256": "377935b817dc8b009625c93966c34b66c4ed5fb8b1c4e59bbb1902a89be2eca4",
+      "bytes": 6405
+    },
+    "Spinelli_S3.xlsx": {
+      "source_path": "validation_cases/Spinelli2019/profiles/case_m15_z98.xlsx",
+      "git_blob": "5317a396e0d947d4c88726851e5ee21abaf54b66",
+      "sha256": "31d1884a05c2e4e4b0cb9176eb1e9ea91c04a415d60f24811169e7ed08e729f6",
+      "bytes": 10310
+    },
+    "Spinelli_compressibility.xlsx": {
+      "source_path": "validation_cases/Spinelli2019/profiles/Z_case_m15_z638098.xlsx",
+      "git_blob": "390c6b8c734b89635bdfb0d80b77d8cf0bf93ce7",
+      "sha256": "12f3f2e6023ea656b5744d60bec0c7c3e791e0c805f3c3d77fea4fe52b79191f",
+      "bytes": 10556
+    },
+    "Lettieri_L1.xlsx": {
+      "source_path": "postprocess_TurboExpo2025/Lettieri/Case1.xlsx",
+      "git_blob": "c8a851bb7ebce7092c30125333c3a139a69b48bf",
+      "sha256": "3dd785fc1f7fe16e678f5c18ccdfab5659816cf2539fc37edf4df6203e711893",
+      "bytes": 10662
+    },
+    "Lettieri_L1_CFD.xlsx": {
+      "source_path": "postprocess_TurboExpo2025/Lettieri/Case1_CFD.xlsx",
+      "git_blob": "7887d5c0e499208c2bf5350ad871c94ef32e5edb",
+      "sha256": "c897d683e8c1348c041d881f89a0df3643e8c8bf6dd7200b4bdbc3ba42db67da",
+      "bytes": 21012
+    },
+    "Lettieri_L5.xlsx": {
+      "source_path": "postprocess_TurboExpo2025/Lettieri/Case5.xlsx",
+      "git_blob": "f82e84a19d16e3af0f1fa35059384fbcb50becb6",
+      "sha256": "041e5ab13b01ae1a32414384d4d1d230dad4ff74eab2b53abc7aa7a168ee0280",
+      "bytes": 10947
+    },
+    "Lettieri_L5_CFD.xlsx": {
+      "source_path": "postprocess_TurboExpo2025/Lettieri/Case5_CFD.xlsx",
+      "git_blob": "b47dc20fa997c529a86992b7180ab239d12e7e39",
+      "sha256": "07b4ae105b44025353f4a1872fa875dbbab257aad706045c354fe5d7c70e7368",
+      "bytes": 13782
+    },
+    "Berana_experiments.xlsx": {
+      "source_path": "postprocess_TurboExpo2025/Berana/pin90_T45.xlsx",
+      "git_blob": "a7af51300efdb0e7726d65ed2ff842aa3fbda44d",
+      "sha256": "f953cffeba2dbb3e9ca3f0ce3b37c49c47ab3694230eb5948e860afb799dbfbe",
+      "bytes": 14077
+    },
+    "Berana_Petruccelli_2D.xlsx": {
+      "source_path": "dev_scripts/main/petruccelli_berana_2D.xlsx",
+      "git_blob": "d902138346300ac8920a91a18221bb918c09a1eb",
+      "sha256": "b8a54ffccc5b888bcaedc70eaae42a578201b63fcc43139caf2f376a41af6665",
+      "bytes": 9968
+    },
+    "Berana_Petruccelli_3D.xlsx": {
+      "source_path": "dev_scripts/main/petruccelli_berana_3D.xlsx",
+      "git_blob": "916230f42fd0655b7f6a9c34f5a3883ea1ae9250",
+      "sha256": "48dac3fbb4beeca37d8b6ca7dd8e940edf097e8428edd409e82504a4bff17eb2",
+      "bytes": 11776
+    },
+    "LICENSE_UPSTREAM.txt": {
+      "source_path": "LICENSE.md",
+      "git_blob": "0a9a922ab5867b06a6507ee35262b767fa22c43d",
+      "sha256": "512e7324aeeb645921023f65b5bac438e5998845f4ee74a495647322923ddb55",
+      "bytes": 1066
+    }
+  }
+}

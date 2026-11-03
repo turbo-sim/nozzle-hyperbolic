@@ -7,6 +7,7 @@ and refactoring checks live in [`development/`](../development/README.md).
 
 | Directory | Contents |
 |---|---|
+| [TurboExpo2025/](TurboExpo2025/README.md) | Published perfect-gas and equilibrium HEM case matrix, first-order paper fluxes with current implicit integration, scalar/mesh comparisons and a standalone HTML report |
 | [NICFD2026/](NICFD2026/README.md) | All six published flashing-water and nitrogen–water cases, current-solver measurements and standalone comparison reports |
 | [lettieri_validation/](lettieri_validation/README.md) | Five-case equilibrium HEM comparison, measured contour, original L1/L5 Excel/CFD and transcribed published L2–L4 pressure data |
 | [validation/](validation/notes.md) | Literature data from Barana, Simoneau, Spinelli, and Zhu/Elbel, plus data processing and plotting scripts |

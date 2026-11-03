@@ -1,0 +1,5 @@
+# Reports, source snapshots and manifests depend on exact file bytes.
+# Keep this case portable across core.autocrlf settings.
+# Treat preserved CRLF terminators as line endings in whitespace checks.
+* -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+REPORT.html -diff

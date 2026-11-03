@@ -1,0 +1,137 @@
+{
+  "schema_version": 1,
+  "purpose": "Reproduce the Turbo Expo 2025 case families using the current roberto-branch HEM and implicit steady-state integration, while retaining the paper's first-order spatial flux methods.",
+  "paper": {
+    "doi": "10.1115/GT2025-153250",
+    "title": "A Hyperbolic One-Dimensional Model for Two-Phase Flows in Converging-Diverging Nozzles",
+    "authors": [
+      "Andrea Cioffi",
+      "Alberto Bergamin",
+      "Roberto Agromayor",
+      "Fredrik Haglind"
+    ],
+    "year": 2025,
+    "local_source": "Downloads/A_Hyperbolic_One_Dimensional_Model_for_Two_Phase_Flows_in_Converging_Diverging_Nozzles.pdf",
+    "sha256": "6c0348936149bf73a800780d03b865f7700700c9fc13e54e3852e7ddcf5ab2a6",
+    "inspection": "Complete text extracted; Figures 6 and 12 visually inspected where numerical labels and reference units mattered. The 15-page repository-download PDF contains an Orbit cover and 14 paper pages.",
+    "redistribution": "The source PDF is not copied into this case. The manuscript's scholarly citation, case parameters and limited numerical tables are retained; original source files remain on the user's machine."
+  },
+  "archived_code": {
+    "repository": "https://github.com/turbo-sim/nozzle-hyperbolic",
+    "revision": "6961d73a1aa6ce3ee409b2042fb5b0874ac8a15d",
+    "subject": "turbo expo 2025 version",
+    "source_manifest": "data/source_manifest.json",
+    "license_file": "data/LICENSE_UPSTREAM.txt",
+    "rebuild_inputs": "python -B cases/TurboExpo2025/data/import_sources.py",
+    "note": "Original experimental and CFD workbooks are preserved byte for byte, with Git blob IDs, SHA256 hashes, original paths and full source commit. The Git repository carries an MIT license; third-party measurements and CFD digitizations retain their scholarly attribution."
+  },
+  "source_priority": [
+    "Paper Table 2 and case-specific text establish physical boundary conditions, flux families, roughness and production mesh counts where stated.",
+    "Immutable workbooks from the explicitly named paper-version Git commit establish recoverable geometry and digitized comparison data.",
+    "Archived scripts establish units, approximate coordinate normalizations and available interpolation choices. Their stale active settings do not override the paper's final case matrix.",
+    "Independent classical perfect-gas formulas establish analytical comparison data and backpressures for the requested shock positions; they are not used as hidden solution initializations."
+  ],
+  "scholarly_references": {
+    "Spinelli": {
+      "doi": "10.1007/s00348-018-2578-0",
+      "year": 2018,
+      "description": "Experimental evidence of non-ideal compressible effects in expanding flow of a high molecular complexity vapor",
+      "note": "The archived directory is named Spinelli2019, but the actual article cited by the Turbo Expo paper is from 2018."
+    },
+    "Lettieri": {
+      "doi": "10.1115/1.4038082",
+      "year": 2018,
+      "description": "Characterization of nonequilibrium condensation of supercritical carbon dioxide in a de Laval nozzle"
+    },
+    "Romei_Persico": {
+      "doi": "10.1016/j.applthermaleng.2021.116816",
+      "year": 2021,
+      "description": "Computational fluid-dynamic modelling of two-phase compressible flows of carbon dioxide in supercritical conditions",
+      "note": "CFD pressure/liquid fraction source attribution follows archived workbook/plotting files and the Turbo Expo paper. Precise digitization procedure and source figure are unrecovered."
+    },
+    "Petruccelli": {
+      "doi": "10.1115/1.4066602",
+      "year": 2025,
+      "description": "Numerical investigation of two-phase shock waves in CO2 flows using a modified Hertz-Knudsen model"
+    },
+    "Berana": {
+      "doi": "10.1080/10789669.2009.10390880",
+      "year": 2009,
+      "description": "Shock waves in supersonic two-phase flow of CO2 in converging-diverging nozzles",
+      "note": "Some archived source paths spell this author Barana; the paper and case family correctly use Berana."
+    }
+  },
+  "reference_processing": {
+    "implementation": "data/import_sources.py uses only standard-library ZIP/XML parsing. Original workbook bytes are not rewritten.",
+    "pressure_units": {
+      "Spinelli": "Dimensionless p/p0 multiplied by each case's Table 2 inlet pressure",
+      "Lettieri": "bar multiplied by 100000",
+      "Berana": "MPa multiplied by 1000000",
+      "Berana_Petruccelli_CFD": "Dimensionless p/p0 multiplied by B3 inlet pressure 9000000 Pa"
+    },
+    "coordinate_units": {
+      "Lettieri": "Workbook millimeters multiplied by 0.001",
+      "Berana": "Experimental workbook millimeters multiplied by 0.001; 2D/3D CFD workbook positions already in meters",
+      "Spinelli": "Primary archived x/H divided by archived L/H=14.57, expressed as a normalized similarity coordinate in the common x_m schema. No undocumented translation is applied."
+    },
+    "sorting": "Reference points are sorted only by x for interpolation/plotting. No smoothing, clipping or pressure edits are performed.",
+    "uncertainty": "Spinelli pressure-ratio/compressibility error arrays are preserved from the archived plotting script. No unsupported uncertainty is invented for Lettieri or Berana.",
+    "spinelli_coordinate_diagnostic": "An additional series, kind=coordinate_diagnostic, translates the archived reported throat 10.177035175879398 H to the recovered spline throat 0.6690685012574956 L. This is an explicitly reconstructed diagnostic, not another experiment and not a primary experimental scoring reference.",
+    "empty_references": [
+      "P1",
+      "P2",
+      "P3",
+      "P4"
+    ]
+  },
+  "geometry_decisions": {
+    "perfect_gas": {
+      "choice": "Degree-12 polynomial fit of archived normalized wall radius in perfect_gas_nozzle.xlsx, interpreted as a radius on a 1 m computational length.",
+      "independent_crosscheck": {
+        "paper_area_ratio": 1.86,
+        "reconstructed_area_ratio": 1.860880112050656,
+        "paper_choked_mass_flow_kg_s": 22.48,
+        "reconstructed_choked_mass_flow_kg_s": 22.47995916646657,
+        "throat_x_m": 0.671582694998684,
+        "throat_radius_m": 0.07520152333902516
+      },
+      "rejected_alternatives": "Archived old drivers show degree 6 or 8; these give choked flow 23.00464 or 22.78789 kg/s and do not recover both published area and mass-flow scalars.",
+      "remaining_difference": "The same recovered contour gives analytical entropy increments 15.71817, 64.25773 and 100.63877 J/(kg K) for shocks at exactly 25, 50 and 75 percent of divergent length. Paper Table 1 quotes 18.66, 60.66 and 105.79. Historical final NPZ and exact backpressures were not committed; this unresolved difference must not be hidden or treated as a current-solver failure."
+    },
+    "Spinelli": "The normalized archived nozzle Ma1.5 wall contour is evaluated with a not-a-knot cubic spline. The archived driver contains both polynomial and spline alternatives, so exact original interpolation is unrecovered. With no friction, similarity scaling preserves pressure/velocity fields. Absolute physical mass-flow validation is outside the recoverable evidence. The source plot's reported throat and normalized workbook contour disagree; primary comparisons retain archival coordinates and disclose the uncertainty.",
+    "Lettieri": "The original 33-point workbook is retained, including inlet half-height 0.00638 m. Unlike the separate modern lettieri_validation suite, no correction to primary publication value 0.00635 m is silently applied. Channel width is 0.00648 m, full area A=2*h*width.",
+    "Petruccelli": "The same Lettieri wall ordinate is treated as circular radius, following paper Section 3.4, with A=pi*r^2 and Dh=2*r.",
+    "Berana": "The archived paper-version piecewise linear wall formula is retained: h=0.0002-0.32*x upstream, h=0.0002+(0.0702/8.38)*x downstream, width=0.001 m, domain [-0.015,0.00838] m. It yields throat area 0.4 mm2 and outlet area 0.5404 mm2; the paper text quotes 0.52 mm2. The formula is not tuned to match the pressure curves."
+  },
+  "paper_conventions_and_inconsistencies": [
+    "Paper Table 3 labels mass flow kg/s, but its numerical values use half-channel per-depth rho*u*h. For the configured full channel, compare mdot/(2*0.00648) in kg/(s*m), and report actual full-channel kg/s separately. The existing lettieri_validation README documents this convention and the archived Turbo Expo plotting source computes u*rho*exit_half_height.",
+    "Production perfect-gas mesh is 500 cells in the main text, whereas Appendix A's finest mesh is 400. Lettieri production mesh is 200, whereas the appendix's finest is 250. Both production and appendix mesh sequences are retained.",
+    "The paper does not specify the perfect-gas boundary regime used for its mesh table. This reproduction explicitly selects the adapted case for that mesh study.",
+    "Paper main text quotes an adapted perfect-gas pressure ratio of 1.89, while Mach 2.1 implies stagnation-to-static ratio near 9.1. Analytical equations determine reference pressure here.",
+    "Table 2 rounded temperatures 314.7/313.9 K are retained for L1/L5, rather than the measured 314.67/313.88 K used by the separate Lettieri validation suite.",
+    "Two-phase Roe is intentionally excluded as in the paper. Additional Rusanov/HLL counterparts are retained where the paper displayed only one of these methods."
+  ],
+  "missing_evidence": [
+    "Archived postprocess_TurboExpo2025/notes.txt explicitly states the original simulation NPZ files were only on Andrea's local computer. There is no historical final-field regression dataset.",
+    "Independent Petruccelli P1-P4 CFD pressure and liquid-fraction arrays were not found in the archived repository. Current results may be plotted, but quantitative recovery of those paper comparisons remains unverified.",
+    "A complete independent original Spinelli dimensional geometry and exact coordinate mapping were not recovered."
+  ],
+  "audit": {
+    "immutable_sources_verified_against_git": 15,
+    "case_count": 23,
+    "solver_configuration_count": 52,
+    "reference_series_count": 35,
+    "P1_P4_references_explicitly_empty": true,
+    "no_CFD_simulation_run_by_source_importer": true
+  },
+  "additional_paper_graph_digitization": {
+    "file": "outputs/paper_digitization.json",
+    "generator": "scripts/digitize_paper.py",
+    "source": "Attached paper Figure 9, PDF page 11 (printed page 10), original embedded raster images",
+    "historical_HEM_method": "Rusanov, as identified in the Figure 9 caption",
+    "kind": "Independently visually reviewed partial graph samples; original solver/CFD numeric arrays remain unavailable",
+    "validation": "Tick calibration and conservative color-stroke extraction checked against both original-figure overlays; source and QA image hashes retained",
+    "limitations": "Upstream curve overlaps, steep jump interiors and ambiguous or merged tails are omitted. No historical gaps are interpolated. Stroke/calibration bounds describe graph reading, not experimental/model uncertainty or a statistical confidence interval.",
+    "scoring": "Compare the current dense prediction at observed sample positions only; separate current Rusanov versus historical Rusanov agreement from current HLL versus historical Rusanov differences."
+  }
+}

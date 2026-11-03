@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "scheme": {
+    "reconstruction": "constant",
+    "time_integrator": "euler-implicit",
+    "boundary_treatment": "coupled",
+    "newton_iterations": 10,
+    "newton_backtracking": true,
+    "newton_update_tolerance": 1e-10,
+    "newton_residual_tolerance": 1e-12,
+    "max_backtracks": 20,
+    "jacobian_mode": "colored",
+    "linear_solver": "banded",
+    "filter_strength": 0.0
+  },
+  "steady": {
+    "cfl": 0.2,
+    "cfl_growth": 1.2,
+    "cfl_max": 1000000.0,
+    "cfl_shrink": 0.5,
+    "max_steps": 4000,
+    "max_retries": 14,
+    "stagnation_steps": 32
+  },
+  "residual": {
+    "criterion": "both",
+    "norm": "l2",
+    "weighting": "volume",
+    "relative_tolerance": 1e-6,
+    "absolute_tolerance": 1e-9,
+    "boundary_tolerance": 1e-9,
+    "global_tolerance": 1e-9
+  },
+  "execution": {
+    "initialization": "current model cold start; successful same-case/same-flux coarse solutions may be prolonged explicitly",
+    "timing": "one compilation-inclusive observation per stage; property preparation, independent verification and output excluded; no speedup claim",
+    "failed_stage": "retain every failure; do not prolong a failed state; attempt every remaining requested mesh independently"
+  }
+}

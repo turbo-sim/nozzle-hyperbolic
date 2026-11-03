@@ -1,0 +1,1141 @@
+{
+  "schema_version": 1,
+  "paper": {
+    "title": "A Hyperbolic One-Dimensional Model for Two-Phase Flows in Converging-Diverging Nozzles",
+    "authors": [
+      "Andrea Cioffi",
+      "Alberto Bergamin",
+      "Roberto Agromayor",
+      "Fredrik Haglind"
+    ],
+    "year": 2025,
+    "doi": "10.1115/GT2025-153250",
+    "url": "https://doi.org/10.1115/GT2025-153250",
+    "source_pdf_name": "A_Hyperbolic_One_Dimensional_Model_for_Two_Phase_Flows_in_Converging_Diverging_Nozzles.pdf",
+    "source_pdf_sha256": "6c0348936149bf73a800780d03b865f7700700c9fc13e54e3852e7ddcf5ab2a6",
+    "archived_code_revision": "6961d73a1aa6ce3ee409b2042fb5b0874ac8a15d"
+  },
+  "numerical_policy": {
+    "spatial_reconstruction": "constant",
+    "spatial_order": 1,
+    "fluxes_perfect_gas": [
+      "rusanov",
+      "roe",
+      "hll"
+    ],
+    "fluxes_equilibrium": [
+      "rusanov",
+      "hll"
+    ],
+    "time_integrator": "euler-implicit",
+    "paper_time_integrator": "explicit Euler",
+    "paper_cfl": 0.5,
+    "paper_stopping": "two-norm of relative difference of consecutive solutions below1e-6",
+    "current_stopping": "original spatial residual plus boundary and global monitors; actual thresholds recorded with each run",
+    "friction_intent": "Haaland Darcy friction and Beattie two-phase dynamic viscosity, using current HEM implementation",
+    "initialization": "current model cold initialization unless explicitly recorded otherwise; no historical paper or analytic solution field used as a hidden seed",
+    "notes": [
+      "Two-phase Roe is deliberately excluded, as in the paper.",
+      "Current formulation changes are permitted by the user and must be disclosed. This is a replication campaign with current physics and implicit integration, not bitwise regression against missing old NPZ."
+    ]
+  },
+  "geometries": {
+    "perfect_gas": {
+      "kind": "polynomial_radius",
+      "workbook": "data/perfect_gas_nozzle.xlsx",
+      "sheet": "nozzle Ma1.5",
+      "x_column": "A",
+      "y_column": "B",
+      "x_scale": 1.0,
+      "y_scale": 1.0,
+      "x_min": 0.0,
+      "x_max": 1.0,
+      "degree": 12,
+      "notes": [
+        "Degree 12 is independently identified by the paper's Aout/A*=1.86 and critical mass flow22.48kg/s: recovered polynomial gives1.860880112 and22.47995917. Archived old driver degree6 and old exact script degree8 do not reproduce these scalars.",
+        "The normalized wall shape is treated as radius in a1m computational duct, following the perfect-gas paper plotting sources."
+      ]
+    },
+    "spinelli": {
+      "kind": "spline_half_height",
+      "workbook": "data/Spinelli_nozzles.xlsx",
+      "sheet": "nozzle Ma1.5",
+      "x_column": "A",
+      "y_column": "B",
+      "x_scale": 1.0,
+      "y_scale": 1.0,
+      "x_min": 0.0,
+      "x_max": 1.0,
+      "width_m": 1.0,
+      "degree": 12,
+      "notes": [
+        "Frictionless similarity geometry: both x and wall ordinate are normalized by source length, computational length1. No absolute dimensional mass-flow validation is claimed.",
+        "CubicSpline(not-a-knot), as archived fit_nozzle_shape.py. Archived driver had alternative polynomial and spline branches, and historical field NPZ is missing. Exact source geometry interpolation cannot be proven.",
+        "Primary experimental coordinates use archived x/H divided by14.57. A separately marked reconstructed coordinate diagnostic is supplied because archived throat10.177H disagrees with normalized shape's throat at0.669069L; it is excluded from experimental scoring."
+      ]
+    },
+    "lettieri": {
+      "kind": "spline_half_height",
+      "workbook": "data/Lettieri_nozzle.xlsx",
+      "sheet": "Sheet1",
+      "x_column": "A",
+      "y_column": "B",
+      "x_scale": 1.0,
+      "y_scale": 1.0,
+      "x_min": -0.032013,
+      "x_max": 0.066355,
+      "width_m": 0.00648,
+      "degree": 10,
+      "notes": [
+        "Original workbook half-height retained byte-for-byte: inlet0.00638m, no publication-specific correction silently substituted.",
+        "Rectangular section, A=2*h*width, hydraulic diameter4A/[2(width+2h)], source width6.48mm."
+      ]
+    },
+    "petruccelli": {
+      "kind": "spline_radius",
+      "workbook": "data/Lettieri_nozzle.xlsx",
+      "sheet": "Sheet1",
+      "x_column": "A",
+      "y_column": "B",
+      "x_scale": 1.0,
+      "y_scale": 1.0,
+      "x_min": -0.032013,
+      "x_max": 0.066355,
+      "degree": 10,
+      "notes": [
+        "Paper Section3.4 reuses Lettieri contour with circular rather than rectangular section: A=pi*r^2, Dh=2r."
+      ]
+    },
+    "berana": {
+      "kind": "piecewise_half_height",
+      "x_min": -0.015,
+      "x_max": 0.00838,
+      "throat_x_m": 0.0,
+      "inlet_half_height_m": 0.005,
+      "throat_half_height_m": 0.0002,
+      "outlet_half_height_m": 0.0002702,
+      "width_m": 0.001,
+      "convergent_slope": -0.32,
+      "divergent_slope": 0.008377088305489258,
+      "notes": [
+        "Exact archived paper-version main.py piecewise formula: h=.0002-.32*x upstream; h=.0002+(.0702/8.38)*x downstream.",
+        "Source geometry gives throat0.4mm2 and outlet0.5404mm2; paper text rounds/quotes outlet0.52mm2. Preserve formula and disclose discrepancy rather than tuning area to results."
+      ]
+    }
+  },
+  "cases": [
+    {
+      "id": "G_subsonic",
+      "family": "perfect_gas",
+      "fluid": "Air",
+      "p0_Pa": 700000.0,
+      "T0_K": 500.0,
+      "p_out_Pa": 646999.0,
+      "cells": 500,
+      "geometry": "perfect_gas",
+      "fluxes": [
+        "rusanov",
+        "roe",
+        "hll"
+      ],
+      "roughness_m": 0.0,
+      "friction": false,
+      "outlet_regime": "subsonic",
+      "paper_figures": [
+        2
+      ],
+      "gamma": 1.4,
+      "R_J_kgK": 287.0,
+      "reference_kind": "analytical",
+      "notes": [
+        "Subsonic backpressure646999Pa from archived independent perfect-gas expansion script; paper only describes slightly below choking pressure ratio."
+      ]
+    },
+    {
+      "id": "G_adapted",
+      "family": "perfect_gas",
+      "fluid": "Air",
+      "p0_Pa": 700000.0,
+      "T0_K": 500.0,
+      "p_out_Pa": null,
+      "cells": 500,
+      "geometry": "perfect_gas",
+      "fluxes": [
+        "rusanov",
+        "roe",
+        "hll"
+      ],
+      "roughness_m": 0.0,
+      "friction": false,
+      "outlet_regime": "supersonic",
+      "paper_figures": [
+        2,
+        3,
+        4
+      ],
+      "gamma": 1.4,
+      "R_J_kgK": 287.0,
+      "reference_kind": "analytical"
+    },
+    {
+      "id": "G_shock_pr156",
+      "family": "perfect_gas",
+      "fluid": "Air",
+      "p0_Pa": 700000.0,
+      "T0_K": 500.0,
+      "p_out_Pa": 448717.9487179487,
+      "cells": 500,
+      "geometry": "perfect_gas",
+      "fluxes": [
+        "rusanov",
+        "roe",
+        "hll"
+      ],
+      "roughness_m": 0.0,
+      "friction": false,
+      "outlet_regime": "subsonic",
+      "paper_figures": [
+        3
+      ],
+      "gamma": 1.4,
+      "R_J_kgK": 287.0,
+      "reference_kind": "analytical",
+      "notes": [
+        "Paper PR1.56 is rounded; exact backpressure of historical NPZ unavailable."
+      ]
+    },
+    {
+      "id": "G_shock_25",
+      "family": "perfect_gas",
+      "fluid": "Air",
+      "p0_Pa": 700000.0,
+      "T0_K": 500.0,
+      "p_out_Pa": null,
+      "cells": 500,
+      "geometry": "perfect_gas",
+      "fluxes": [
+        "rusanov",
+        "roe",
+        "hll"
+      ],
+      "roughness_m": 0.0,
+      "friction": false,
+      "outlet_regime": "subsonic",
+      "paper_figures": [
+        4
+      ],
+      "gamma": 1.4,
+      "R_J_kgK": 287.0,
+      "reference_kind": "analytical",
+      "shock_fraction": 0.25,
+      "notes": [
+        "Backpressure is derived independently from the analytic normal-shock solution at the requested fraction of the divergent length; this is reference setup, not a numerical field warm start."
+      ]
+    },
+    {
+      "id": "G_shock_50",
+      "family": "perfect_gas",
+      "fluid": "Air",
+      "p0_Pa": 700000.0,
+      "T0_K": 500.0,
+      "p_out_Pa": null,
+      "cells": 500,
+      "geometry": "perfect_gas",
+      "fluxes": [
+        "rusanov",
+        "roe",
+        "hll"
+      ],
+      "roughness_m": 0.0,
+      "friction": false,
+      "outlet_regime": "subsonic",
+      "paper_figures": [
+        4
+      ],
+      "gamma": 1.4,
+      "R_J_kgK": 287.0,
+      "reference_kind": "analytical",
+      "shock_fraction": 0.5,
+      "notes": [
+        "Backpressure is derived independently from the analytic normal-shock solution at the requested fraction of the divergent length; this is reference setup, not a numerical field warm start."
+      ]
+    },
+    {
+      "id": "G_shock_75",
+      "family": "perfect_gas",
+      "fluid": "Air",
+      "p0_Pa": 700000.0,
+      "T0_K": 500.0,
+      "p_out_Pa": null,
+      "cells": 500,
+      "geometry": "perfect_gas",
+      "fluxes": [
+        "rusanov",
+        "roe",
+        "hll"
+      ],
+      "roughness_m": 0.0,
+      "friction": false,
+      "outlet_regime": "subsonic",
+      "paper_figures": [
+        4
+      ],
+      "gamma": 1.4,
+      "R_J_kgK": 287.0,
+      "reference_kind": "analytical",
+      "shock_fraction": 0.75,
+      "notes": [
+        "Backpressure is derived independently from the analytic normal-shock solution at the requested fraction of the divergent length; this is reference setup, not a numerical field warm start."
+      ]
+    },
+    {
+      "id": "S1",
+      "family": "spinelli",
+      "fluid": "MDM",
+      "p0_Pa": 920000.0,
+      "T0_K": 541.0,
+      "p_out_Pa": null,
+      "cells": 250,
+      "geometry": "spinelli",
+      "fluxes": [
+        "rusanov",
+        "hll"
+      ],
+      "roughness_m": 0.0,
+      "friction": false,
+      "outlet_regime": "supersonic",
+      "paper_figures": [
+        5,
+        6
+      ],
+      "paper_Z0": 0.63,
+      "notes": [
+        "Table2 rounded reservoir temperature retained; primary experimental coordinates use archived x/H divided by14.57. Coordinate ambiguity remains; a reconstructed throat-aligned alternative is separately marked diagnostic."
+      ]
+    },
+    {
+      "id": "S2",
+      "family": "spinelli",
+      "fluid": "MDM",
+      "p0_Pa": 459000.0,
+      "T0_K": 512.0,
+      "p_out_Pa": null,
+      "cells": 250,
+      "geometry": "spinelli",
+      "fluxes": [
+        "rusanov",
+        "hll"
+      ],
+      "roughness_m": 0.0,
+      "friction": false,
+      "outlet_regime": "supersonic",
+      "paper_figures": [
+        5,
+        6
+      ],
+      "paper_Z0": 0.81,
+      "notes": [
+        "Table2 rounded reservoir temperature retained; primary experimental coordinates use archived x/H divided by14.57. Coordinate ambiguity remains; a reconstructed throat-aligned alternative is separately marked diagnostic."
+      ]
+    },
+    {
+      "id": "S3",
+      "family": "spinelli",
+      "fluid": "MDM",
+      "p0_Pa": 84000.0,
+      "T0_K": 537.0,
+      "p_out_Pa": null,
+      "cells": 250,
+      "geometry": "spinelli",
+      "fluxes": [
+        "rusanov",
+        "hll"
+      ],
+      "roughness_m": 0.0,
+      "friction": false,
+      "outlet_regime": "supersonic",
+      "paper_figures": [
+        5,
+        6
+      ],
+      "paper_Z0": 0.98,
+      "notes": [
+        "Table2 rounded reservoir temperature retained; primary experimental coordinates use archived x/H divided by14.57. Coordinate ambiguity remains; a reconstructed throat-aligned alternative is separately marked diagnostic."
+      ]
+    },
+    {
+      "id": "L1",
+      "family": "lettieri",
+      "fluid": "CO2",
+      "p0_Pa": 5896000.0,
+      "T0_K": 314.7,
+      "p_out_Pa": null,
+      "cells": 200,
+      "geometry": "lettieri",
+      "fluxes": [
+        "rusanov",
+        "hll"
+      ],
+      "roughness_m": 0.0,
+      "friction": true,
+      "outlet_regime": "supersonic",
+      "paper_figures": [
+        7,
+        8
+      ],
+      "notes": [
+        "Paper Table2 rounded T0 retained; smooth wall Haaland friction with Beattie viscosity intended. Main text200cells differs from Appendix finest250."
+      ]
+    },
+    {
+      "id": "L1_inviscid",
+      "family": "lettieri",
+      "fluid": "CO2",
+      "p0_Pa": 5896000.0,
+      "T0_K": 314.7,
+      "p_out_Pa": null,
+      "cells": 200,
+      "geometry": "lettieri",
+      "fluxes": [
+        "rusanov",
+        "hll"
+      ],
+      "roughness_m": 0.0,
+      "friction": false,
+      "outlet_regime": "supersonic",
+      "paper_figures": [
+        8
+      ],
+      "reference_case": "L1"
+    },
+    {
+      "id": "L5",
+      "family": "lettieri",
+      "fluid": "CO2",
+      "p0_Pa": 8474000.0,
+      "T0_K": 313.9,
+      "p_out_Pa": null,
+      "cells": 200,
+      "geometry": "lettieri",
+      "fluxes": [
+        "rusanov",
+        "hll"
+      ],
+      "roughness_m": 0.0,
+      "friction": true,
+      "outlet_regime": "supersonic",
+      "paper_figures": [
+        7,
+        8
+      ],
+      "notes": [
+        "Paper Table2 rounded T0 retained; smooth wall Haaland friction with Beattie viscosity intended. Main text200cells differs from Appendix finest250."
+      ]
+    },
+    {
+      "id": "L5_inviscid",
+      "family": "lettieri",
+      "fluid": "CO2",
+      "p0_Pa": 8474000.0,
+      "T0_K": 313.9,
+      "p_out_Pa": null,
+      "cells": 200,
+      "geometry": "lettieri",
+      "fluxes": [
+        "rusanov",
+        "hll"
+      ],
+      "roughness_m": 0.0,
+      "friction": false,
+      "outlet_regime": "supersonic",
+      "paper_figures": [
+        8
+      ],
+      "reference_case": "L5"
+    },
+    {
+      "id": "P1",
+      "family": "petruccelli",
+      "fluid": "CO2",
+      "p0_Pa": 13000000.0,
+      "T0_K": 348.0,
+      "p_out_Pa": 7800000.0,
+      "cells": 600,
+      "geometry": "petruccelli",
+      "fluxes": [
+        "rusanov",
+        "hll"
+      ],
+      "roughness_m": 2e-06,
+      "friction": true,
+      "outlet_regime": "subsonic",
+      "paper_figures": [
+        7,
+        9,
+        10
+      ],
+      "notes": [
+        "Paper compared finite-rate Hertz-Knudsen CFD. Original P1-P4 CFD arrays are absent from the archived repository; no fabricated reference curve is supplied."
+      ]
+    },
+    {
+      "id": "P2",
+      "family": "petruccelli",
+      "fluid": "CO2",
+      "p0_Pa": 13000000.0,
+      "T0_K": 348.0,
+      "p_out_Pa": 9100000.0,
+      "cells": 600,
+      "geometry": "petruccelli",
+      "fluxes": [
+        "rusanov",
+        "hll"
+      ],
+      "roughness_m": 2e-06,
+      "friction": true,
+      "outlet_regime": "subsonic",
+      "paper_figures": [
+        7,
+        9
+      ],
+      "notes": [
+        "Paper compared finite-rate Hertz-Knudsen CFD. Original P1-P4 CFD arrays are absent from the archived repository; no fabricated reference curve is supplied."
+      ]
+    },
+    {
+      "id": "P3",
+      "family": "petruccelli",
+      "fluid": "CO2",
+      "p0_Pa": 10000000.0,
+      "T0_K": 348.0,
+      "p_out_Pa": 6000000.0,
+      "cells": 600,
+      "geometry": "petruccelli",
+      "fluxes": [
+        "rusanov",
+        "hll"
+      ],
+      "roughness_m": 2e-06,
+      "friction": true,
+      "outlet_regime": "subsonic",
+      "paper_figures": [
+        7,
+        9,
+        10
+      ],
+      "notes": [
+        "Paper compared finite-rate Hertz-Knudsen CFD. Original P1-P4 CFD arrays are absent from the archived repository; no fabricated reference curve is supplied."
+      ]
+    },
+    {
+      "id": "P4",
+      "family": "petruccelli",
+      "fluid": "CO2",
+      "p0_Pa": 10000000.0,
+      "T0_K": 348.0,
+      "p_out_Pa": 7000000.0,
+      "cells": 600,
+      "geometry": "petruccelli",
+      "fluxes": [
+        "rusanov",
+        "hll"
+      ],
+      "roughness_m": 2e-06,
+      "friction": true,
+      "outlet_regime": "subsonic",
+      "paper_figures": [
+        7,
+        9,
+        11
+      ],
+      "notes": [
+        "Paper compared finite-rate Hertz-Knudsen CFD. Original P1-P4 CFD arrays are absent from the archived repository; no fabricated reference curve is supplied."
+      ]
+    },
+    {
+      "id": "B1",
+      "family": "berana",
+      "fluid": "CO2",
+      "p0_Pa": 9000000.0,
+      "T0_K": 318.0,
+      "p_out_Pa": 5010000.0,
+      "cells": 1600,
+      "geometry": "berana",
+      "fluxes": [
+        "rusanov",
+        "hll"
+      ],
+      "roughness_m": 2e-06,
+      "friction": true,
+      "outlet_regime": "subsonic",
+      "paper_figures": [
+        7,
+        12
+      ],
+      "notes": [
+        "1600cells is AppendixA finest mesh; main text does not specify Berana production cell count."
+      ]
+    },
+    {
+      "id": "B2",
+      "family": "berana",
+      "fluid": "CO2",
+      "p0_Pa": 9000000.0,
+      "T0_K": 318.0,
+      "p_out_Pa": 5690000.0,
+      "cells": 1600,
+      "geometry": "berana",
+      "fluxes": [
+        "rusanov",
+        "hll"
+      ],
+      "roughness_m": 2e-06,
+      "friction": true,
+      "outlet_regime": "subsonic",
+      "paper_figures": [
+        7,
+        12
+      ],
+      "notes": [
+        "1600cells is AppendixA finest mesh; main text does not specify Berana production cell count."
+      ]
+    },
+    {
+      "id": "B3",
+      "family": "berana",
+      "fluid": "CO2",
+      "p0_Pa": 9000000.0,
+      "T0_K": 318.0,
+      "p_out_Pa": 5960000.0,
+      "cells": 1600,
+      "geometry": "berana",
+      "fluxes": [
+        "rusanov",
+        "hll"
+      ],
+      "roughness_m": 2e-06,
+      "friction": true,
+      "outlet_regime": "subsonic",
+      "paper_figures": [
+        7,
+        12
+      ],
+      "notes": [
+        "1600cells is AppendixA finest mesh; main text does not specify Berana production cell count."
+      ]
+    },
+    {
+      "id": "B3_k0",
+      "family": "berana_sensitivity",
+      "fluid": "CO2",
+      "p0_Pa": 9000000.0,
+      "T0_K": 318.0,
+      "p_out_Pa": 5960000.0,
+      "cells": 1600,
+      "geometry": "berana",
+      "fluxes": [
+        "rusanov",
+        "hll"
+      ],
+      "roughness_m": 0.0,
+      "friction": true,
+      "outlet_regime": "subsonic",
+      "paper_figures": [
+        12
+      ],
+      "reference_case": "B3"
+    },
+    {
+      "id": "B3_k1",
+      "family": "berana_sensitivity",
+      "fluid": "CO2",
+      "p0_Pa": 9000000.0,
+      "T0_K": 318.0,
+      "p_out_Pa": 5960000.0,
+      "cells": 1600,
+      "geometry": "berana",
+      "fluxes": [
+        "rusanov",
+        "hll"
+      ],
+      "roughness_m": 1e-06,
+      "friction": true,
+      "outlet_regime": "subsonic",
+      "paper_figures": [
+        12
+      ],
+      "reference_case": "B3"
+    },
+    {
+      "id": "B3_k3",
+      "family": "berana_sensitivity",
+      "fluid": "CO2",
+      "p0_Pa": 9000000.0,
+      "T0_K": 318.0,
+      "p_out_Pa": 5960000.0,
+      "cells": 1600,
+      "geometry": "berana",
+      "fluxes": [
+        "rusanov",
+        "hll"
+      ],
+      "roughness_m": 3e-06,
+      "friction": true,
+      "outlet_regime": "subsonic",
+      "paper_figures": [
+        12
+      ],
+      "reference_case": "B3"
+    }
+  ],
+  "mesh_studies": [
+    {
+      "case_id": "G_adapted",
+      "flux": "rusanov",
+      "cells": [
+        50,
+        100,
+        200,
+        300,
+        400
+      ],
+      "observables": [
+        "p_throat",
+        "p_out",
+        "mass_flow"
+      ],
+      "notes": "Paper does not identify which perfect-gas boundary regime was used for Table4; adapted selected explicitly for this replication."
+    },
+    {
+      "case_id": "S2",
+      "flux": "rusanov",
+      "cells": [
+        50,
+        100,
+        150,
+        200,
+        250
+      ],
+      "observables": [
+        "p_throat",
+        "p_out",
+        "mass_flow"
+      ]
+    },
+    {
+      "case_id": "L5",
+      "flux": "rusanov",
+      "cells": [
+        50,
+        100,
+        150,
+        200,
+        250
+      ],
+      "observables": [
+        "p_throat",
+        "p_out",
+        "mass_flow"
+      ]
+    },
+    {
+      "case_id": "P1",
+      "flux": "rusanov",
+      "cells": [
+        200,
+        300,
+        400,
+        500,
+        600
+      ],
+      "observables": [
+        "p_throat",
+        "p_min",
+        "mass_flow"
+      ]
+    },
+    {
+      "case_id": "B3",
+      "flux": "rusanov",
+      "cells": [
+        100,
+        200,
+        400,
+        800,
+        1600
+      ],
+      "observables": [
+        "p_throat",
+        "p_min",
+        "mass_flow"
+      ]
+    }
+  ],
+  "paper_tables": {
+    "table1": {
+      "description": "Historical paper values; entropy generation at25/50/75percent divergent length and choked mass flow",
+      "entropy_exact_J_kgK": [
+        18.66,
+        60.66,
+        105.79
+      ],
+      "mass_flow_exact_kg_s": 22.48,
+      "relative_error_percent": {
+        "rusanov": {
+          "entropy": [
+            -5.22,
+            -3.62,
+            -2.51
+          ],
+          "mass_flow": -0.48
+        },
+        "roe": {
+          "entropy": [
+            4.14,
+            1.37,
+            1.7
+          ],
+          "mass_flow": -0.37
+        },
+        "hll": {
+          "entropy": [
+            -5.16,
+            -2.72,
+            -4.51
+          ],
+          "mass_flow": -0.44
+        }
+      }
+    },
+    "table3": {
+      "description": "Historical mass-flow comparison: paper labels kg/s, but these values use half-channel per-depth mass flux rho*u*h, i.e.kg/(s*m). CFD columns are independent references; HEM columns are historical reported results.",
+      "actual_comparison_units": "kg/(s*m)",
+      "paper_printed_units": "kg/s",
+      "current_conversion": "mass_flow_full_channel_kg_s/(2*width_m)",
+      "width_m": 0.00648,
+      "units_note": "See existing cases/lettieri_validation/README.md geometry/mass-flow convention and archived TurboExpo plotting source m3=u*rho*0.002006. Report actual full-channel kg/s separately.",
+      "L1": {
+        "CFD_mixture": 29.43,
+        "CFD_barotropic": 29.46,
+        "paper_HEM_rusanov": 29.37,
+        "paper_HEM_hll": 29.41
+      },
+      "L5": {
+        "CFD_mixture": 48.94,
+        "CFD_barotropic": 48.95,
+        "paper_HEM_rusanov": 49.06,
+        "paper_HEM_hll": 48.5
+      }
+    },
+    "table4": {
+      "description": "Historical percent differences from finest grid, not experimental error; Rusanov",
+      "columns": [
+        "cells",
+        "p_throat_percent",
+        "p_out_or_min_percent",
+        "mass_flow_percent"
+      ],
+      "perfect_gas": [
+        [
+          50,
+          9.52,
+          12.15,
+          4.38
+        ],
+        [
+          100,
+          3.22,
+          5.44,
+          1.48
+        ],
+        [
+          200,
+          3.04,
+          1.84,
+          0.22
+        ],
+        [
+          300,
+          1.01,
+          0.62,
+          0.02
+        ],
+        [
+          400,
+          0,
+          0,
+          0
+        ]
+      ],
+      "S2": [
+        [
+          50,
+          11.36,
+          11.36,
+          2.49
+        ],
+        [
+          100,
+          4.63,
+          4.63,
+          1.14
+        ],
+        [
+          150,
+          2.13,
+          2.13,
+          0.57
+        ],
+        [
+          200,
+          0.85,
+          0.85,
+          0.25
+        ],
+        [
+          250,
+          0,
+          0,
+          0
+        ]
+      ],
+      "L5": [
+        [
+          50,
+          9.66,
+          5.44,
+          5.44
+        ],
+        [
+          100,
+          2.6,
+          2.26,
+          2.26
+        ],
+        [
+          150,
+          0.54,
+          0.74,
+          0.74
+        ],
+        [
+          200,
+          0.12,
+          0.35,
+          0.35
+        ],
+        [
+          250,
+          0,
+          0,
+          0
+        ]
+      ],
+      "P1": [
+        [
+          200,
+          4.99,
+          5.62,
+          1.01
+        ],
+        [
+          300,
+          3.62,
+          2.82,
+          0.55
+        ],
+        [
+          400,
+          1.45,
+          1.42,
+          0.28
+        ],
+        [
+          500,
+          1.15,
+          0.57,
+          0.12
+        ],
+        [
+          600,
+          0,
+          0,
+          0
+        ]
+      ],
+      "B3": [
+        [
+          100,
+          22.03,
+          57.25,
+          6.88
+        ],
+        [
+          200,
+          15.25,
+          31.65,
+          3.47
+        ],
+        [
+          400,
+          10.88,
+          11.24,
+          2.06
+        ],
+        [
+          800,
+          2.45,
+          4.47,
+          1.1
+        ],
+        [
+          1600,
+          0,
+          0,
+          0
+        ]
+      ]
+    }
+  },
+  "figure_map": {
+    "1": {
+      "description": "Characteristic boundary diagrams",
+      "cases": [],
+      "notes": [
+        "Methods explanation; no numerical field comparison"
+      ]
+    },
+    "2": {
+      "description": "Perfect-gas subsonic/adapted pressure, density and Mach for three fluxes",
+      "cases": [
+        "G_subsonic",
+        "G_adapted"
+      ],
+      "notes": []
+    },
+    "3": {
+      "description": "Perfect-gas shockPR1.56 and analytical scheme comparison",
+      "cases": [
+        "G_shock_pr156"
+      ],
+      "notes": [
+        "Pressure ratio is rounded in paper"
+      ]
+    },
+    "4": {
+      "description": "Perfect-gas shocks at25/50/75percent divergent length",
+      "cases": [
+        "G_shock_25",
+        "G_shock_50",
+        "G_shock_75"
+      ],
+      "notes": [
+        "Paper plotted Roe; all three paper fluxes are calculated here"
+      ]
+    },
+    "5": {
+      "description": "Spinelli states and expansions in temperature-entropy plane",
+      "cases": [
+        "S1",
+        "S2",
+        "S3"
+      ],
+      "notes": [
+        "Phase-diagram context, not an experimental thermodynamic trajectory"
+      ]
+    },
+    "6": {
+      "description": "Spinelli pressure/compressibility against digitized experiment",
+      "cases": [
+        "S1",
+        "S2",
+        "S3"
+      ],
+      "notes": [
+        "Coordinate origin/interpolation ambiguity disclosed; primary raw x/H divided by14.57"
+      ]
+    },
+    "7": {
+      "description": "CO2 validation states and expansions in temperature-entropy plane",
+      "cases": [
+        "L1",
+        "L5",
+        "P1",
+        "P2",
+        "P3",
+        "P4",
+        "B1",
+        "B2",
+        "B3"
+      ],
+      "notes": [
+        "Phase-diagram context"
+      ]
+    },
+    "8": {
+      "description": "L1/L5 pressure/liquid fraction with/without friction, experiment and HEM CFD",
+      "cases": [
+        "L1",
+        "L1_inviscid",
+        "L5",
+        "L5_inviscid"
+      ],
+      "notes": [
+        "Original rounded paper reservoir temperatures retained"
+      ]
+    },
+    "9": {
+      "description": "P1-P4 pressure",
+      "cases": [
+        "P1",
+        "P2",
+        "P3",
+        "P4"
+      ],
+      "notes": [
+        "Independent CFD curve arrays unavailable; no quantitative reference claim"
+      ]
+    },
+    "10": {
+      "description": "P1/P3 Mach and liquid fraction",
+      "cases": [
+        "P1",
+        "P3"
+      ],
+      "notes": [
+        "Independent CFD liquid fraction arrays unavailable"
+      ]
+    },
+    "11": {
+      "description": "P4 Rusanov/HLL pressure",
+      "cases": [
+        "P4"
+      ],
+      "notes": [
+        "Independent CFD curve arrays unavailable"
+      ]
+    },
+    "12": {
+      "description": "B3 roughness0/1/2/3micron, B1-B3 experiments, B3 2D/3D CFD and geometry",
+      "cases": [
+        "B1",
+        "B2",
+        "B3",
+        "B3_k0",
+        "B3_k1",
+        "B3_k3"
+      ],
+      "notes": [
+        "0micron means hydraulically smooth friction, not frictionless"
+      ]
+    }
+  },
+  "known_limits": [
+    "Historical final field NPZ files were not committed: archived notes explicitly say they existed only on Andrea's local computer.",
+    "No original Petruccelli P1-P4 CFD arrays are present. Their current field predictions can be shown, but paper-curve quantitative agreement remains unverified until reference data are supplied.",
+    "Spinelli geometry dimensional scale and exact original interpolation/coordinate transform are incomplete in archived source. Primary reference x/H is divided by14.57; a reconstructed throat-aligned alternative is diagnostic only and excluded from experimental scoring.",
+    "Paper describes adapted perfect-gas pressure ratio1.89; with Mach2.1 the stagnation-to-static ratio is about9.1. Preserve paper statement as a known inconsistency, and compute references from the equations.",
+    "Paper main text/Appendix mesh counts differ for perfect gas500versus400 and Lettieri200versus250; both production and listed mesh grids retained.",
+    "Rounded Table2 temperatures intentionally differ from higher precision values in the separate Lettieri validation suite."
+  ]
+}
