@@ -1,0 +1,606 @@
+# Port reference: origin/alberto-branch faafff704e54fd866abff95fcb88fc0a5217405c.
+# Intentional safety changes are documented in docs/two_fluid_migration.md.
+"""
+Source terms for two-fluid model
+"""
+
+import functools
+import math
+import jax
+import jax.numpy as jnp
+
+# Weight laws across the bubbly -> droplet transition (alpha_b < alpha < alpha_d),
+# used by the drag and by the regime-dependent heat transfer.
+REGIME_BLENDS = ("linear", "smoothstep")
+
+
+def regime_weight(alpha1, alpha_b, alpha_d, blend="linear"):
+    """
+    Droplet-regime weight s in [0, 1]: 0 for alpha1 <= alpha_b, 1 for alpha1 >= alpha_d.
+
+    linear     : s = w,              w = (alpha1 - alpha_b) / (alpha_d - alpha_b);
+                 the slope of a blended closure jumps at alpha_b and alpha_d.
+    smoothstep : s = w^2 (3 - 2 w);  zero slope at both ends, so a closure blended
+                 as (1 - s) * bubbly + s * droplet is C1 across the transition.
+    """
+    w = jnp.clip((alpha1 - alpha_b) / (alpha_d - alpha_b), 0.0, 1.0)
+    if blend == "smoothstep":
+        return w * w * (3.0 - 2.0 * w)
+    if blend == "linear":
+        return w
+    raise ValueError(f"unknown regime blend {blend!r}; choose from {REGIME_BLENDS}")
+
+def calculate_mass_transfer_lv(T_l, T_v, T_sat, htc_l, htc_v, A_i, h_sat_l, h_sat_v, h_l, h_v, Qvi, Qli):
+    """
+    Interphase mass transfer from Rane & He (2021), Eq. (4).
+    Positive m_dot = evaporation (l -> v), Negative = condensation (v -> l).
+    """
+    # Eq. (4): m_dot = -[htc_l * ai * (Tsat - Tl) + htc_v * ai * (Tsat - Tv)] / (h_qs - h_ps)
+    # Distribute the minus sign:
+    # numerator = -htc_l * A_i * (T_sat - T_l) - htc_v * A_i * (T_sat - T_v)
+
+    numerator = - Qvi - Qli
+
+
+    # Denominator depends on direction: Eq. (5) for evaporation, Eq. (6) for condensation
+    denominator = h_sat_v - h_sat_l
+
+    m_dot = numerator / denominator
+
+    return m_dot
+
+
+DRAG_LAWS = ("schiller_naumann", "ishii_zuber")
+
+
+def ishii_zuber_mixture_viscosity(mu_c, mu_d, alpha_disp, alpha_max=0.9):
+    """
+    Mixture viscosity of Ishii & Zuber (1979) with alpha_dm = 1:
+        mu_m = mu_c (1 - alpha_disp)^(-2.5 mu*),   mu* = (mu_d + 0.4 mu_c) / (mu_d + mu_c)
+    -> mu_c / (1 - alpha) for bubbles (mu_d << mu_c), mu_c (1 - alpha)^-2.5 for drops.
+    alpha_disp is capped at alpha_max: a regime law is also evaluated (with zero blend
+    weight) far outside its regime, where 1 - alpha -> 0 would give inf * 0 = NaN.
+    """
+    mu_star = (mu_d + 0.4 * mu_c) / (mu_d + mu_c)
+    return mu_c * (1.0 - jnp.minimum(alpha_disp, alpha_max)) ** (-2.5 * mu_star)
+
+
+def calculate_drag_force_one_component(
+    alpha1, alpha2, rho1, rho2, mu1, mu2, u1, u2, d,
+    alpha_b=0.3, alpha_d=0.7, blend="linear",
+    drag_bubbly="schiller_naumann", drag_droplet="schiller_naumann",
+):
+    """
+    Regime-dependent drag force per unit volume for the one-component case.
+    Drag coefficient of each regime (drag_bubbly / drag_droplet):
+      'schiller_naumann' (default): C_d = 24/Re (1 + 0.15 Re^0.687), continuous-phase viscosity
+      'ishii_zuber': viscous regime of Ishii & Zuber (1979), C_d = 24/Re_m (1 + 0.1 Re_m^0.75),
+                     Re_m with the mixture viscosity (ishii_zuber_mixture_viscosity: crowding).
+                     Distorted / Newton regimes not included.
+
+    Convention: phase 1 = vapor (gas), phase 2 = liquid.
+      F > 0 means force on vapor in the direction of u2 - u1.
+
+    Parameters
+    ----------
+    alpha1, alpha2 : volume fractions (vapor, liquid)
+    rho1, rho2     : densities (vapor, liquid)
+    mu1, mu2       : dynamic viscosities (vapor, liquid)
+    u1, u2         : velocities (vapor, liquid)
+    d              : characteristic diameter of dispersed structures
+    alpha_b        : upper bound of bubbly regime (vapor fraction)
+    alpha_d        : lower bound of droplet regime (vapor fraction)
+    blend          : transition between alpha_b and alpha_d (regime_weight).
+                     'linear' (default): linear interpolation between the bubbly
+                     force frozen at alpha_b and the droplet force frozen at alpha_d;
+                     continuous, but its slope jumps at both ends.
+                     'smoothstep': (1 - s) * bubbly + s * droplet, both laws at the
+                     actual alpha, s = smoothstep -> C1 across the transition.
+    drag_bubbly, drag_droplet : drag coefficient law of each regime (DRAG_LAWS)
+    """
+    if drag_bubbly not in DRAG_LAWS or drag_droplet not in DRAG_LAWS:
+        raise ValueError(f"drag laws {DRAG_LAWS}; got {drag_bubbly!r}, {drag_droplet!r}")
+    u_rel = u1 - u2
+    u_rel_abs = jnp.abs(u_rel)
+
+    def force(law, rho_c, mu_c, mu_d, alpha_disp):
+        # Cancel |du| against Cd's 1/Re analytically before evaluation.
+        # The remaining odd power has value/derivative zero at rest. Its
+        # inactive branch uses 1 only to avoid 0**fractional AD; this is not
+        # a velocity floor and changes no nonzero-slip value.
+        if law == "ishii_zuber":
+            viscosity = ishii_zuber_mixture_viscosity(mu_c, mu_d, alpha_disp)
+            factor, exponent = 0.1, 0.75
+        else:
+            viscosity = mu_c
+            factor, exponent = 0.15, 0.687
+        reynolds_per_speed = rho_c*d/viscosity
+        safe_abs = jnp.where(u_rel == 0., 1., u_rel_abs)
+        odd_power = jnp.where(u_rel == 0., 0., u_rel*safe_abs**exponent)
+        return 18.*viscosity*alpha_disp/d**2*(u_rel+factor*reynolds_per_speed**exponent*odd_power)
+
+    def bubbly(_):
+        return force(drag_bubbly, rho2, mu2, mu1, alpha1)
+
+    def droplet(_):
+        return force(drag_droplet, rho1, mu1, mu2, alpha2)
+
+    def transition(_):
+        F_b = force(drag_bubbly, rho2, mu2, mu1, alpha_b)
+        F_d = force(drag_droplet, rho1, mu1, mu2, 1.0-alpha_d)
+        w = (alpha1-alpha_b)/(alpha_d-alpha_b)
+        return F_b+(F_d-F_b)*w
+
+    if blend != "linear":
+        s = regime_weight(alpha1, alpha_b, alpha_d, blend)
+        return (1.0 - s) * bubbly(None) + s * droplet(None)
+
+    return jax.lax.cond(
+        alpha1 <= alpha_b,
+        bubbly,
+        lambda _: jax.lax.cond(alpha1 >= alpha_d, droplet, transition, None),
+        None,
+    )
+
+
+LIQUID_HTC_BUBBLY = ("ranz_marshall", "jakob", "max", "liao")
+LIQUID_HTC_DROPLET = ("internal", "jakob", "max")
+
+
+def jakob_nusselt(ja):
+    """
+    Liquid-side Nusselt number of a bubble growing in superheated liquid, controlled by
+    thermal diffusion (Plesset & Zwick 1954, R = sqrt(12/pi) Ja sqrt(D_l t)):
+        Nu = h d / k_l = (12/pi) Ja,   Ja = rho_l cp_l (T_l - T_sat) / (rho_g h_fg)
+    floored at the conduction limit of a sphere, Nu = 2.  Independent of the slip.
+    """
+    return jnp.maximum(2.0, 12.0 / jnp.pi * ja)
+
+
+def liao_nusselt(ja, pe):
+    """
+    Liquid-side Nusselt number of a flashing bubble, thermal diffusion + convection
+    (Liao et al., their Eqs. 8-10):
+        Nu = h d / k_l = sqrt(12/pi^2 Ja^2 + Pe / (3 pi)),   Pe = |du| d / D_l = Re Pr
+    Ja with (T_l - T_sat) to the first power (the paper's square is a typo: Ja must be
+    dimensionless).  The slip enters under the root next to Ja^2, so there is no cusp at
+    du = 0 while the liquid is superheated.  Floored to keep the sqrt gradient finite.
+    """
+    return jnp.sqrt(jnp.maximum(12.0 / jnp.pi**2 * ja**2 + pe / (3.0 * jnp.pi), 1e-12))
+
+
+def select_liquid_htc(option, htc_default, htc_jakob, htc_liao=None):
+    """option: the regime's own closure ('ranz_marshall' / 'internal') | 'jakob' | 'max' | 'liao'."""
+    if option == "jakob":
+        return htc_jakob
+    if option == "max":
+        return jnp.maximum(htc_default, htc_jakob)
+    if option == "liao":
+        return htc_liao
+    return htc_default
+
+
+def calculate_heat_transfer_one_component(
+    alpha1, state1, state2, u1, u2, d,
+    Nu1_int=120.0, Nu2_int=2.0 * jnp.pi**2 / 3.0,
+    alpha_b=0.3, alpha_d=0.7, blend="linear", slip_u0=0.0,
+    ja=0.0, liquid_bubbly="ranz_marshall", liquid_droplet="internal",
+):
+    """
+    Regime-dependent interfacial heat transfer coefficients for the
+    one-component case, blended across the transition as in
+    calculate_drag_force_one_component.
+
+    Convention: phase 1 = vapor (gas), phase 2 = liquid.
+    On each side of the interface:
+      - continuous phase: Ranz-Marshall, Nu = 2 + 0.6 Re^1/2 Pr^1/3
+        (continuous-phase properties, actual slip |u1 - u2|)
+      - dispersed phase:  constant internal Nusselt, htc = k * Nu_int / d
+
+      bubbly  (alpha1 <= alpha_b): vapor dispersed in liquid
+          htc1 = k1 * Nu1_int / d,              htc2 = RM(liquid continuous)
+      droplet (alpha1 >= alpha_d): liquid dispersed in vapor
+          htc1 = RM(vapor continuous),          htc2 = k2 * Nu2_int / d
+      transition: linear blend in alpha1 of the two regimes, both evaluated
+          at the current d and slip (continuous at alpha_b and alpha_d).
+
+    Parameters
+    ----------
+    alpha1         : vapor volume fraction
+    state1, state2 : dicts with "rho", "mu", "k", "cp" of vapor / liquid
+                     (same format as ranz_marshall_htc_two_fluid)
+    u1, u2         : velocities (vapor, liquid)
+    d              : characteristic diameter of dispersed structures
+    Nu1_int        : Nusselt number inside a bubble (vapor side, bubbly regime)
+    Nu2_int        : Nusselt number inside a droplet (liquid side, droplet regime);
+                     default 2*pi^2/3 ≈ 6.58 is the conduction-limited sphere value
+    alpha_b        : upper bound of bubbly regime (vapor fraction)
+    alpha_d        : lower bound of droplet regime (vapor fraction)
+    blend          : transition weight (regime_weight): 'linear' (default) or
+                     'smoothstep' (zero slope at alpha_b and alpha_d -> C1 HTCs)
+    slip_u0        : [m/s] smooth effective slip of Ranz-Marshall (0 = |u1 - u2|),
+                     see ranz_marshall_htc_two_fluid
+    ja             : liquid Jakob number, only used by the 'jakob' / 'max' options
+    liquid_bubbly  : liquid-side HTC of the bubbly regime: 'ranz_marshall' (default) |
+                     'jakob' (jakob_nusselt) | 'max' (larger of the two) |
+                     'liao' (liao_nusselt, Jakob + Peclet; Pe slip as in Ranz-Marshall)
+    liquid_droplet : liquid-side HTC of the droplet regime: 'internal' (Nu2_int, default) |
+                     'jakob' | 'max'.  The vapor side keeps Ranz-Marshall in the droplet
+                     regime and Nu1_int in the bubbly regime
+
+    Returns
+    -------
+    htc1, htc2 : interfacial HTCs of vapor and liquid [W/(m^2 K)]
+    """
+    if liquid_bubbly not in LIQUID_HTC_BUBBLY or liquid_droplet not in LIQUID_HTC_DROPLET:
+        raise ValueError(f"liquid HTC options: bubbly {LIQUID_HTC_BUBBLY}, droplet {LIQUID_HTC_DROPLET}; "
+                         f"got {liquid_bubbly!r}, {liquid_droplet!r}")
+    u_rel_abs = jnp.abs(u1 - u2)
+    htc2_jakob = state2["k"] * jakob_nusselt(ja) / d
+    u_pe = jnp.sqrt(u_rel_abs**2 + slip_u0**2) if slip_u0 > 0.0 else u_rel_abs
+    pe = u_pe * d * state2["rho"] * state2["cp"] / state2["k"]
+    htc2_liao = state2["k"] * liao_nusselt(ja, pe) / d
+
+    def bubbly(_):
+        # Vapor dispersed in liquid: internal Nu on the vapor side, liquid continuous
+        htc1 = state1["k"] * Nu1_int / d
+        htc2 = select_liquid_htc(liquid_bubbly, ranz_marshall_htc_two_fluid(state2, u_rel_abs, d, slip_u0),
+                                 htc2_jakob, htc2_liao)
+        return htc1, htc2
+
+    def droplet(_):
+        # Liquid dispersed in vapor: vapor continuous, internal Nu on the liquid side
+        htc1 = ranz_marshall_htc_two_fluid(state1, u_rel_abs, d, slip_u0)
+        htc2 = select_liquid_htc(liquid_droplet, state2["k"] * Nu2_int / d, htc2_jakob)
+        return htc1, htc2
+
+    def transition(_):
+        htc1_b, htc2_b = bubbly(None)
+        htc1_d, htc2_d = droplet(None)
+        w = (alpha1 - alpha_b) / (alpha_d - alpha_b)
+        return htc1_b + (htc1_d - htc1_b) * w, htc2_b + (htc2_d - htc2_b) * w
+
+    if blend != "linear":
+        s = regime_weight(alpha1, alpha_b, alpha_d, blend)
+        htc1_b, htc2_b = bubbly(None)
+        htc1_d, htc2_d = droplet(None)
+        return htc1_b + (htc1_d - htc1_b) * s, htc2_b + (htc2_d - htc2_b) * s
+
+    return jax.lax.cond(
+        alpha1 <= alpha_b,
+        bubbly,
+        lambda _: jax.lax.cond(alpha1 >= alpha_d, droplet, transition, None),
+        None,
+    )
+
+def interfacial_area_original(
+    alpha,
+    alpha_b=0.3,
+    alpha_d=0.7,
+    Nb=1e10,
+    Nd=1e10,
+    d_min_b=1e-5,
+    d_min_d=1e-5,
+    d_min=1e-5,
+    ai_scale=1.0,
+):
+    """
+    TA-BD interfacial area density with nucleation and breakup floors.
+
+    Five regions as a function of vapor volume fraction alpha:
+      1. alpha <= alpha_b_star         : nucleation floor (constant ai, d = d_min_b)
+      2. alpha_b_star < alpha <= 0.3   : bubbly regime
+      3. 0.3 < alpha < 0.7             : linear transition
+      4. 0.7 <= alpha < alpha_d_star   : droplet regime
+      5. alpha >= alpha_d_star         : breakup floor (constant ai, d = d_min_d)
+
+    Parameters
+    ----------
+    alpha : scalar
+        Vapor volume fraction in [0, 1].
+    alpha_b, alpha_d : float
+        TA-BD transition bounds (0.3 and 0.7 in the paper).
+    Nb, Nd : float
+        Bubble and droplet number densities [1/m^3].
+    d_min_b, d_min_d : float
+        Minimum physical diameters for bubbles and droplets [m].
+    ai_scale : float
+        Correction factor (field inversion): ai -> ai_scale * ai and d -> d / ai_scale, which
+        keeps ai * d = 6 alpha_disp of the bubbly and droplet branches. 1 = the law itself.
+
+    Returns
+    -------
+    ai : scalar
+        Interfacial area density [1/m].
+    d : scalar
+        Characteristic length scale [m] (bubble or droplet diameter).
+    """
+
+    # Derived thresholds where the natural cube-root diameter hits the floor
+    alpha_b_star = jnp.pi * Nb * d_min_b**3 / 6.0
+    alpha_d_star = 1.0 - jnp.pi * Nd * d_min_d**3 / 6.0
+
+    # Endpoint values at the TA-BD transition boundaries (alpha_b = 0.3, alpha_d = 0.7)
+    Ai_b_at_03 = (6.0 * alpha_b) ** (2.0 / 3.0) * (jnp.pi * Nb) ** (1.0 / 3.0)
+    Ai_d_at_07 = (6.0 * (1.0 - alpha_d)) ** (2.0 / 3.0) * (jnp.pi * Nd) ** (1.0 / 3.0)
+    d_b_at_03 = (6.0 * alpha_b / (jnp.pi * Nb)) ** (1.0 / 3.0)
+    d_d_at_07 = (6.0 * (1.0 - alpha_d) / (jnp.pi * Nd)) ** (1.0 / 3.0)
+
+    def nucleation_floor(_):
+        ai = Nb * jnp.pi * d_min_b**2
+        d = d_min_b
+        return ai, d
+
+    def bubbly(_):
+        ai = (6.0 * alpha) ** (2.0 / 3.0) * (jnp.pi * Nb) ** (1.0 / 3.0)
+        d = (6.0 * alpha / (jnp.pi * Nb)) ** (1.0 / 3.0)
+        return ai, d
+
+    def transition(_):
+        w = (alpha - alpha_b) / (alpha_d - alpha_b)
+        ai = Ai_b_at_03 + (Ai_d_at_07 - Ai_b_at_03) * w
+        d = d_b_at_03 + (d_d_at_07 - d_b_at_03) * w
+        return ai, d
+
+    def droplet(_):
+        ai = (6.0 * (1.0 - alpha)) ** (2.0 / 3.0) * (jnp.pi * Nd) ** (1.0 / 3.0)
+        d = (6.0 * (1.0 - alpha) / (jnp.pi * Nd)) ** (1.0 / 3.0)
+        return ai, d
+
+    def breakup_floor(_):
+        ai = Nd * jnp.pi * d_min_d**2
+        d = d_min_d
+        return ai, d
+
+    # Nested lax.cond cascade — walks through the five branches in order.
+    # Structure: if alpha <= alpha_b_star -> nucleation_floor
+    #            elif alpha <= alpha_b    -> bubbly
+    #            elif alpha <  alpha_d    -> transition
+    #            elif alpha <  alpha_d_star -> droplet
+    #            else                     -> breakup_floor
+    ai, d = jax.lax.cond(
+        alpha <= alpha_b_star,
+        nucleation_floor,
+        lambda _: jax.lax.cond(
+            alpha <= alpha_b,
+            bubbly,
+            lambda _: jax.lax.cond(
+                alpha < alpha_d,
+                transition,
+                lambda _: jax.lax.cond(
+                    alpha < alpha_d_star,
+                    droplet,
+                    breakup_floor,
+                    None,
+                ),
+                None,
+            ),
+            None,
+        ),
+        None,
+    )
+
+    return ai_scale * ai, d / ai_scale
+
+def dispersed_fraction(alpha, eps=0.1):
+    """
+    Smooth version of min(alpha, 1 - alpha), the volume fraction of the dispersed phase.
+
+    Uses |x| ~ sqrt(x^2 + eps^2) with x = 2 alpha - 1, then shifts and rescales so the
+    result is exactly 0 at alpha = 0 and 1 and exactly 0.5 at alpha = 0.5. eps -> 0
+    recovers the sharp minimum; larger eps rounds the corner at alpha = 0.5 over a wider band.
+    """
+    def raw(x):
+        return 0.5 * (1.0 - jnp.sqrt(x**2 + eps**2))
+
+    lo, mid = raw(1.0), raw(0.0)
+    return 0.5 * (raw(2.0 * alpha - 1.0) - lo) / (mid - lo)
+
+
+def interfacial_area_poly(alpha,
+        ai_ctrl=(100.0, 12342.0, 23401.0, 26272.0, 20992.0, 14931.0, 12818.0, 12545.0, 10153.0, 5255.0, 100.0),
+        eps=0.1, d_min=1e-5,
+        alpha_b=0.3,
+        alpha_d=0.7,
+        Nb=1e10,
+        Nd=1e10,
+        d_min_b=1e-5,
+        d_min_d=1e-5,
+        ai_scale=1.0,):
+    """
+    Smooth polynomial version of interfacial_area_segments with the modified points
+    (alpha_pts 0, 0.05, 0.25, 0.7, 0.9, 1; ai_pts 100, 6500, 22000, 12000, 5000, 100).
+
+    ai is a Bernstein polynomial of degree N = len(ai_ctrl) - 1:
+      ai = sum_k ai_ctrl[k] * C(N, k) alpha^k (1 - alpha)^(N - k)
+    so ai(0) = ai_ctrl[0] and ai(1) = ai_ctrl[-1] exactly (100 1/m, as the segments), and
+    min(ai_ctrl) <= ai <= max(ai_ctrl). The diameter follows d = 6 alpha_disp / ai with the
+    floor d >= d_min, as in interfacial_area_para / interfacial_area_segments.
+
+    Default ai_ctrl: fit_bernstein_ai(segments points, degree=10, lam=1e-3), rounded.
+    Error vs the segments: rms 580 1/m (2.6 % of the peak), max 2330 1/m at the corner
+    alpha = 0.25; the peak is rounded off to 20330 1/m at alpha = 0.31 (segments: 22000
+    at 0.25), single maximum, no wiggles.
+
+    ai_scale multiplies ai (field-inversion correction); d follows from the scaled ai.
+
+    Returns
+    -------
+    ai : interfacial area density [1/m]
+    d : characteristic diameter [m]
+    """
+    N = len(ai_ctrl) - 1
+    ai = ai_scale * sum(c * math.comb(N, k) * alpha**k * (1.0 - alpha) ** (N - k) for k, c in enumerate(ai_ctrl))
+    alpha_disp = dispersed_fraction(alpha, eps)
+    d = jnp.maximum(6.0 * alpha_disp / ai, d_min)
+    return ai, d
+
+def ranz_marshall_htc_two_fluid(
+        state_continuous,
+        relative_velocity,
+        d_dispersed,
+        slip_u0=0.0,
+):
+    """
+    Continuous-phase HTC for dispersed particles (Ranz-Marshall 1952).
+
+    Same as ranz_marshall_htc_two_components from HNEM, but uses
+    the actual relative velocity instead of the Weber-estimated slip.
+    All thermophysical properties are taken from the CONTINUOUS phase.
+
+    Parameters
+    ----------
+    alpha_dispersed : float
+        Volume fraction of the dispersed phase.
+    state_continuous : FluidState
+        Thermodynamic state of the continuous phase.
+    fluid_continuous : Fluid
+        Fluid object for the continuous phase (needs fluid_name for surface tension).
+    relative_velocity : float
+        Absolute relative velocity between phases |u1 - u2| [m/s].
+    We : float
+        Critical Weber number (default 8.0). Reserved, not used when
+        relative_velocity is provided directly.
+    Nb : float
+        Number density for interfacial area model (default 1e10).
+    slip_u0 : float
+        [m/s] > 0: Re from the smooth effective slip sqrt(du^2 + slip_u0^2) instead
+        of |du|, so Nu has no cusp (infinite slope) where the slip changes sign.
+        0 (default): |du|, the original closure.
+    """
+    # --- Continuous-phase properties ---
+    rho_c = state_continuous["rho"]
+    mu_c  = state_continuous["mu"]
+    k_c   = state_continuous["k"]
+    cp_c  = state_continuous["cp"]
+
+    # --- Re and Pr use continuous-phase properties ---
+    if slip_u0 > 0.0:
+        u_rel = jnp.sqrt(relative_velocity**2 + slip_u0**2)
+    else:
+        u_rel = jnp.abs(relative_velocity)
+    Re = rho_c * u_rel * d_dispersed / mu_c
+    Re_safe = jnp.maximum(Re, 1e-12)   # avoid 0**0.5 → ∞ gradient under jacfwd
+    Pr = cp_c * mu_c / k_c
+
+    Nu = 2.0 + 0.6 * Re_safe**0.5 * Pr**(1.0 / 3.0)
+
+    htc = k_c * Nu / d_dispersed
+
+    return htc
+
+
+def interfacial_area_para(alpha, a_min=100.0, a_max=20000.0, eps=0.1, d_min=1e-5,
+                    alpha_b=0.3,
+                    alpha_d=0.7,
+                    Nb=10e12,
+                    Nd=10e10,
+                    d_min_b=5e-6,
+                    ai_scale=1.0):
+    """
+    Interfacial area density for data assimilation: inverted parabola in alpha.
+
+    ai(0) = ai(1) = a_min and ai(0.5) = a_max.
+
+    The diameter follows from the monodisperse-sphere relation ai = 6 alpha_disp / d,
+    where alpha_disp is the volume fraction of the dispersed phase, a smooth version of
+    min(alpha, 1 - alpha) (see dispersed_fraction; eps sets the rounding at alpha = 0.5):
+      alpha < 0.5 : bubbly  (vapor dispersed), alpha_disp ~ alpha
+      alpha > 0.5 : misty   (liquid dispersed), alpha_disp ~ 1 - alpha
+
+    Nucleation / breakup floor (as in interfacial_area): the diameter never drops below
+    d_min, so d(0) = d(1) = d_min and ai(0) = ai(1) = a_min are both finite and non-zero.
+    The floor is active for alpha_disp < a_min * d_min / 6, where ai = 6 alpha_disp / d no
+    longer holds (minimum-size bubbles/droplets, as in the prior's floor regions).
+
+    ai_scale multiplies ai (field-inversion correction); d follows from the scaled ai.
+
+    Returns
+    -------
+    ai : interfacial area density [1/m]
+    d : characteristic diameter [m]
+    """
+    ai = ai_scale * (a_min + (a_max - a_min) * 4.0 * alpha * (1.0 - alpha))
+    alpha_disp = dispersed_fraction(alpha, eps)
+    d = jnp.maximum(6.0 * alpha_disp / ai, d_min)
+    return ai, d
+
+
+def interfacial_area_segments(alpha,
+                              alpha_pts=(0.0, 0.05, 0.25, 0.7, 0.9, 1.0),
+                              ai_pts=(100.0, 3900.0, 15000.0, 24000.0, 20000.0, 100.0),
+                              corner=0.0, eps=0.1, d_min=1e-5,
+                              alpha_b=0.3,
+                              alpha_d=0.7,
+                              Nb=10e12,
+                              Nd=10e10,
+                              d_min_b=5e-6,
+                              ai_scale=1.0):
+    """
+    Interfacial area density for data assimilation: piecewise linear in alpha.
+
+    ai is linear between the control points (alpha_pts[k], ai_pts[k]); alpha_pts must be
+    strictly increasing and span [0, 1], ai_pts > 0.  Any shape, e.g. non-symmetric.
+    corner > 0 rounds every interior corner over a width ~corner in alpha (each slope
+    change becomes a softplus ramp, C-infinity; the segments are unchanged away from the
+    corners); corner = 0 is exact linear interpolation.
+
+    The diameter follows from ai = 6 alpha_disp / d with the nucleation / breakup floor
+    d >= d_min, as in interfacial_area_para (alpha_disp: dispersed_fraction, eps).
+
+    Default points: a shape skewed to the vapor side (peak 24000 1/m at alpha = 0.7,
+    parabola-like area up to alpha ~ 0.25) that runs the case-4 ladder of
+    main_ladder.py / settings_ladder.yaml unattended to N = 400, inlet void 1e-5
+    (tested 2026-10-16, see LADDER_HISTORY.md).
+
+    ai_scale multiplies ai (field-inversion correction); d follows from the scaled ai.
+
+    Returns
+    -------
+    ai : interfacial area density [1/m]
+    d : characteristic diameter [m]
+    """
+    xs = tuple(float(v) for v in alpha_pts)
+    ys = tuple(float(v) for v in ai_pts)
+    if len(xs) != len(ys) or len(xs) < 2:
+        raise ValueError("interfacial_area_segments: alpha_pts and ai_pts need the same length >= 2")
+    if any(b <= a for a, b in zip(xs, xs[1:])) or xs[0] > 0.0 or xs[-1] < 1.0:
+        raise ValueError("interfacial_area_segments: alpha_pts must increase strictly from 0 to 1")
+    if min(ys) <= 0.0:
+        raise ValueError("interfacial_area_segments: ai_pts must be > 0")
+    if corner > 0.0:
+        slopes = [(y1 - y0) / (x1 - x0) for x0, x1, y0, y1 in zip(xs, xs[1:], ys, ys[1:])]
+        ai = ys[0] + slopes[0] * (alpha - xs[0])
+        for xk, s0, s1 in zip(xs[1:-1], slopes, slopes[1:]):
+            ai = ai + (s1 - s0) * corner * jax.nn.softplus((alpha - xk) / corner)
+        ai = jnp.maximum(ai, min(ys))
+    else:
+        ai = jnp.interp(alpha, jnp.asarray(xs), jnp.asarray(ys))
+    ai = ai_scale * ai
+    alpha_disp = dispersed_fraction(alpha, eps)
+    d = jnp.maximum(6.0 * alpha_disp / ai, d_min)
+    return ai, d
+
+
+# Interfacial area laws selectable by name (settings: sources.interfacial_area).
+# Every law takes (alpha, alpha_b=, alpha_d=, Nb=, Nd=, d_min_b=, ai_scale=, ...) and returns (ai, d);
+# ai_scale (default 1) multiplies ai before d is derived from it (field-inversion correction beta).
+INTERFACIAL_AREA_LAWS = {
+    "original": interfacial_area_original,     # TA-BD number-density law (uses Nb / Nd)
+    "polynomial": interfacial_area_poly,       # Bernstein-polynomial diameter (ignores Nb / Nd)
+    "parabola": interfacial_area_para,         # inverted parabola in alpha (ignores Nb / Nd)
+    "segments": interfacial_area_segments,     # piecewise linear in alpha (ignores Nb / Nd)
+}
+
+
+def get_interfacial_area(name="polynomial", params=None):
+    """
+    Interfacial area law `name` with its keyword arguments `params` fixed, e.g.
+    get_interfacial_area("polynomial", {"d_min": 6.5e-5}).  Returns a callable
+    with the same signature as the laws above.
+    """
+    if name not in INTERFACIAL_AREA_LAWS:
+        raise ValueError(f"unknown interfacial area law {name!r}; "
+                         f"choose from {sorted(INTERFACIAL_AREA_LAWS)}")
+    law = INTERFACIAL_AREA_LAWS[name]
+    return functools.partial(law, **params) if params else law

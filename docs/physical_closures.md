@@ -129,3 +129,55 @@ See [the annular verification study](../cases/verification_annular/README.md)
 for installation, exact configurations, shared geometry, reference-equation
 corrections and measured coverage. Optional adapter tests skip when NozzleX
 is not installed; they do not make it a production installation requirement.
+
+## Two-fluid closures from the frozen Alberto reference
+
+`models.two_fluid.ClosureConfig` configures the port of
+`origin/alberto-branch` at `faafff704e54fd866abff95fcb88fc0a5217405c`.
+The implementation is in `_alberto_closures.py` and `_alberto_sources.py`;
+the older retained two-fluid files are not its reference or import path.
+See [the migration guide](two_fluid_migration.md) for state, boundary and
+discretization details. Pass `closures=None` to explicitly disable interphase
+exchange, or `ClosureConfig(...)` to enable it. No implemented upstream
+two-fluid wall-friction law was available.
+
+| Selector | Implemented choices | Limits and approximations |
+|---|---|---|
+| `area_law` | `original`, `polynomial`, `parabola`, `segments` | Interfacial area in m$^{-1}$ and diameter in m; `original` uses bubble/droplet counts per m$^3$. Other laws prescribe area from void fraction. |
+| `drag_bubbly`, `drag_droplet` | `schiller_naumann`, `ishii_zuber` | Independent selectors; Ishii–Zuber includes its viscous regime only, not distorted/Newton regimes. |
+| `htc_liquid_bubbly` | `ranz_marshall`, `jakob`, `max`, `liao` | Jakob/Liao choices require the mass-transfer/saturation formulation. |
+| `htc_liquid_droplet` | `internal`, `jakob`, `max` | Used when `regime_htc=True`; internal Nu is the declared upstream approximation. |
+| `regime_blend` | `linear`, `smoothstep` | Linear uses frozen end-regime drag values across the transition; smoothstep blends actual-state correlations with a $C^1$ weight. |
+| `mass_transfer` | true/false | One-component heat/mass exchange or two-component heat/drag. Positive mass source means liquid-to-gas evaporation. |
+
+`area_params` are passed by name and now override the base correlation defaults,
+including `d_min_b`; upstream's call-site keyword could shadow this override.
+No normalization by evolving phase mass or volume is used in convergence tests.
+
+The following numerical/empirical regularizations are explicitly retained;
+they are not replacements for EOS domain checks:
+
+| Policy | Frozen value/behavior |
+|---|---|
+| Drag at zero slip | The port cancels the $1/Re$ factor analytically against $|\Delta u|\Delta u$. It preserves nonzero-slip correlations and restores the finite Stokes derivative at exact rest; upstream's $Re\ge10^{-12}$ and viscosity denominator floors are removed from drag. Accepted states require finite positive viscosity. |
+| Ranz–Marshall Reynolds input | $\max(Re,10^{-12})$ before its square root; finite zero-slip AD with a tiny conduction-limit offset. |
+| Liao Nusselt square root | Argument bounded below by $10^{-12}$; declaration retained from the frozen closure. |
+| Ishii–Zuber dispersed fraction | Capped at 0.9 inside the mixture-viscosity correlation to keep the inactive regime finite. This is not a cell void-fraction clip. |
+| Dispersed diameter | Law-specific physical diameter floors; original source call uses $d_{min,b}=5\times10^{-6}$ m unless `area_params` overrides it. |
+| Effective slip | `smooth_slip=False` by default; opt-in $\sqrt{(u_g-u_l)^2+u_0^2}$ changes HTC and uses `smooth_slip_u0=2` m/s by default. |
+| Evaporation gate | Binary liquid enthalpy/temperature thresholds, OR vapor fraction above 0.05; optional pressure cutoff. The latter must remain inside a valid saturation domain. |
+
+The phase property calls do not clip pressure or enthalpy. Accepted states must
+remain in both PH table domains, have positive density, temperature, sound
+speed and transport data, and remain in the tabulated saturation-pressure
+interval when the selected physics reads saturation. This prevents JAXProp's
+endpoint saturation interpolation from silently supplying out-of-range physics.
+
+`PhasePinConfig` selects independent, off-by-default equation changes: the
+binary vapor saturation-energy pin and the finite-time vapor momentum pin.
+The momentum time is in seconds and must be supplied explicitly. The older
+momentum blend without a relaxation time is rejected because its steady root
+depends on the pseudo-time step. Pins are restricted to implicit steady solves;
+unmodified physical balance defects remain visible beside selected-equation
+convergence. Endpoint boundary traces have no connection to these thin-phase
+policies.

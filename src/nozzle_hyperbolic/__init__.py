@@ -28,6 +28,7 @@ _EXPORTS.update(
         "AnnularModel": (".models.euler_annular.model", "AnnularModel"),
         "AdvectionModel": (".models.scalar.advection", "AdvectionModel"),
         "BurgersModel": (".models.scalar.burgers", "BurgersModel"),
+        "TwoFluidModel": (".models.two_fluid.model", "TwoFluidModel"),
     }
 )
 __all__ = ["__version__", *_EXPORTS]
