@@ -1,4 +1,11 @@
-"""
+"""Deprecated historical two-fluid implementation.
+
+.. deprecated:: 0.0.1
+    Use ``models.two_fluid.constrained_state`` for the current eight-state model.
+    Retained only for historical comparisons and remaining legacy callers.
+    This module is a deletion candidate after those callers/tests migrate.
+    The current model is not a drop-in replacement for every legacy API.
+
 State-vector converters for the two-fluid solver.
 
 Primitive state (enthalpy frame):

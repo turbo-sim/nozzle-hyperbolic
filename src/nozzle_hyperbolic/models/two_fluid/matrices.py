@@ -1,4 +1,11 @@
-"""
+"""Deprecated historical two-fluid implementation.
+
+.. deprecated:: 0.0.1
+    The current ``TwoFluidModel`` uses the pinned ``_alberto_matrices`` port.
+    Retained only for historical comparisons and remaining legacy callers.
+    This module is a deletion candidate after those callers/tests migrate.
+    The current model is not a drop-in replacement for every legacy API.
+
 Closed-form matrices for Städtke's two-fluid FVS scheme in enthalpy primitives.
 
 All algebra is transcribed from stadtke_enthalpy_frame_derivation_latest.md.

@@ -1,4 +1,11 @@
-"""
+"""Deprecated historical two-fluid implementation.
+
+.. deprecated:: 0.0.1
+    The current ``TwoFluidModel`` uses the pinned ``_alberto_closures`` port.
+    Retained only for historical comparisons and remaining legacy callers.
+    This module is a deletion candidate after those callers/tests migrate.
+    The current model is not a drop-in replacement for every legacy API.
+
 Source terms for two-fluid model
 """
 
@@ -151,7 +158,7 @@ def calculate_heat_transfer_one_component(
 
 def interfacial_area_original(
     alpha,
-    alpha_b=0.3, 
+    alpha_b=0.3,
     alpha_d=0.7,
     Nb=1e10,
     Nd=1e10,
@@ -269,7 +276,7 @@ def dispersed_fraction(alpha, eps=0.1):
 
 
 def interfacial_area_poly(alpha, d_ctrl=(160e-6, 0.0, 320e-6, 0.0, 1455e-6), eps=0.1, d_min=6e-5,
-        alpha_b=0.3,  
+        alpha_b=0.3,
         alpha_d=0.7,
         Nb=1e10,
         Nd=1e10,
@@ -354,10 +361,10 @@ def ranz_marshall_htc_two_fluid(
 
 
 def interfacial_area_para(alpha, a_min=100.0, a_max=20000.0, eps=0.1, d_min=1e-5,
-                    alpha_b=0.3, 
+                    alpha_b=0.3,
                     alpha_d=0.7,
-                    Nb=10e12, 
-                    Nd=10e10, 
+                    Nb=10e12,
+                    Nd=10e10,
                     d_min_b=5e-6):
     """
     Interfacial area density for data assimilation: inverted parabola in alpha.

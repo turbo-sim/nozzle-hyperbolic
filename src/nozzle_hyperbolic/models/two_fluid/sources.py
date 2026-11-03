@@ -1,4 +1,11 @@
-"""
+"""Deprecated historical two-fluid implementation.
+
+.. deprecated:: 0.0.1
+    The current ``TwoFluidModel`` uses the pinned ``_alberto_sources`` port.
+    Retained only for historical comparisons and remaining legacy callers.
+    This module is a deletion candidate after those callers/tests migrate.
+    The current model is not a drop-in replacement for every legacy API.
+
 Source-term assembly for Städtke's two-fluid model.
 
 Two public functions:
@@ -22,8 +29,6 @@ import jaxprop as jxp
 from .matrices import PhaseProps, CommonQty, J_matrix, Phi_inv_matrix
 
 # Closure correlations from the existing two-fluid source library
-import sys, os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "closures"))
 from .closures.source_two_fluid import (
     calculate_drag_force_one_component,
     calculate_heat_transfer_one_component,
@@ -265,7 +270,7 @@ def two_fluid_closure(
         # ai, d = 100, 5e-5
         # ── Drag force on gas per unit volume (sign: F > 0 accelerates gas) ─────
         mu_g = stg_ex["viscosity"][0]
-        k_g = stg_ex["conductivity"][0]   
+        k_g = stg_ex["conductivity"][0]
         mu_l = stl_ex["viscosity"][0]
         # Drag force per unit volume: F > 0 means force on gas in direction of u_l - u_g
         Fv_g = -calculate_drag_force_one_component(
@@ -378,7 +383,7 @@ def two_fluid_closure(
         # ai, d = 100, 5e-5
         # ── Drag force on gas per unit volume (sign: F > 0 accelerates gas) ─────
         mu_g = stg_ex["viscosity"][0]
-        k_g = stg_ex["conductivity"][0]   
+        k_g = stg_ex["conductivity"][0]
         mu_l = stl_ex["viscosity"][0]
         # Drag force per unit volume: F > 0 means force on gas in direction of u_l - u_g
         Fv_g = -calculate_drag_force_one_component(
@@ -648,7 +653,7 @@ def D_VE_algebric(U_h, cq, closure, eos_g, eos_l, k):
 
 def D_VE_algebric_two_component(U_h, cq, closure, eos_g, eos_l, k):
     """
-    For cases where there is no mass transfer 
+    For cases where there is no mass transfer
     """
     p, u_g, u_l, ag, h_g, h_l = U_h
     al = 1.0 - ag
@@ -669,8 +674,8 @@ def D_VE_algebric_two_component(U_h, cq, closure, eos_g, eos_l, k):
     density_term = rg * rl / rh2 - 1
 
     # ── Building D_VE ───────────────────────────────────────────────────────
-    D3 = rg * rl / rh2 * Fv_g 
-    D4 = rg * rl / rh2 * Fv_l 
+    D3 = rg * rl / rh2 * Fv_g
+    D4 = rg * rl / rh2 * Fv_l
     D5 = Fv_g * (u_int + u_g * density_term) + sigma_Qg
     D6 = Fv_l * (u_int + u_l * density_term) + sigma_Ql
 

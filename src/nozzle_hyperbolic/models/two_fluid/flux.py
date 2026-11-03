@@ -1,4 +1,11 @@
-"""
+"""Deprecated historical two-fluid implementation.
+
+.. deprecated:: 0.0.1
+    The current ``TwoFluidModel`` uses the pinned ``_alberto_flux`` port.
+    Retained only for historical comparisons and remaining legacy callers.
+    This module is a deletion candidate after those callers/tests migrate.
+    The current model is not a drop-in replacement for every legacy API.
+
 FVS flux kernel and non-conservative correction for Städtke's two-fluid model.
 
 Implements §13.6 of stadtke_enthalpy_frame_derivation_complete.md:
@@ -201,7 +208,7 @@ def fvs_interface_flux(U_h_L, U_h_R, fluid_g, fluid_l, k,
     hat_al = al_b * rl * rg_hat / rh2         # volume-fraction weight for u_l
     u_mix  = hat_ag * u_g_b + hat_al * u_l_b    # mixture velocity
 
-    
+
     Ma_face = jnp.abs(u_mix) / jnp.maximum(jnp.abs(a), 1e-8)
     z_ac    = jnp.clip(Ma_face, lowmach_diss, 1.0)
 
