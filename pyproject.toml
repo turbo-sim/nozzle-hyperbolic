@@ -72,15 +72,6 @@ markers = [
 [tool.coverage.run]
 branch = true
 source = ["nozzle_hyperbolic"]
-omit = [
-    "*/models/two_fluid/solver.py",
-    "*/models/two_fluid/state.py",
-    "*/models/two_fluid/matrices.py",
-    "*/models/two_fluid/flux.py",
-    "*/models/two_fluid/sources.py",
-    "*/models/two_fluid/boundaries.py",
-    "*/models/two_fluid/closures/*",
-]
 
 [tool.coverage.report]
 show_missing = true

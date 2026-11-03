@@ -8,7 +8,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from nozzle_hyperbolic.models.two_fluid import from_primitives
-from nozzle_hyperbolic.models.two_fluid._alberto_flux import nonconservative_correction
+from nozzle_hyperbolic.models.two_fluid.flux import nonconservative_correction
 
 from tests._support.two_fluid import model, physical_data
 

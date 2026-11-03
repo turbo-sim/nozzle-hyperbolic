@@ -1,5 +1,17 @@
 # Alberto: legacy development scripts
 
+**Current API status:** this is a historical research collection. Several
+drivers and sensitivity studies still import the retired
+`nozzle_hyperbolic.fvm_solver` namespace. The sensitivity scripts also reference
+the removed `models.two_fluid.closures.source_two_fluid` module. Their commands
+and measurements below describe the earlier execution audit; they do not
+establish compatibility with today's package. The duplicate packaged two-fluid
+solver has now been deleted. Use the [current two-fluid guide](../../docs/notes/two_fluid_migration.md),
+[standalone demo](../../demos/two_fluid/README.md) and
+[NICFD case client](../../cases/NICFD2026/README.md) for maintained entry points.
+Migrating these historical drivers requires an explicit update to their solver
+API and configuration handling, rather than restoring the removed solver.
+
 These files predate the controlled studies in `development/roberto/`. They have
 been grouped by topic without changing their numerical algorithms or original
 configuration values. Start with the [execution audit](RUN_REPORT.md), which
@@ -29,7 +41,7 @@ are historical. All original Python/configuration basenames are retained.
 `settings_single_phase_nozzle.yaml` is in `two_fluid/settings/` because it
 uses the two-fluid configuration schema despite its name.
 
-## Run from the repository root
+## Historical launch commands from the execution audit
 
 Use the existing Poetry environment and module commands, without `sys.path`
 workarounds:

@@ -14,7 +14,7 @@ The review covered all Python files through structural/static inspection, with c
 
 | Area | Assessment |
 |---|---|
-| [`models/`](src/nozzle_hyperbolic/models/) | Good ownership of physical equations and general-EOS behavior. Shared Euler outlet and Roe helpers avoid duplicating important physics. Historical two-fluid files obscure the supported route. |
+| [`models/`](src/nozzle_hyperbolic/models/) | Good ownership of physical equations and general-EOS behavior. Shared Euler outlet and Roe helpers avoid duplicating important physics. The duplicate two-fluid implementation has now been removed. |
 | [`numerics/`](src/nozzle_hyperbolic/numerics/) | Mostly small, model-independent kernels. Colored differentiation, local JVP reuse and block-banded solving have meaningful dense/AD comparisons. Historical helper variants need clearer boundaries. |
 | [`solvers/fvm/`](src/nozzle_hyperbolic/solvers/fvm/) | Appropriate assembly and driver layer. The operator constructor has accumulated too many responsibilities. |
 | [`solvers/time_marching/`](src/nozzle_hyperbolic/solvers/time_marching/) | Useful separation of integration and Newton policies from physical models. Explicit stages advance conserved contents and complete algebraic states. |
@@ -27,28 +27,20 @@ The review covered all Python files through structural/static inspection, with c
 
 “High” below means a high maintenance/correctness priority. It does not mean that every item is an observed failing numerical result. Larger changes listed here remain proposals for discussion.
 
-### 1. Delete the deprecated historical two-fluid implementation after migrating its remaining callers — high
+### 1. Remove the deprecated historical two-fluid implementation — completed
 
-**Status: marked deprecated in source documentation; deletion is recommended and has not been performed.** These files can be deleted once their remaining callers/tests have been migrated or explicitly archived:
+The duplicate standalone solver, old state implementation and old closure module
+have been deleted. The active pinned physics now occupies the familiar
+`matrices.py`, `flux.py` and `sources.py` paths; closure laws are grouped by
+mechanism. Model-owned boundary, admissibility and stabilization policies have
+dedicated modules. Public model/configuration imports remain unchanged.
 
-| Deprecated file | Current destination/responsibility |
-|---|---|
-| [`models/two_fluid/solver.py`](src/nozzle_hyperbolic/models/two_fluid/solver.py) | `TwoFluidModel` plus the shared `solvers/fvm` drivers |
-| [`models/two_fluid/state.py`](src/nozzle_hyperbolic/models/two_fluid/state.py) | Current eight-state conversions in `constrained_state.py` |
-| [`models/two_fluid/matrices.py`](src/nozzle_hyperbolic/models/two_fluid/matrices.py) | Active pinned `_alberto_matrices.py` |
-| [`models/two_fluid/flux.py`](src/nozzle_hyperbolic/models/two_fluid/flux.py) | Active pinned `_alberto_flux.py` |
-| [`models/two_fluid/sources.py`](src/nozzle_hyperbolic/models/two_fluid/sources.py) | Active pinned `_alberto_sources.py` |
-| [`models/two_fluid/boundaries.py`](src/nozzle_hyperbolic/models/two_fluid/boundaries.py) | Current model-owned `BoundaryConfig` equations |
-| [`models/two_fluid/closures/source_two_fluid.py`](src/nozzle_hyperbolic/models/two_fluid/closures/source_two_fluid.py) | Active pinned `_alberto_closures.py` |
-| [`models/two_fluid/closures/__init__.py`](src/nozzle_hyperbolic/models/two_fluid/closures/__init__.py) | Remove the historical closure package after its module is removed |
-
-Before this review these eight files represented about **4,950 lines**, almost a quarter of the source tree. Maintaining and searching two implementations substantially increases the chance of editing or testing the wrong path. The old solver also changes JAX precision at import and contains numerical policies different from the shared engine.
-
-**Keep `_alberto_*`, `model.py`, `configuration.py`, `constrained_state.py` and the current two-fluid package initializer.** The public `TwoFluidModel` depends on these. Its state representation and APIs are not interchangeable with every historical function.
-
-The historical FVS and deprecated mass-transfer tests were grouped separately during the test reorganization and subsequently deleted at the user's request. Their three expected failures described the historical closure, not evidence that the active port has the same defect. The frozen archive has also been removed. See the [removal audit](LEGACY_REMOVAL.md) for remaining deprecated source and research callers. Preserve useful independent physical assertions when retargeting other callers; copying expected values to the new implementation would weaken them.
-
-The source now uses explicit Sphinx `deprecated` notices. No runtime deprecation warnings were added, and historical algorithms were retained.
+The [current two-fluid guide](docs/notes/two_fluid_migration.md) maps Alberto's
+function names, explains the retained equations and records the historical
+research scripts that still need a separate driver migration. Maintained tests
+import the canonical modules. Original regression data and provenance archives
+remain unchanged. The earlier source/test counts in this review are historical
+measurements, not inventories of the cleaned tree.
 
 ### 2. Divide `Operator` binding into a few cohesive factories — high
 

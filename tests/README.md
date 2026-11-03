@@ -132,9 +132,10 @@ the package's locked numerical stack and refuses silent dependency skips.
 Python coverage measures executed Python lines and branches, including tracing;
 it does not demonstrate that every XLA runtime branch or numerical regime was
 exercised. Parameterized sonic/rest/reverse-flow, JIT/AD and physical tests provide
-that additional evidence. Deprecated two-fluid implementation files are explicitly
-omitted from maintained coverage; active models and the generic engine remain
-included. Coverage reports expose remaining gaps rather than making a 100% claim.
+that additional evidence. All active two-fluid modules and closure laws are
+included in coverage after removing the deprecated parallel implementation and
+its exclusions. Coverage reports expose remaining gaps rather than making a
+100% claim.
 
 The wheel smoke check installs a built wheel into a disposable environment with
 no numerical dependencies. It verifies the lazy top-level import and byte identity
@@ -143,6 +144,5 @@ checkout. Numerical model behavior is checked separately in the locked environme
 
 The frozen archive and original-suite backup were removed at the user's request.
 The numerical baselines in `regression/data/` remain independent of that archive.
-See the [removal audit](../LEGACY_REMOVAL.md) for remaining historical references.
-Earlier measured results and remaining limits are recorded in
-[TEST_SUITE_REVIEW.md](../TEST_SUITE_REVIEW.md).
+The [two-fluid guide](../docs/notes/two_fluid_migration.md) describes the current
+implementation, retained numerical references and historical research callers.

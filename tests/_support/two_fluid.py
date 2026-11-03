@@ -6,7 +6,7 @@ import jaxprop as jxp
 
 from nozzle_hyperbolic.geometry.nozzle import ConstantAreaGeometry
 from nozzle_hyperbolic.models.two_fluid import TwoFluidModel
-from nozzle_hyperbolic.models.two_fluid._alberto_matrices import (
+from nozzle_hyperbolic.models.two_fluid.matrices import (
     phase_props,
     common_quantities,
 )

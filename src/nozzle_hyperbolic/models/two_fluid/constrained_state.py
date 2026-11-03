@@ -24,8 +24,10 @@ def conserved(W):
         Geometry weighting is applied separately by the numerical operator.
     """
     p, alpha, mg, ug, ml, ul, eg, el = jnp.moveaxis(jnp.asarray(W), -1, 0)
-    return jnp.stack((mg, ml, mg * ug, ml * ul,
-                      eg + 0.5 * mg * ug**2, el + 0.5 * ml * ul**2), axis=-1)
+    return jnp.stack(
+        (mg, ml, mg * ug, ml * ul, eg + 0.5 * mg * ug**2, el + 0.5 * ml * ul**2),
+        axis=-1,
+    )
 
 
 def primitives(W):
@@ -44,8 +46,9 @@ def primitives(W):
         specific enthalpies: ``(p, u_g, u_l, alpha_g, h_g, h_l)``.
     """
     p, alpha, mg, ug, ml, ul, eg, el = jnp.moveaxis(jnp.asarray(W), -1, 0)
-    return jnp.stack((p, ug, ul, alpha, (eg + p * alpha) / mg,
-                      (el + p * (1 - alpha)) / ml), axis=-1)
+    return jnp.stack(
+        (p, ug, ul, alpha, (eg + p * alpha) / mg, (el + p * (1 - alpha)) / ml), axis=-1
+    )
 
 
 def from_primitives(U, fluid_g, fluid_l):
@@ -69,8 +72,10 @@ def from_primitives(U, fluid_g, fluid_l):
     rg = fluid_g.get_state(jxp.HmassP_INPUTS, hg, p)["rho"]
     rl = fluid_l.get_state(jxp.HmassP_INPUTS, hl, p)["rho"]
     mg, ml = alpha * rg, (1 - alpha) * rl
-    return jnp.stack((p, alpha, mg, ug, ml, ul,
-                      mg * hg - p * alpha, ml * hl - p * (1 - alpha)), axis=-1)
+    return jnp.stack(
+        (p, alpha, mg, ug, ml, ul, mg * hg - p * alpha, ml * hl - p * (1 - alpha)),
+        axis=-1,
+    )
 
 
 def eos_constraints(W, fluid_g, fluid_l):
@@ -96,5 +101,6 @@ def eos_constraints(W, fluid_g, fluid_l):
     # Intrinsic density constraints retain sensitivity to a disappearing phase.
     # Partial-density residuals would vanish in proportion to alpha despite a
     # finite relative EOS error. Pure phases are outside this representation.
-    return jnp.stack((W[..., 2] / W[..., 1] - rg,
-                      W[..., 4] / (1 - W[..., 1]) - rl), axis=-1)
+    return jnp.stack(
+        (W[..., 2] / W[..., 1] - rg, W[..., 4] / (1 - W[..., 1]) - rl), axis=-1
+    )

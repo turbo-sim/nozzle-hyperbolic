@@ -23,7 +23,7 @@ from nozzle_hyperbolic.models.two_fluid import (
     from_primitives,
     PhasePinConfig,
 )
-from nozzle_hyperbolic.models.two_fluid._alberto_matrices import (
+from nozzle_hyperbolic.models.two_fluid.matrices import (
     phase_props,
     J_matrix,
     K_matrix,
@@ -31,7 +31,7 @@ from nozzle_hyperbolic.models.two_fluid._alberto_matrices import (
     X_matrix,
     flux_vector,
 )
-from nozzle_hyperbolic.models.two_fluid._alberto_sources import (
+from nozzle_hyperbolic.models.two_fluid.sources import (
     TwoFluidClosure,
     D_VE_algebric,
     D_VE_algebric_two_component,
@@ -39,7 +39,7 @@ from nozzle_hyperbolic.models.two_fluid._alberto_sources import (
     D_VE_area,
     two_fluid_closure,
 )
-from nozzle_hyperbolic.models.two_fluid._alberto_flux import compatible_flux_solve
+from nozzle_hyperbolic.models.two_fluid.flux import compatible_flux_solve
 
 from tests._support.two_fluid import model, physical_data, raw_flux
 
@@ -346,7 +346,7 @@ def test_interfacial_parameter_overrides_are_not_shadowed():
 
 @pytest.mark.parametrize("law", ("schiller_naumann", "ishii_zuber"))
 def test_drag_has_analytic_stokes_derivative_at_literal_rest(law):
-    from nozzle_hyperbolic.models.two_fluid._alberto_closures import (
+    from nozzle_hyperbolic.models.two_fluid.closures import (
         calculate_drag_force_one_component,
         ishii_zuber_mixture_viscosity,
     )
@@ -532,7 +532,7 @@ def test_interfacial_area_configuration_rejects_invalid_parameters(options):
 
 
 def test_bicubic_mask_rejects_unpopulated_nodes_and_nonfinite_coefficients():
-    from nozzle_hyperbolic.models.two_fluid.model import _table_stencil_mask
+    from nozzle_hyperbolic.models.two_fluid.thermodynamics import table_stencil_mask
 
     table = {
         name: {"value": np.ones((4, 4)), "coeffs": np.ones((3, 3, 16))}
@@ -540,10 +540,10 @@ def test_bicubic_mask_rejects_unpopulated_nodes_and_nonfinite_coefficients():
     }
     fluid = SimpleNamespace(table=table, N_h=4, N_p=4)
     np.testing.assert_array_equal(
-        _table_stencil_mask(fluid, False), np.ones((3, 3), bool)
+        table_stencil_mask(fluid, False), np.ones((3, 3), bool)
     )
     table["density"]["value"][0, 0] = np.nan
     table["temperature"]["coeffs"][2, 2, 0] = np.inf
     expected = np.ones((3, 3), bool)
     expected[0, 0] = expected[2, 2] = False
-    np.testing.assert_array_equal(_table_stencil_mask(fluid, False), expected)
+    np.testing.assert_array_equal(table_stencil_mask(fluid, False), expected)
