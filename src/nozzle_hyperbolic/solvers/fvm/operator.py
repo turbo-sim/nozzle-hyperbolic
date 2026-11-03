@@ -64,6 +64,52 @@ from nozzle_hyperbolic.solvers.boundaries import make_boundary_solver
 
 
 class Operator:
+    """Bind a physical model and numerical scheme to reusable JAX kernels.
+
+    Parameters
+    ----------
+    model : BalanceModel
+        Structural model with a fixed mesh, state/storage scales, physical
+        callbacks and declared dependency stencils. Optional capabilities must
+        cover the selected numerical flux, filter and boundary strategy.
+    scheme : Scheme, optional
+        Validated numerical settings. Defaults to corrected Stadtke flux with
+        constant reconstruction and coupled backward Euler.
+
+    Attributes
+    ----------
+    shape : tuple of int
+        Full state shape ``(N + 2, V)``, including two algebraic traces.
+    ntransport, nconstraints : int
+        Transported balance and cell-local algebraic equation counts.
+    radius : int
+        Combined physical and numerical dependency radius in state blocks.
+    effective_boundary_treatment : str
+        Resolved coupled or segregated trace solution strategy.
+
+    Raises
+    ------
+    ValueError
+        If 64-bit JAX mode is disabled, model declarations or callback shapes
+        are invalid, or the selected numerical capabilities are unavailable.
+
+    Notes
+    -----
+    Enable ``jax_enable_x64`` before construction. Binding validates abstract
+    shapes; individual JIT kernels compile lazily on first use. Reuse this
+    instance for a fixed model and scheme. Changes in state shape or dtype can
+    require additional compilations.
+
+    Treat model configuration, geometry, EOS configuration and callback closure
+    data as immutable throughout this operator's lifetime. Python values can
+    be captured during tracing; mutating the model does not reliably invalidate
+    compiled kernels. Construct a new model/operator for changed physics.
+
+    Storage kernels use integrated contents ``(N, T)``. Spatial residuals use
+    integrated transported rows, and boundary/constraint residuals are scaled
+    algebraic rows. See ``docs/model_interface.md`` for callable signatures.
+    """
+
     def __init__(self, model, scheme=Scheme()):
         if not jax.config.x64_enabled:
             raise ValueError(

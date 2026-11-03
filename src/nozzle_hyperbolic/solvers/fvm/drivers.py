@@ -16,6 +16,28 @@ from ..residuals import ResidualPolicy, assess_residuals
 
 
 def sampler(operator, policy):
+    """Build a host-side sampler of the original spatial and algebraic rows.
+
+    Parameters
+    ----------
+    operator : Operator
+        Bound model and numerical scheme with fixed physical scales.
+    policy : ResidualPolicy
+        Norm, weighting and independent stopping targets.
+
+    Returns
+    -------
+    sample : callable
+        ``sample(state, initial=None, time=0.0)`` returns a metrics dictionary.
+        State has shape ``(N + 2, V)``; initial is a fixed vector of transported
+        equation norms, defaulting to the current norms. Time is physical time.
+
+    Notes
+    -----
+    Sampling transfers diagnostics to the host and synchronizes JAX work.
+    Retain this callable for repeated samples of the same operator and policy;
+    its reduction kernel is compiled lazily and reused.
+    """
     if not isinstance(policy, ResidualPolicy):
         raise ValueError("policy must be a ResidualPolicy")
     model = operator.model
@@ -111,6 +133,23 @@ class SteadyWorkspace:
     functions while resetting the initial field, controller, histories and
     residual baselines. Model identity is intentional: bound callbacks and
     physical scales must not be replaced underneath an existing workspace.
+
+    Parameters
+    ----------
+    model : BalanceModel
+        Exact model instance reused for every solve. Its configuration and
+        callback closure data must remain fixed for the workspace lifetime.
+    scheme : Scheme, optional
+        Fixed numerical choices used when binding the operator.
+    residual : ResidualPolicy, optional
+        Fixed sampling and stopping policy.
+
+    Attributes
+    ----------
+    operator : Operator
+        Reusable operator, constructed once at workspace initialization.
+    sample : callable
+        Reusable host-side residual sampler for this operator and policy.
     """
 
     model: object
@@ -127,6 +166,23 @@ class SteadyWorkspace:
         object.__setattr__(self, "sample", sampler(operator, self.residual))
 
     def validate(self, model, scheme, residual):
+        """Require identical model identity and equal numerical/stopping settings.
+
+        Parameters
+        ----------
+        model : BalanceModel
+            Model instance requested by the solve.
+        scheme : Scheme
+            Requested numerical scheme.
+        residual : ResidualPolicy
+            Requested residual policy.
+
+        Raises
+        ------
+        ValueError
+            If any binding differs. In-place changes to model configuration
+            are not detected; callers must keep that configuration fixed.
+        """
         if self.model is not model or self.scheme != scheme or self.residual != residual:
             raise ValueError("workspace must match model identity, scheme and residual policy")
 
@@ -146,6 +202,40 @@ def solve_single_grid(
 
     All models use identical Newton/CFL/acceptance and convergence semantics.
     Model-specific scalar quantities enter only through the supplied evaluator.
+
+    Parameters
+    ----------
+    model : BalanceModel
+        Physical model on a fixed mesh, with ``N`` cells and ``V`` variables.
+    scheme : Scheme, optional
+        Reconstruction, flux, time integrator and nonlinear solution settings.
+    settings : SteadySettings, optional
+        Residual stopping policy and pseudo-time CFL controller.
+    initial_state : array_like, shape (N + 2, V), optional
+        Full iteration state including endpoint traces. Defaults to the
+        model's physical initial guess. No analytical warm start is inferred.
+    monitor_specs : iterable of MonitorSpec, optional
+        Scalar monitor definitions sampled at initial and accepted states.
+    quantity_evaluator : callable, optional
+        ``quantity_evaluator(state, integrated_face_flux)`` returns a mapping
+        keyed by monitor name or quantity. Required when monitors are supplied.
+    callback : callable, optional
+        Receives each recorded history dictionary, including rejected trials.
+    workspace : SteadyWorkspace, optional
+        Reuse bound kernels for this exact model, scheme and residual policy.
+        Without it, each invocation constructs a new operator and sampler.
+
+    Returns
+    -------
+    Solution
+        Final host state, success/reason, complete attempt history, final
+        metrics and bound operator. Failure states remain available for audit.
+
+    Notes
+    -----
+    Inner Newton success alone does not establish steady convergence. The
+    original spatial rows, traces, cell constraints, global balances and
+    required monitors are checked separately, followed by any model audit.
     """
     monitor_specs = tuple(monitor_specs)
     if monitor_specs and not callable(quantity_evaluator):
@@ -348,6 +438,46 @@ def solve_grid_sequence(
     between complete hierarchy replays. Defaults retain cold fallback/retry;
     set ``retry_cold=False, stop_on_failure=True`` for a strict sequence that
     never replaces a failed transfer or solve with an independent start.
+
+    Parameters
+    ----------
+    model_factory : callable
+        ``model_factory(count)`` returns a model with the requested cell count.
+    cells : iterable of int, optional
+        Strictly increasing cell counts, each at least two.
+        Defaults to ``(50, 100, 200, 400)``.
+    scheme : Scheme, optional
+        Shared numerical scheme unless ``scheme_factory`` is supplied.
+    settings : SteadySettings, optional
+        Shared stopping/controller policy; inherited CFL affects warm starts.
+    on_stage : callable, optional
+        ``on_stage(model, solution, stages)`` runs after each completed stage.
+    monitor_specs : iterable of MonitorSpec, optional
+        Monitor definitions reused on every mesh.
+    initial_solution : Solution, optional
+        Previous numerical solution on a coarser matching domain.
+    quantity_evaluator_factory : callable, optional
+        ``quantity_evaluator_factory(model)`` returns the stage's monitor
+        evaluator. Defaults to the model's ``quantities`` callback if present.
+    carry_cfl : bool, optional
+        Inherit the last successful accepted CFL on warm transfers, default True.
+    scheme_factory : callable, optional
+        ``scheme_factory(count)`` selects an explicit Scheme for each mesh.
+    workspace_factory : callable, optional
+        ``workspace_factory(model, scheme, settings)`` returns a matching
+        SteadyWorkspace for replays of the same hierarchy.
+    stop_on_failure : bool, optional
+        Stop at the first unsuccessful stage, default False.
+    retry_cold : bool, optional
+        Permit independent cold attempts after failed warm starts, default True.
+
+    Returns
+    -------
+    solution : Solution
+        Result of the last attempted grid, including an unsuccessful result.
+    stages : list of dict
+        Stage outcomes, initialization policies, CFL data, preparation costs
+        and retained failed warm attempts.
     """
     if not isinstance(carry_cfl, bool):
         raise ValueError("carry_cfl must be a boolean")
@@ -523,6 +653,38 @@ def solve_transient(
     The optional model transient_solution_audit applies to each output; when
     absent, solution_audit provides the backward-compatible fallback. A final
     steady branch constraint need not describe every transient intermediate.
+
+    Parameters
+    ----------
+    model : BalanceModel
+        Physical model on a fixed mesh; steady-only equation policies are
+        rejected for physical-time integration.
+    output_times : iterable of float
+        Nonnegative, finite, strictly increasing physical output times. The
+        initial physical time is zero; a zero-time output is permitted.
+    scheme : Scheme, optional
+        Numerical method. Defaults to HLL with implicit Euler integration.
+    cfl : float, optional
+        Positive requested wave CFL, default 0.45. Explicit source and filter
+        stability bounds can further reduce the actual timestep.
+    initial_state : array_like, shape (N + 2, V), optional
+        Admissible full iteration state, defaulting to the model's initial guess.
+    max_steps : int, optional
+        Maximum accepted steps across all outputs, default 100000.
+
+    Returns
+    -------
+    list of Solution
+        Snapshots at requested times, stopping after the first failed output.
+        A failed snapshot records the time actually reached. Histories and
+        conservation budgets accumulate from the initial state.
+
+    Notes
+    -----
+    Timestep retries halve the attempted increment, with at most sixteen
+    attempts per accepted step. Each output checks physical admissibility,
+    finite diagnostics, boundary and cell-constraint defects, and any model
+    audit; spatial steady-state convergence is not required.
     """
     if getattr(model, "steady_only", False):
         raise ValueError("The selected model equation policy is steady-only; disable it for physical-time integration")

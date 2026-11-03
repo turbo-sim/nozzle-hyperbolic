@@ -11,6 +11,56 @@ from ..residuals import ResidualPolicy
 class Scheme:
     """Numerical choices with two independent Stadtke correction flags.
 
+    Parameters
+    ----------
+    reconstruction : str, optional
+        Piecewise-constant or named MUSCL reconstruction. Default is
+        ``"constant"``; see the model interface guide for supported limiters.
+    flux : str, optional
+        Numerical flux: ``"stadtke"`` (default), ``"rusanov"``, ``"hll"``,
+        ``"roe"``, ``"osher"`` or the model-owned ``"model_compatibility"``.
+        The model must supply the selected flux's required capabilities.
+    delta_factor : float, optional
+        Positive characteristic regularization coefficient, default 0.1.
+    newton_iterations : int, optional
+        Maximum Newton corrections per inner solve, default 10.
+    newton_backtracking : bool, optional
+        Enable Armijo backtracking for flow Newton corrections. Default False.
+    newton_update_tolerance : float, optional
+        Maximum scaled update for inner convergence, default 1e-10.
+        Zero disables this criterion.
+    newton_residual_tolerance : float, optional
+        Maximum scaled residual RMS for inner convergence, default 1e-12.
+        Zero disables this criterion; at least one criterion must remain active.
+    max_backtracks : int, optional
+        Maximum trial halvings after the initial Newton trial, default 20.
+    jacobian_mode : {"colored", "dense"}, optional
+        Automatic-differentiation assembly, default ``"colored"``.
+    linear_solver : {"banded", "dense"}, optional
+        Newton linear solver, default ``"banded"``. The banded solver requires
+        colored assembly; globally coupled boundaries require dense/dense.
+    time_integrator : str, optional
+        ``"euler-implicit"`` (default), ``"euler-explicit"``,
+        ``"runge-kutta-3"`` or ``"runge-kutta-4"``.
+    boundary_treatment : {"auto", "coupled", "segregated"}, optional
+        Algebraic trace solution strategy, default ``"auto"``. Auto selects
+        coupled implicit boundaries and segregated explicit stage boundaries.
+    filter_strength : float, optional
+        Nonnegative conservative fourth-difference coefficient, default zero.
+    smooth_limiter_coefficient : float, optional
+        Positive width coefficient for smooth Van Leer reconstruction,
+        default 1.0. Other reconstructions ignore this setting.
+    custom_jump_correction : bool, optional
+        Select conservative-jump Stadtke viscosity, default True.
+    custom_endpoint_envelope : bool, optional
+        Bound Stadtke viscosity by endpoint family speeds, default True.
+    quadrature_points : {3, 5, 9}, optional
+        Gauss nodes per Osher integration panel, default 5.
+    integration : {"gauss", "sonic_partitioned"}, optional
+        Osher path integration policy, default ``"gauss"``.
+
+    Notes
+    -----
     The default is corrected ``stadtke`` (both custom corrections enabled).
     ``custom_jump_correction`` replaces finite physical-flux-jump dissipation
     by mean-characteristic conservative-jump viscosity.
@@ -125,6 +175,31 @@ class Scheme:
 
 @dataclass(frozen=True)
 class SteadySettings:
+    """Fixed stopping policy and pseudo-time CFL controller settings.
+
+    Parameters
+    ----------
+    residual : ResidualPolicy, optional
+        Independent equation, boundary, constraint and global-balance targets.
+        A new default policy is created for each settings instance.
+    cfl : float, optional
+        Initial requested CFL, default 0.2.
+    cfl_growth : float, optional
+        Accepted-step multiplier, at least one; default 1.2.
+    cfl_shrink : float, optional
+        Rejected-step multiplier in the open interval (0, 1), default 0.5.
+    cfl_max : float, optional
+        Maximum requested CFL, default 1e6. Explicit steady integration also
+        caps the requested CFL at 0.45.
+    max_steps : int, optional
+        Maximum accepted pseudo-time steps, default 4000.
+    max_retries : int, optional
+        Additional attempts after the first trial of each step, default 14.
+    stagnation_steps : int, optional
+        Consecutive bitwise-unchanged accepted states before reporting
+        stagnation, default 12. Zero disables this check.
+    """
+
     residual: ResidualPolicy = field(default_factory=ResidualPolicy)
     cfl: float = 0.2
     cfl_growth: float = 1.2
@@ -165,6 +240,32 @@ class SteadySettings:
 
 @dataclass
 class Solution:
+    """Host-side state, outcome and diagnostics from a shared solver driver.
+
+    Attributes
+    ----------
+    state : numpy.ndarray, shape (N + 2, V)
+        Physical cell states with independent endpoint traces in the first
+        and last rows, using the model's iteration variables.
+    success : bool
+        Whether the driver's convergence or requested-time checks and any
+        configured model audit passed.
+    reason : str
+        Machine-readable termination reason.
+    history : list of dict
+        Initial/accepted states and rejected attempts recorded by the driver.
+        Rejected attempts do not advance the accepted-step count or time.
+    metrics : dict
+        Final equation, boundary, constraint and conservation diagnostics.
+    time : float
+        Reached physical time; zero for steady pseudo-time solves.
+    elapsed_s : float
+        Driver wall time in seconds. Includes compilation occurring inside the
+        timed solve; operator construction may occur before the timer starts.
+    operator : Operator or None
+        Bound spatial operator, retained for diagnostics and continuation.
+    """
+
     state: np.ndarray
     success: bool
     reason: str
@@ -176,7 +277,21 @@ class Solution:
 
 
 class TimestepInfo(NamedTuple):
-    """Actual dt and independent wave/source/filter limits, all in time units."""
+    """Timestep selection and its independent stability diagnostics.
+
+    Attributes
+    ----------
+    dt : jax.Array
+        Selected time increment after applying requested CFL and, for explicit
+        integration, combining wave, source and filter rates.
+    wave_dt : jax.Array
+        Wave time scale at unit CFL, before multiplication by requested CFL.
+        The actual accepted wave CFL is ``dt / wave_dt``.
+    source_dt, filter_dt : jax.Array
+        Absolute explicit source/filter limits, or infinity when inactive.
+    valid : jax.Array
+        Scalar boolean indicating valid completion and stability data.
+    """
 
     dt: Any
     wave_dt: Any

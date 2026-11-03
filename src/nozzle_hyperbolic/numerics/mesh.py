@@ -8,6 +8,34 @@ import numpy as np
 
 @dataclass(frozen=True)
 class Mesh:
+    """Fixed one-dimensional finite-volume geometry with read-only arrays.
+
+    Parameters
+    ----------
+    faces : array_like, shape (N + 1,)
+        Strictly increasing physical face coordinates, with at least two cells.
+    centers : array_like, shape (N,)
+        Cell coordinates strictly inside their corresponding face intervals.
+    volumes : array_like, shape (N,)
+        Positive physical control-volume measures, including cross section.
+    area_faces : array_like, shape (N + 1,)
+        Positive face measures applied once to unweighted numerical fluxes.
+    area_centers : array_like, shape (N,), optional
+        Positive physical cross sections used by model-specific geometry laws.
+    darea_centers : array_like, shape (N,), optional
+        Physical area derivatives at cell centers.
+    area_derivative_integrals : array_like, shape (N,), optional
+        Integrated physical area derivatives for geometric source assembly.
+    geometry : object, optional
+        Opaque model geometry metadata; not interpreted by the shared engine.
+
+    Notes
+    -----
+    Coordinate and measure arrays are copied to finite host float arrays and
+    marked read-only at construction. Geometry preprocessing is host-side;
+    differentiation through mesh construction is not provided.
+    """
+
     faces: np.ndarray
     centers: np.ndarray
     volumes: np.ndarray
@@ -60,12 +88,15 @@ class Mesh:
 
     @property
     def n_cells(self):
+        """int: Number of physical cells, excluding endpoint traces."""
         return len(self.centers)
 
     @property
     def widths(self):
+        """numpy.ndarray: Face-to-face cell widths, shape ``(N,)``."""
         return np.diff(self.faces)
 
     @property
     def points(self):
+        """numpy.ndarray: Endpoint/center coordinates, shape ``(N + 2,)``."""
         return np.r_[self.faces[0], self.centers, self.faces[-1]]

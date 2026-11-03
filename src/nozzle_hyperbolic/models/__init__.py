@@ -1,1 +1,1 @@
-"""Euler/scalar physical models, closure laws, and the deferred legacy two-fluid model."""
+"""Euler, scalar and constrained two-fluid models and physical closure laws."""

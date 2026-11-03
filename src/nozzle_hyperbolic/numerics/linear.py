@@ -1,4 +1,4 @@
-"""Unchanged definitions relocated from the TwoFluid solver modules."""
+"""Equilibrated local solves and model-independent block-banded elimination."""
 import operator
 
 import jax

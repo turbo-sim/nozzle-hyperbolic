@@ -3,7 +3,7 @@
 The caller supplies physical endpoint fluxes in one common face frame. Models
 own conservative storage, characteristic projectors/speeds, thermodynamics and
 an optional ``face_state_path(left, right, parameter)``. The default is affine
-in reconstruction variables, not silently affine in conservative variables.
+in the supplied face-state variables, rather than in conserved densities.
 
 Fixed Gauss rules are approximations, not scalar entropy or system monotonicity
 theorems. Sonic partitioning captures sign-changing brackets of lambda and

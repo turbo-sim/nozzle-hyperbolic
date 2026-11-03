@@ -176,13 +176,12 @@ def _superbee(a, b):
 
 
 def _van_albada(a, b):
-    """Van Albada limiter — smooth and differentiable everywhere (no hard sign test).
-    Combines minmod (low compression) and superbee (high compression) properties:
-    reduces to minmod for |a|<<|b| and to superbee for |a|≈|b|.
-    σ = (a²b + ab²) / (a² + b² + ε)
-    JAX autodiff works correctly through this limiter, making it preferable
-    for Newton solvers where the Jacobian must be accurate near discontinuities.
-    This matches the limiter described by Städtke (2006) §8.4, Eq. 8.37."""
+    """Retained ungated NumPy Van Albada formula for historical callers.
+
+    This helper uses NumPy arrays and a fixed denominator offset. The shared
+    JAX path uses :func:`van_albada`, with an explicit extrema gate and safe
+    normalization; the two formulas have different behavior at extrema.
+    """
     return (a**2 * b + a * b**2) / (a**2 + b**2 + 1e-300)
 
 
