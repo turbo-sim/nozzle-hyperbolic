@@ -200,8 +200,8 @@ There are **4** configurations with a numerical, branch, accuracy, timeout or as
 
 ```powershell
 poetry run python -B -m development.roe_method.scripts.audit_steady --input "development/roe_method/outputs/roe_steady_verification/summary.json"
-poetry run python -B -m development.roberto.benchmarking.scripts.report --input 'development/roe_method/outputs/roe_steady_verification/summary.json' --roe-audit 'development/roe_method/outputs/roe_audit.json' --roe-sod 'development/roe_method/outputs/roe_transient.json' --roe-real-gas 'development/roe_method/outputs/real_gas_summary.json' --roe-sod-figure 'development/roe_method/outputs/figures/sod_final_profiles.png' --output 'development/roe_method/REPORT.html'
-poetry run python -B -m development.roberto.benchmarking.scripts.audit_report --input 'development/roe_method/REPORT.html'
+poetry run python -B -m development.historical.benchmarking.scripts.report --input 'development/roe_method/outputs/roe_steady_verification/summary.json' --roe-audit 'development/roe_method/outputs/roe_audit.json' --roe-sod 'development/roe_method/outputs/roe_transient.json' --roe-real-gas 'development/roe_method/outputs/real_gas_summary.json' --roe-sod-figure 'development/roe_method/outputs/figures/sod_final_profiles.png' --output 'development/roe_method/REPORT.html'
+poetry run python -B -m development.historical.benchmarking.scripts.audit_report --input 'development/roe_method/REPORT.html'
 ```
 
-Report rebuilding and this summary generator read saved evidence only. They do not advance the solver. The study was moved from `development/roberto/roe_method` to `development/roe_method` after validation; paths and hashes inside original numerical records retain their measurement-time values. Resume checks intentionally reject a changed client or harness; use a new output directory for new campaigns.
+Report rebuilding and this summary generator read saved evidence only. They do not advance the solver. The study was moved from `development/historical/roe_method` to `development/roe_method` after validation; paths and hashes inside original numerical records retain their measurement-time values. Resume checks intentionally reject a changed client or harness; use a new output directory for new campaigns.

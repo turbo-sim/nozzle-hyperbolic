@@ -452,12 +452,12 @@ def render(campaign, audit, tests, campaign_path, *, sod=None, sod_path=None, so
               "- Final numerical evidence is embedded in `REPORT.html`; restore it with `scripts.restore_evidence` before rebuilding after cloning.",
               "- Read the [Roe-only verification profile](verification_profile.yaml), [full timing profile](benchmark_profile.yaml), [implemented theory](roe_theory.md) and [benchmark protocol](benchmark_protocol.md) for exact conventions.", "",
               "```powershell",
-              (f'poetry run python -B -m development.flux_methods.roe.scripts.audit_steady --input "{campaign_path.as_posix()}"' if verification_only else f'poetry run python -B -m development.roberto.benchmarking.scripts.audit --input "{campaign_path.as_posix()}"'),
-              report_html_command or f'poetry run python -B -m development.roberto.benchmarking.scripts.report --input "{campaign_path.as_posix()}" --roe-audit development/flux_methods/roe/outputs/roe_audit.json --output development/flux_methods/roe/REPORT.html',
-              report_audit_command or "poetry run python -B -m development.roberto.benchmarking.scripts.audit_report --input development/flux_methods/roe/REPORT.html",
+              (f'poetry run python -B -m development.flux_methods.roe.scripts.audit_steady --input "{campaign_path.as_posix()}"' if verification_only else f'poetry run python -B -m development.historical.benchmarking.scripts.audit --input "{campaign_path.as_posix()}"'),
+              report_html_command or f'poetry run python -B -m development.historical.benchmarking.scripts.report --input "{campaign_path.as_posix()}" --roe-audit development/flux_methods/roe/outputs/roe_audit.json --output development/flux_methods/roe/REPORT.html',
+              report_audit_command or "poetry run python -B -m development.historical.benchmarking.scripts.audit_report --input development/flux_methods/roe/REPORT.html",
               "```", "",
               "Report rebuilding and this summary generator read saved evidence only. They do not advance the solver. "
-              "The study was moved from `development/roberto/roe_method` to `development/roe_method` after validation; "
+              "The study was moved from `development/historical/roe_method` to `development/roe_method` after validation; "
               "paths and hashes inside original numerical records retain their measurement-time values. "
               "Resume checks intentionally reject a changed client or harness; use a new output directory for new campaigns.", ""]
     return "\n".join(lines)
@@ -502,7 +502,7 @@ def main():
         try:path=path.relative_to(STUDY.parents[2])
         except ValueError:pass
         return "'"+path.as_posix().replace("'","''")+"'"
-    command="poetry run python -B -m development.roberto.benchmarking.scripts.report --input "+quoted(args.campaign)+" --roe-audit "+quoted(args.audit)
+    command="poetry run python -B -m development.historical.benchmarking.scripts.report --input "+quoted(args.campaign)+" --roe-audit "+quoted(args.audit)
     if sod is not None:command+=" --roe-sod "+quoted(sod_path)
     if real_gas is not None:command+=" --roe-real-gas "+quoted(real_gas_path)
     if figure_file is not None:command+=" --roe-sod-figure "+quoted(figure_file)
@@ -525,7 +525,7 @@ def main():
                   real_gas_link_prefix=os.path.relpath(STUDY/"outputs",args.output.parent).replace("\\","/")+"/",
                   shock_diagnostic=shock,shock_diagnostic_link=os.path.relpath(shock_path.with_suffix('.md'),args.output.parent).replace("\\","/") if shock is not None else None,
                   report_html_command=command,
-                  report_audit_command="poetry run python -B -m development.roberto.benchmarking.scripts.audit_report --input "+quoted(args.output.with_name("REPORT.html")))
+                  report_audit_command="poetry run python -B -m development.historical.benchmarking.scripts.audit_report --input "+quoted(args.output.with_name("REPORT.html")))
     args.output.parent.mkdir(parents=True,exist_ok=True)
     args.output.write_text(text, encoding="utf-8", newline="\n")
     print(f"Wrote {args.output}")

@@ -125,5 +125,5 @@ when extending a hierarchy through `initial_solution`.
 Stage metadata retains the policy, starting CFL and last accepted CFL; failed
 warm attempts retain their own starting CFL. Physical-parameter continuation
 retains its separate existing CFL policy. The small
-[HLL shock study](../../development/roberto/cfl_carryover/RESULTS.md) motivated this
+[HLL shock study](../../development/historical/cfl_carryover/RESULTS.md) motivated this
 grid-sequence default; it does not establish a universal speedup.

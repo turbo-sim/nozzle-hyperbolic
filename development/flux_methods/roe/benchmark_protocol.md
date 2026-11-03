@@ -3,7 +3,7 @@
 This is the executable protocol for the implemented Roe method. The physical
 cases come from `nozzle_hyperbolic.verification`; the shared runner, assessment,
 auditor and offline renderer live in
-[`development/roberto/benchmarking`](../../roberto/benchmarking/README.md).
+[`development/historical/benchmarking`](../../historical/benchmarking/README.md).
 No solver, geometry or analytical reference is copied into this study.
 
 The completed evidence contains **160 untimed Roe configurations**. All 160
@@ -133,9 +133,9 @@ For the full four-flux campaign, use an idle machine and a fresh output name.
 The shared runner contains its outputs within the maintained benchmark study:
 
 ```powershell
-poetry run python -B -u -m development.roberto.benchmarking.scripts.run --config development/flux_methods/roe/benchmark_profile.yaml --output outputs/roe_flux_v1 --wait-for-idle
-poetry run python -B -m development.roberto.benchmarking.scripts.audit --input outputs/roe_flux_v1/summary.json
-poetry run python -B -m development.roberto.benchmarking.scripts.report --input development/roberto/benchmarking/outputs/roe_flux_v1/summary.json --output development/flux_methods/roe/REPORT.html
+poetry run python -B -u -m development.historical.benchmarking.scripts.run --config development/flux_methods/roe/benchmark_profile.yaml --output outputs/roe_flux_v1 --wait-for-idle
+poetry run python -B -m development.historical.benchmarking.scripts.audit --input outputs/roe_flux_v1/summary.json
+poetry run python -B -m development.historical.benchmarking.scripts.report --input development/historical/benchmarking/outputs/roe_flux_v1/summary.json --output development/flux_methods/roe/REPORT.html
 ```
 
 Add `--resume` to the run command only when the recorded identities match.

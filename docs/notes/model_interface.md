@@ -450,9 +450,9 @@ the actual integrator-consistent numerical flux budget for conservation checks.
 sonic and fully outgoing traces during a transient. Acoustic auto treatment
 uses EOS-based entropy/compatibility and a pressure/sonic complementarity
 constraint. A 100:1 initial pressure release is a large finite wave; the
-new [transient study](../../development/roberto/transient_problems/README.md)
-uses the permitted perfect-gas finite-wave outlet for that case. The physical
-outlet law is held fixed while comparing numerical boundary treatments.
+[transient-nozzle demo](../../demos/nozzle_transient/README.md) uses the
+permitted perfect-gas finite-wave outlet for that case. Coupled and segregated
+treatments solve the same physical boundary equations, as checked in `tests/`.
 
 The integrated [two-fluid model](two_fluid_migration.md) uses this constrained
 contract and its explicitly identified compatibility discretization. Interface

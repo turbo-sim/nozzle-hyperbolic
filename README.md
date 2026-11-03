@@ -55,8 +55,9 @@ still reject the timestep, and strict inner convergence remains required.
 `Scheme.boundary_treatment` selects coupled or segregated implicit boundaries;
 explicit methods use segregated stage solves. The default `auto` preserves the
 integrator's established treatment. The
-[transient comparison](development/roberto/transient_problems/README.md)
-includes Sod and nozzle pressure-release animations. Steady verification and
+[shock-tube demo](demos/shock_tube/README.md) and
+[transient-nozzle demo](demos/nozzle_transient/README.md) provide standalone
+examples and animations. Steady verification and
 runtime regression monitoring live in
 [`development/benchmark_production/`](development/benchmark_production/README.md).
 
@@ -87,8 +88,8 @@ describes the supported choices. The [model interface](docs/notes/model_interfac
 and [migration guide](docs/notes/migration.md) explain extensions and breaking changes.
 
 ```powershell
-poetry run python -B -m development.roberto.benchmarking.scripts.run
-poetry run python -B -m development.roberto.benchmarking.scripts.report
+poetry run python -B -m development.historical.benchmarking.scripts.run
+poetry run python -B -m development.historical.benchmarking.scripts.report
 ```
 
 

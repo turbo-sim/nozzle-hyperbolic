@@ -18,8 +18,8 @@ All development work is grouped under this single directory:
 - [BC_backpressure/](BC_backpressure/README.md): acoustic and general-EOS
   finite-wave pressure outlets, stagnant/adapted initialization and shocked
   nozzle, annular and CO2 target cases.
-- [roberto/](roberto/README.md): current Euler verification examples, numerical
-  fixes, Newton/PTC, implicit-integration and boundary-condition studies.
+- [historical/](historical/README.md): retained sensitivity, CFL carryover
+  and local-timestep studies.
 - [benchmark_production/](benchmark_production/README.md): production flux and
   grid-sequencing comparisons on 400 cells, with 50/100/200-cell coarse grids
   and separate fixed-work component timings.
@@ -29,18 +29,19 @@ The implemented shared solver's residual definitions, convergence policy and
 monitoring API are documented in
 [residual monitoring](../docs/notes/residual_monitoring.md).
 
-Roberto's [study index](roberto/README.md) lists the retained sensitivity and
-transient studies. The retired nozzle and annular example folders and their
+The [historical study index](historical/README.md) lists retained numerical
+investigations. The [standalone demos](../demos/README.md) contain the Sod and
+nozzle pressure-release examples; the old transient comparison has been removed. The retired nozzle and annular example folders and their
 saved evidence have been removed; their physical cases live in the installed
 verification catalogue.
 
-New controlled studies belong under `roberto/<study>/`, with human-facing
+New controlled studies belong under `development/<study>/`, with human-facing
 notes at the study root, code in `scripts/` and generated data in `outputs/`.
 Run from the repository root in the existing project environment, for example:
 
 ```powershell
-poetry run python -B -m development.roberto.sensitivity_backpressure.scripts.run_sweep --help
-poetry run python -B -m development.roberto.sensitivity_CFL_settings.scripts.compare_settings --help
+poetry run python -B -m development.historical.sensitivity_backpressure.scripts.run_sweep --help
+poetry run python -B -m development.historical.sensitivity_CFL_settings.scripts.compare_settings --help
 ```
 
 Study READMEs describe current commands and distinguish recorded campaigns

@@ -16,6 +16,21 @@ the final theory, verification evidence and clients of the maintained benchmark.
 | [evidence/](evidence/) | Final production pytest log and JUnit record |
 | [scripts/](scripts/) | Verification, saved-data analysis and report-generation clients; no copied production solver |
 
+## Sod client check during the historical-directory cleanup
+
+On 3 November 2026, the Sod verification client became self-contained when the
+old transient study was removed. Physical inputs, method selections, meshes,
+initial states, scales and output times match the previous fixture exactly.
+The 50-cell Roe/RK3 run gives identical final states, analytical errors and
+budgets with the original and replacement setup.
+
+Both runs reach the requested time and have a numerical conservation defect of
+about $1.3\times10^{-15}$. Both fail the existing analytical-budget check: its
+assumption of zero mass/energy boundary exchange and exact constant momentum
+transfer gives a maximum normalized defect of about $2.65\times10^{-7}$, above
+the $10^{-8}$ criterion. That criterion is unchanged; this is a reproduced
+pre-existing verification failure. The saved broader campaign was not rerun.
+
 ## What has been demonstrated
 
 - **160/160** cold steady solves converged and passed independent original
@@ -40,7 +55,7 @@ Run commands from the repository root in the existing Poetry environment:
 ```powershell
 poetry run python -B -m development.flux_methods.roe.scripts.restore_evidence
 poetry run python -B -m development.flux_methods.roe.scripts.report --presentation-only
-poetry run python -B -m development.roberto.benchmarking.scripts.audit_report --input development/flux_methods/roe/REPORT.html
+poetry run python -B -m development.historical.benchmarking.scripts.audit_report --input development/flux_methods/roe/REPORT.html
 ```
 
 The committed HTML intentionally embeds the final numerical evidence: it is
@@ -52,7 +67,7 @@ HTML, Markdown assessment, refinement audit and difficult-shock work diagnosis.
 No flow solver is imported or advanced by these presentation commands.
 
 Production source was frozen during the validation campaign. This study was
-subsequently moved from `development/roberto/roe_method` to
+subsequently moved from `development/historical/roe_method` to
 `development/roe_method`, then to `development/flux_methods/roe`. Paths, source fingerprints and executed-command strings
 inside original evidence retain their measurement-time values. The relocated
 clients record their own new identities on a future run; historical campaigns
@@ -79,7 +94,7 @@ poetry run python -B -m development.flux_methods.roe.scripts.verify_sod --output
 poetry run python -B -m development.flux_methods.roe.scripts.verify_real_gas --cells 25 --output development/flux_methods/roe/outputs/new_real_gas_25
 
 # Full four-flux timing matrix: requires an idle machine and many complete solves.
-poetry run python -B -u -m development.roberto.benchmarking.scripts.run --config development/flux_methods/roe/benchmark_profile.yaml --output outputs/roe_flux_v1 --wait-for-idle
+poetry run python -B -u -m development.historical.benchmarking.scripts.run --config development/flux_methods/roe/benchmark_profile.yaml --output outputs/roe_flux_v1 --wait-for-idle
 ```
 
 See [benchmark_protocol.md](benchmark_protocol.md) for the exact population,
@@ -87,7 +102,7 @@ excluded warmups, repeat counts, independent checks and report command for a
 new timing campaign. Physical YAML definitions and analytical references are
 loaded through [the installed verification API](../../../src/nozzle_hyperbolic/verification/README.md);
 they are not duplicated here. The shared runner and HTML assets remain in
-[the maintained benchmark](../../roberto/benchmarking/README.md).
+[the maintained benchmark](../../historical/benchmarking/README.md).
 
 ## Production ownership
 

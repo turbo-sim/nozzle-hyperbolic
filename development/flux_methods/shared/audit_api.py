@@ -31,7 +31,7 @@ def main():
                     old_imports.append(dict(file=path.relative_to(ROOT).as_posix(),line=node.lineno,module=name))
         checked.append(path.relative_to(ROOT).as_posix())
     baseline_profiles={}
-    for name in ("development/roberto/benchmarking/settings.yaml","development/flux_methods/roe/benchmark_profile.yaml"):
+    for name in ("development/historical/benchmarking/settings.yaml","development/flux_methods/roe/benchmark_profile.yaml"):
         config=yaml.safe_load((ROOT/name).read_text(encoding="utf-8-sig"))
         baseline_profiles[name]=dict(flux=config["scheme"].get("flux"),fluxes=config.get("fluxes"),
              custom_jump_correction=config["scheme"]["custom_jump_correction"],

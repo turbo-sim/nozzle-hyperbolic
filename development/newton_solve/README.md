@@ -10,7 +10,7 @@ agreement with the continuous analytical reference.
 See [RESULTS.md](RESULTS.md) for the measured outcomes and their interpretation.
 
 The implementation and results live in `development/newton_solve`. The previous
-study in `development/roberto/historical/newton_solve` is retained untouched.
+study in `development/historical/historical/newton_solve` is retained untouched.
 This study does not modify `src/` or use a historical solver adapter.
 
 ## Controlled comparison

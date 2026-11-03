@@ -12,7 +12,7 @@ solver has now been deleted. Use the [current two-fluid guide](../../docs/notes/
 Migrating these historical drivers requires an explicit update to their solver
 API and configuration handling, rather than restoring the removed solver.
 
-These files predate the controlled studies in `development/roberto/`. They have
+These files predate the controlled studies in `development/historical/`. They have
 been grouped by topic without changing their numerical algorithms or original
 configuration values. Start with the [execution audit](RUN_REPORT.md), which
 lists every program/helper and all configurations, including failures, time

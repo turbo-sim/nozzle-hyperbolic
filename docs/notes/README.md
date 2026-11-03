@@ -39,8 +39,8 @@ Other material has an explicit role:
   consult the current model interface for production storage and numerical APIs.
 - [Flux studies](../../development/flux_methods/README.md),
   [steady benchmarks](../../development/benchmark_production/README.md) and
-  [transient studies](../../development/roberto/transient_problems/README.md)
-  own their numerical profiles, saved results and report-generation scripts.
+  [transient demos](../../demos/README.md) own their numerical profiles,
+  saved results and output-generation scripts.
 
 Keep user-facing documentation in `../source/`, repository notes here, proposals
 in `proposals/`, and dated audits in `archive/`. Put experiment-specific evidence

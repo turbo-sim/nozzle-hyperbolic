@@ -19,7 +19,7 @@ import re
 STUDY = Path(__file__).resolve().parents[1]
 REPO = STUDY.parents[1]
 ASSETS = Path(__file__).resolve().parent / "report_assets"
-PLOTLY = REPO / "development/roberto/benchmarking/scripts/report_assets/vendor/plotly-2.35.2.min.js.gz"
+PLOTLY = REPO / "development/historical/benchmarking/scripts/report_assets/vendor/plotly-2.35.2.min.js.gz"
 
 
 def _clean(value):

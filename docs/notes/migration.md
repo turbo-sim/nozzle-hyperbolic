@@ -80,8 +80,8 @@ for versioned physical YAML cases and independent analytical projections. Meshes
 fluxes, integrators, tolerances and repeat counts belong to numerical profiles.
 The [steady benchmark](../../development/benchmark_production/README.md),
 [flux studies](../../development/flux_methods/README.md) and
-[transient study](../../development/roberto/transient_problems/README.md) call the
-production source. Their reports state actual completed coverage and limitations.
+[transient demos](../../demos/README.md) call the production source. Their
+documentation states the covered problems and limitations.
 The former `generic_interface_v3` directory is not a current entry point.
 
 The frozen implementation archive and its dependent tests have been removed.

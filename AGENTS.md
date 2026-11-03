@@ -14,9 +14,10 @@ The user's current scope and corrections take precedence over these conventions.
   environment changes. A structural refactor preserves numerical behavior and
   function bodies; fluxes, closures, tolerances, initialization and defaults are
   separate numerical changes requiring explicit scope and review.
-- Keep experiments under `development/`, normally `development/roberto/` for a
-  new controlled study. Preserve established thematic folders. Do not silently
-  add experimental hooks or change defaults in `src/`.
+- Keep new experiments in descriptively named folders under `development/`.
+  Retained earlier studies live under `development/historical/`. Preserve
+  established thematic folders. Do not silently add experimental hooks or
+  change defaults in `src/`.
 - Complete authorized implementation and appropriate verification; ask only
   for genuinely missing decisions. NozzleX integration, additional model ports,
   publishing and releases are separate work unless requested.

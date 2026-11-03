@@ -14,12 +14,13 @@ runner-specific timing and resume rules.
 
 ## Organize a numerical study
 
-New controlled studies normally use `development/roberto/<study>/`. Preserve
+New controlled studies use descriptively named `development/<study>/` folders.
+Retained earlier investigations live in `development/historical/`. Preserve
 existing thematic collections such as `development/flux_methods/` and their
 shared infrastructure. Use the established names in an existing study:
 
 ```text
-development/roberto/<study>/
+development/<study>/
   README.md                  question, physical setup, controlled settings, commands
   <topic>_NOTES.md            equations, interpretation, design discussion as needed
   <topic>_REPORT.md           findings with embedded relative figure links
