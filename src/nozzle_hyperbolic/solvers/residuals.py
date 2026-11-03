@@ -22,6 +22,7 @@ class ResidualPolicy:
     absolute_tolerance: float = 1e-9
     boundary_tolerance: float = 1e-9
     global_tolerance: float = 1e-9
+    constraint_tolerance: float = 1e-9
     initial_floor: float = 1e-14
     criterion: str = "either"
 
@@ -37,6 +38,7 @@ class ResidualPolicy:
             "absolute_tolerance",
             "boundary_tolerance",
             "global_tolerance",
+            "constraint_tolerance",
         ):
             if not math.isfinite(getattr(self, name)) or getattr(self, name) <= 0:
                 raise ValueError(f"{name} must be finite and positive")

@@ -3,11 +3,12 @@
 This module knows neither Euler variables nor an EOS. Model callbacks supply
 physical fluxes, characteristic frames, sources, boundary equations and domain.
 
-The supported contract is a square conservative balance system on fixed cells,
-with one independent state trace at each endpoint. Arrays are cell-major:
-``full=(n+2,v)``, physical cells ``(n,v)``, face states/fluxes ``(n+1,v)``, and
-scaled algebraic boundary rows ``(2,v)``. The model's iteration variables are
-also its reconstruction variables. Callbacks must be JAX traceable.
+The supported contract has t transported balances and c algebraic cell rows
+in v=t+c variables, with independent endpoint traces. Arrays are cell-major:
+``full=(n+2,v)``, physical cells ``(n,v)``, transported fluxes ``(n+1,t)``, and
+scaled algebraic boundary rows ``(2,v)``. Reconstruction can use a model-owned
+local representation map. Callbacks must be JAX traceable. Nonconservative
+compatibility callbacks consume the raw flux before additional stabilization.
 
 ``cell_conserved`` returns densities per physical volume. Face conserved states,
 physical fluxes and optional characteristic projectors use one model-owned face
@@ -71,19 +72,46 @@ class Operator:
         self.model, self.mesh, self.scheme = model, model.mesh, scheme
         self.effective_boundary_treatment = scheme.effective_boundary_treatment
         n, nvar = model.mesh.n_cells, model.nvar
+        ntransport = getattr(model, "ntransport", nvar)
+        nconstraints = getattr(model, "nconstraints", 0)
+        nboundary = getattr(model, "nboundary", nvar)
         if (
             isinstance(nvar, bool)
             or not isinstance(nvar, (int, np.integer))
             or nvar < 1
-            or len(model.equation_names) != nvar
+            or any(isinstance(k, bool) or not isinstance(k, (int, np.integer))
+                   for k in (ntransport, nconstraints, nboundary))
+            or ntransport < 1 or nconstraints < 0
+            or ntransport + nconstraints != nvar or nboundary != nvar
+            or len(model.equation_names) != ntransport
         ):
             raise ValueError(
-                "A model must declare its positive equation count and names"
+                "Require nvar = ntransport + nconstraints, nboundary = nvar, and transported equation names"
             )
-        if getattr(model, "n_equations", nvar) != nvar:
+        if getattr(model, "n_equations", ntransport) != ntransport:
             raise ValueError(
-                "The current conservative interface requires a square system"
+                "n_equations, when supplied, must equal ntransport"
             )
+        self.ntransport, self.nconstraints = ntransport, nconstraints
+        # Old external conservative models retain their square contract. Every
+        # packaged model explicitly declares its nonconservative capability.
+        nc_mode = getattr(model, "nonconservative_mode", "none")
+        if nc_mode not in ("none", "flux_difference"):
+            raise ValueError("Unsupported nonconservative_mode")
+        if nc_mode != "none" and not hasattr(model, "supported_fluxes"):
+            raise ValueError("Nonconservative models must explicitly declare supported_fluxes")
+        if hasattr(model, "supported_fluxes") and scheme.flux not in model.supported_fluxes:
+            raise ValueError(f"Flux {scheme.flux!r} is not supported by this model; use {model.supported_fluxes}")
+        compatibility_flux = scheme.flux == "model_compatibility"
+        equation_policy = getattr(model, "transform_cell_equations", None)
+        self.equation_policy_active = bool(getattr(model, "has_equation_pins", equation_policy is not None))
+        if self.equation_policy_active and scheme.time_integrator != "euler-implicit":
+            raise ValueError("Active equation-changing policies require implicit integration; explicit content recovery cannot impose replaced balances")
+        if compatibility_flux and not callable(getattr(model, "numerical_face_flux", None)):
+            raise ValueError("model_compatibility requires numerical_face_flux")
+        validate_scheme = getattr(model, "validate_scheme", None)
+        if validate_scheme is not None:
+            validate_scheme(scheme)
         radius = (
             1
             if scheme.reconstruction == "constant" and scheme.filter_strength == 0
@@ -98,6 +126,19 @@ class Operator:
             ):
                 raise ValueError(f"Model must declare a nonnegative integer {name}")
             radius = max(radius, int(value))
+        for name, required in (
+            ("nonconservative_dependency_radius", nc_mode != "none"),
+            ("stabilization_dependency_radius", callable(getattr(model, "stabilization_flux", None))),
+            ("equation_dependency_radius", equation_policy is not None),
+        ):
+            if required:
+                value = getattr(model, name, None)
+                if isinstance(value, bool) or not isinstance(value, (int, np.integer)) or value < 0:
+                    raise ValueError(f"Model must declare a nonnegative integer {name}")
+                # A raw-face-flux dependency reaches one additional state
+                # block under MUSCL. Do not discard these columns in coloring.
+                extra = int(scheme.reconstruction != "constant") if name != "equation_dependency_radius" else 0
+                radius = max(radius, int(value) + extra)
         coupling = getattr(model, "boundary_coupling", None)
         if coupling not in ("local", "global"):
             raise ValueError("Model must declare boundary_coupling='local' or 'global'")
@@ -110,12 +151,27 @@ class Operator:
         self.radius = min(radius, n + 1)
         for name in ("conservative_scales", "variable_scales", "global_flux_scales"):
             values = np.asarray(getattr(model, name))
-            if values.shape != (nvar,) or not np.all(
+            size = nvar if name == "variable_scales" else ntransport
+            if values.shape != (size,) or not np.all(
                 np.isfinite(values) & (values > 0)
             ):
                 raise ValueError(
                     f"{name} must be one positive finite scale per equation"
                 )
+        if nconstraints:
+            scales = np.asarray(getattr(model, "constraint_scales", None))
+            if scales.shape != (nconstraints,) or not np.all(np.isfinite(scales) & (scales > 0)):
+                raise ValueError("constraint_scales must be fixed positive finite scales")
+            if len(getattr(model, "constraint_names", ())) != nconstraints:
+                raise ValueError("Each cell constraint needs a name")
+        if hasattr(model, "invariant_projections"):
+            projection = np.asarray(model.invariant_projections)
+            labels = tuple(getattr(model, "invariant_names", ()))
+            scales = np.asarray(getattr(model, "invariant_flux_scales", None))
+            if (projection.shape != (len(labels), ntransport) or not len(labels)
+                or not np.all(np.isfinite(projection)) or scales.shape != (len(labels),)
+                or not np.all(np.isfinite(scales) & (scales > 0))):
+                raise ValueError("Invariant projections require finite (invariants,transport) data, names and positive fixed flux scales")
         if not np.isfinite(model.reference_time) or model.reference_time <= 0:
             raise ValueError("Positive fixed reference time required")
         fused_data = callable(getattr(model, "face_data", None))
@@ -156,6 +212,7 @@ class Operator:
         full_abstract = jax.ShapeDtypeStruct(self.shape, dtype)
         cell_abstract = jax.ShapeDtypeStruct((n, nvar), dtype)
         face_abstract = jax.ShapeDtypeStruct((n + 1, nvar), dtype)
+        flux_abstract = jax.ShapeDtypeStruct((n + 1, ntransport), dtype)
 
         def shape_of(name, *args):
             callback = getattr(model, name, None)
@@ -168,12 +225,31 @@ class Operator:
                 raise ValueError(f"{name} must return shape {expected}")
 
         for name, arg, expected in (
-            ("cell_conserved", cell_abstract, (n, nvar)),
-            ("flux_to_conserved_frame", face_abstract, (n + 1, nvar)),
-            ("integrated_source", full_abstract, (n, nvar)),
+            ("cell_conserved", cell_abstract, (n, ntransport)),
+            ("flux_to_conserved_frame", flux_abstract, (n + 1, ntransport)),
+            ("integrated_source", full_abstract, (n, ntransport)),
             ("wave_speed", cell_abstract, (n,)),
         ):
             require_shape(shape_of(name, arg), expected, name)
+        if nconstraints:
+            require_shape(shape_of("cell_constraints", cell_abstract), (n, nconstraints), "cell_constraints")
+        if nc_mode != "none":
+            require_shape(shape_of("integrated_nonconservative", full_abstract, flux_abstract),
+                          (n, ntransport), "integrated_nonconservative")
+        if callable(getattr(model, "stabilization_flux", None)):
+            require_shape(shape_of("stabilization_flux", full_abstract, flux_abstract),
+                          (n + 1, ntransport), "stabilization_flux")
+        if compatibility_flux:
+            require_shape(jax.eval_shape(lambda l, r: model.numerical_face_flux(l, r, scheme),
+                                         face_abstract, face_abstract),
+                          (n + 1, ntransport), "numerical_face_flux")
+        if equation_policy is not None:
+            rows = jax.ShapeDtypeStruct((n, ntransport), dtype)
+            require_shape(jax.eval_shape(equation_policy, full_abstract, rows, None),
+                          (n, ntransport), "transform_cell_equations steady")
+            require_shape(jax.eval_shape(equation_policy, full_abstract, rows,
+                                         jax.ShapeDtypeStruct((), dtype)),
+                          (n, ntransport), "transform_cell_equations implicit")
 
         def require_bounds(bounds):
             if not isinstance(bounds, (tuple, list)) or len(bounds) != 2:
@@ -190,14 +266,14 @@ class Operator:
                 raise ValueError(
                     f"face_data must return a dict containing {sorted(required)}"
                 )
-            require_shape(data["conserved"], (n + 1, nvar), "face_data conserved")
+            require_shape(data["conserved"], (n + 1, ntransport), "face_data conserved")
             require_shape(
-                data["physical_flux"], (n + 1, nvar), "face_data physical_flux"
+                data["physical_flux"], (n + 1, ntransport), "face_data physical_flux"
             )
             require_bounds(data["speed_bounds"])
-        else:
+        elif not compatibility_flux:
             for name in ("face_conserved", "face_physical_flux"):
-                require_shape(shape_of(name, face_abstract), (n + 1, nvar), name)
+                require_shape(shape_of(name, face_abstract), (n + 1, ntransport), name)
             if scheme.flux in ("rusanov", "hll"):
                 require_bounds(shape_of("face_speed_bounds", face_abstract))
         require_shape(
@@ -210,14 +286,14 @@ class Operator:
         boundary_flux = getattr(model, "boundary_face_flux", None)
         if boundary_flux is not None:
             require_shape(
-                shape_of("boundary_face_flux", full_abstract, face_abstract),
-                (n + 1, nvar),
+                shape_of("boundary_face_flux", full_abstract, flux_abstract),
+                (n + 1, ntransport),
                 "boundary_face_flux",
             )
         if scheme.filter_strength > 0:
             require_shape(
                 shape_of("filter_conserved", full_abstract),
-                self.shape,
+                (n + 2, ntransport),
                 "filter_conserved",
             )
             require_shape(
@@ -269,7 +345,7 @@ class Operator:
             require_shape(width, eigenvalues.shape, "characteristic width")
             require_shape(
                 projectors,
-                (*eigenvalues.shape, nvar, nvar),
+                (*eigenvalues.shape, ntransport, ntransport),
                 "characteristic projectors",
             )
         if osher is not None and getattr(model, "face_state_path", None) is not None:
@@ -312,7 +388,7 @@ class Operator:
                 raise ValueError("Roe eigenvalues must return (faces,waves)")
             require_shape(
                 roe_shapes["projectors"],
-                (*eigenvalues.shape, nvar, nvar),
+                (*eigenvalues.shape, ntransport, ntransport),
                 "Roe projectors",
             )
             require_shape(roe_shapes["width"], eigenvalues.shape, "Roe widths")
@@ -330,15 +406,37 @@ class Operator:
         content_scale = volumes[:, None] * qscale
         reference_time = float(model.reference_time)
 
+        reconstruction_state = getattr(model, "reconstruction_state", None)
+        reconstruction_inverse = getattr(model, "from_reconstruction_state", None)
+        reconstruction_scales = model.variable_scales
+        if reconstruction_state is not None or reconstruction_inverse is not None:
+            if not callable(reconstruction_state) or not callable(reconstruction_inverse):
+                raise ValueError("Reconstruction representation requires both forward and inverse callbacks")
+            mapped = jax.eval_shape(reconstruction_state, full_abstract)
+            if len(mapped.shape) != 2 or mapped.shape[0] != n + 2:
+                raise ValueError("reconstruction_state must preserve the point axis")
+            reconstruction_scales = np.asarray(getattr(model, "reconstruction_scales", None))
+            if reconstruction_scales.shape != (mapped.shape[1],) or not np.all(
+                np.isfinite(reconstruction_scales) & (reconstruction_scales > 0)
+            ):
+                raise ValueError("Reconstruction variables require positive fixed reconstruction_scales")
+            recovered_shape = jax.eval_shape(reconstruction_inverse,
+                jax.ShapeDtypeStruct((n + 1, mapped.shape[1]), dtype))
+            require_shape(recovered_shape, (n + 1, nvar), "from_reconstruction_state")
+
         def reconstruct(full):
-            return reconstruct_faces(
-                full,
+            states = full if reconstruction_state is None else reconstruction_state(full)
+            left, right = reconstruct_faces(
+                states,
                 points,
                 faces,
                 scheme.reconstruction,
-                variable_scales=model.variable_scales,
+                variable_scales=reconstruction_scales,
                 smooth_coefficient=scheme.smooth_limiter_coefficient,
             )
+            if reconstruction_inverse is not None:
+                return reconstruction_inverse(left), reconstruction_inverse(right)
+            return left, right
 
         def roe_data(left, right, left_data=None, right_data=None):
             if fused_roe:
@@ -374,6 +472,8 @@ class Operator:
             return model.face_characteristics(left, right, scheme.delta_factor)
 
         def flux_from_states(left, right):
+            if compatibility_flux:
+                return model.flux_to_conserved_frame(model.numerical_face_flux(left, right, scheme))
             if fused_data:
                 left_data, right_data = model.face_data(left), model.face_data(right)
                 ql, qr = left_data["conserved"], right_data["conserved"]
@@ -435,9 +535,14 @@ class Operator:
         # and endpoint overrides stay outside the local differentiation map.
         local_face_flux = local_jvp(flux_from_states)
 
-        def face_flux(full):
+        def unfiltered_flux(full):
             left, right = reconstruct(full)
-            flux = local_face_flux(left, right)
+            return local_face_flux(left, right)
+
+        def filtered_flux(full, flux):
+            stabilization = getattr(model, "stabilization_flux", None)
+            if stabilization is not None:
+                flux = flux + stabilization(full, flux)
             if scheme.filter_strength > 0:
                 flux = fourth_difference_flux(
                     flux,
@@ -449,6 +554,9 @@ class Operator:
                 flux = boundary_flux(full, flux)
             return area[:, None] * flux
 
+        def face_flux(full):
+            return filtered_flux(full, unfiltered_flux(full))
+
         def source(full):
             return model.integrated_source(full)
 
@@ -457,9 +565,48 @@ class Operator:
         def storage(physical):
             return volumes[:, None] * local_storage(physical)
 
+        def nonconservative(full, raw_flux):
+            if nc_mode == "none":
+                return jnp.zeros((n, ntransport), dtype=full.dtype)
+            return model.integrated_nonconservative(full, raw_flux)
+
+        def contributions(full):
+            raw_flux = unfiltered_flux(full)
+            weighted_raw = area[:, None] * raw_flux
+            flux = filtered_flux(full, raw_flux)
+            parts = dict(
+                conservative=weighted_raw[1:] - weighted_raw[:-1],
+                stabilization=(flux[1:] - flux[:-1]) - (weighted_raw[1:] - weighted_raw[:-1]),
+                nonconservative=nonconservative(full, raw_flux),
+                source=source(full),
+            )
+            original = parts["conservative"] + parts["stabilization"] + parts["nonconservative"] - parts["source"]
+            parts["equation_policy"] = (jnp.zeros_like(original) if equation_policy is None
+                                         else equation_policy(full, original, None) - original)
+            return parts
+
+        def physical_spatial(full):
+            raw_flux = unfiltered_flux(full)
+            flux = filtered_flux(full, raw_flux)
+            result = flux[1:] - flux[:-1] - source(full)
+            # Keep the conservative arithmetic exactly as before.
+            if nc_mode != "none":
+                result = result + nonconservative(full, raw_flux)
+            return result
+
         def spatial(full):
-            flux = face_flux(full)
-            return flux[1:] - flux[:-1] - source(full)
+            original = physical_spatial(full)
+            return original if equation_policy is None else equation_policy(full, original, None)
+
+        def constraints(cells):
+            if nconstraints:
+                return model.cell_constraints(cells) / jnp.asarray(model.constraint_scales)
+            return jnp.zeros((cells.shape[0], 0), dtype=cells.dtype)
+
+        def cell_rows(transport, cells):
+            if nconstraints:
+                return jnp.concatenate((transport, constraints(cells)), axis=1)
+            return transport
 
         def pack(cells, boundary):
             return jnp.concatenate([boundary[:1], cells, boundary[1:]]).ravel()
@@ -468,10 +615,15 @@ class Operator:
             # Uniform scaling prevents huge pseudo-time steps from amplifying
             # roundoff in the implicit residual; the zero set is unchanged.
             row_scale = jnp.maximum(1.0, dt / reference_time)
-            return (
+            if equation_policy is not None:
+                raw = storage(new[1:-1]) - storage(old[1:-1]) + dt * physical_spatial(new)
+                transport = equation_policy(new, raw, dt) / row_scale / content_scale
+                return cell_rows(transport, new[1:-1])
+            transport = (
                 (storage(new[1:-1]) - storage(old[1:-1])) / row_scale
                 + (dt / row_scale) * spatial(new)
             ) / content_scale
+            return cell_rows(transport, new[1:-1])
 
         def residual(new_flat, old_flat, dt, time):
             new, old = new_flat.reshape(self.shape), old_flat.reshape(self.shape)
@@ -482,7 +634,7 @@ class Operator:
         def steady(full_flat, time=0.0):
             full = full_flat.reshape(self.shape)
             return pack(
-                reference_time * spatial(full) / content_scale,
+                cell_rows(reference_time * spatial(full) / content_scale, full[1:-1]),
                 model.boundary_residual(full, time),
             )
 
@@ -574,7 +726,8 @@ class Operator:
             self.reduced_direction = jax.jit(reduced["direction"])
 
         def recover_residual(flat, target):
-            return ((storage(flat.reshape(n, nvar)) - target) / content_scale).ravel()
+            cells = flat.reshape(n, nvar)
+            return cell_rows((storage(cells) - target) / content_scale, cells).ravel()
 
         recover_blocks = make_block_operators(
             recover_residual,
@@ -613,14 +766,24 @@ class Operator:
 
         def balance(full):
             flux = face_flux(full)
-            return flux[0] - flux[-1] + jnp.sum(source(full), axis=0)
+            result = flux[0] - flux[-1] + jnp.sum(source(full), axis=0)
+            if nc_mode != "none":
+                result = result - jnp.sum(nonconservative(full, unfiltered_flux(full)), axis=0)
+            return result
 
         def stage_rates(full):
-            flux = face_flux(full)
+            raw_flux = unfiltered_flux(full)
+            flux = filtered_flux(full, raw_flux)
             integrated = source(full)
-            return flux[1:] - flux[:-1] - integrated, flux[0] - flux[-1] + jnp.sum(
+            residual = flux[1:] - flux[:-1] - integrated
+            transfer = flux[0] - flux[-1] + jnp.sum(
                 integrated, axis=0
             )
+            if nc_mode != "none":
+                nc = nonconservative(full, raw_flux)
+                residual = residual + nc
+                transfer = transfer - jnp.sum(nc, axis=0)
+            return residual, transfer
 
         if scheme.time_integrator == "euler-implicit":
             step = implicit_step
@@ -639,6 +802,7 @@ class Operator:
                 lambda full: valid(full.ravel()),
                 method=scheme.time_integrator,
                 evaluate_stage=stage_rates,
+                recover_initial=nconstraints > 0,
             )
 
             def step(full, dt, time=0.0):
@@ -650,6 +814,11 @@ class Operator:
         self.source = jax.jit(source)
         self.storage = jax.jit(storage)
         self.spatial_residual = jax.jit(spatial)
+        self.physical_spatial_residual = jax.jit(physical_spatial)
+        self.residual_contributions = jax.jit(contributions)
+        self.cell_constraints = jax.jit(constraints)
+        self.balance_rate = jax.jit(balance)
+        self.unfiltered_face_flux = jax.jit(unfiltered_flux)
         self.residual = jax.jit(residual)
         self.steady_residual = jax.jit(steady)
         self.boundary_residual = jax.jit(model.boundary_residual)
@@ -665,8 +834,14 @@ class Operator:
             completion_ok = jnp.asarray(True)
             explicit = scheme.time_integrator != "euler-implicit"
             if explicit:
+                if nconstraints:
+                    cells, recovery = recover(storage(full[1:-1]), full[1:-1])
+                    completion_ok = recovery.converged & recovery.admissible
+                    # Failed recovery must not feed invalid trial properties
+                    # into trace completion; the limit is still marked invalid.
+                    full = full.at[1:-1].set(jnp.where(completion_ok, cells, full[1:-1]))
                 full, info = complete(full, time)
-                completion_ok = info.converged & info.admissible
+                completion_ok = completion_ok & info.converged & info.admissible
 
             def evaluate(_):
                 speed = model.wave_speed(full[1:-1])

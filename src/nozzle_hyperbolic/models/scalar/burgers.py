@@ -15,6 +15,10 @@ from .analytical import burgers_riemann
 
 class BurgersModel:
     nvar = 1
+    ntransport = 1
+    nconstraints = 0
+    nboundary = 1
+    nonconservative_mode = "none"
     name = "burgers"
     equation_names = ("Scalar transport",)
     source_dependency_radius = 0

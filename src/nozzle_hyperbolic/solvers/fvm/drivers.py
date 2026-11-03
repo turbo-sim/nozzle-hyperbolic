@@ -39,6 +39,9 @@ def sampler(operator, policy):
         # it inside a large fused monitor changes roundoff near strict targets.
         raw = operator.spatial_residual(state)
         bc = operator.boundary_residual(state, time)
+        constraints = np.asarray(operator.cell_constraints(state[1:-1]))
+        constraint_norm = np.max(np.abs(constraints), axis=0)
+        constraint_max = float(np.max(constraint_norm, initial=0.0))
         reductions, boundary, global_defect = jax.device_get(reduce(raw, bc))
         norms = reductions[policy.norm]
         initial = norms if initial is None else initial
@@ -46,7 +49,7 @@ def sampler(operator, policy):
         relative = np.asarray(assessment["equation_relative"])
         active = np.asarray(assessment["relative_active"])
         valid = bool(operator.is_admissible(state))
-        return dict(
+        metrics = dict(
             equation_norm=np.asarray(norms),
             equation_relative=relative,
             equation_l1=np.asarray(reductions["l1"]),
@@ -58,9 +61,16 @@ def sampler(operator, policy):
             overall_relative=float(np.max(np.where(active, relative, 0.0))),
             global_defect=np.asarray(global_defect),
             boundary_max=float(boundary),
+            boundary_equation_max=np.max(np.abs(np.asarray(bc)), axis=0),
+            constraint_norm=constraint_norm,
+            constraint_max=constraint_max,
+            constraints_passed=bool(np.all(np.isfinite(constraints)) and constraint_max <= policy.constraint_tolerance),
             finite=bool(assessment["finite"])
             and np.isfinite(boundary)
-            and np.isfinite(global_defect).all(),
+            and np.isfinite(global_defect).all()
+            and np.isfinite(constraints).all(),
+            # Algebraic cells have fixed scales and an independent absolute
+            # infinity-norm check; no phase weights or initial-relative test.
             admissible=valid,
             all_equations_passed=bool(assessment["all_equations_passed"]),
             absolute_satisfied=np.asarray(assessment["absolute_satisfied"]),
@@ -69,6 +79,25 @@ def sampler(operator, policy):
             global_passed=bool(np.max(global_defect) <= policy.global_tolerance),
             relative_active=np.asarray(assessment["relative_active"]),
         )
+        if operator.equation_policy_active:
+            original = operator.physical_spatial_residual(state)
+            unmodified, _, unmodified_global = jax.device_get(reduce(original, bc))
+            metrics.update(
+                equation_policy_active=True,
+                unmodified_equation_norm=np.asarray(unmodified[policy.norm]),
+                unmodified_equation_linf=np.asarray(unmodified["linf"]),
+                unmodified_global_defect=np.asarray(unmodified_global),
+            )
+            metrics["finite"] = metrics["finite"] and bool(unmodified["finite"])
+        if hasattr(model, "invariant_projections"):
+            physical = operator.physical_spatial_residual(state) if operator.equation_policy_active else raw
+            signed = np.asarray(model.invariant_projections) @ np.asarray(physical).sum(axis=0)
+            signed = signed / np.asarray(model.invariant_flux_scales)
+            metrics.update(invariant_names=tuple(model.invariant_names),
+                           invariant_defect=signed,
+                           invariants_passed=bool(np.all(np.abs(signed) <= policy.global_tolerance)))
+            metrics["finite"] = metrics["finite"] and bool(np.all(np.isfinite(signed)))
+        return metrics
 
     return sample
 
@@ -144,7 +173,9 @@ def solve_single_grid(
             and metrics["admissible"]
             and metrics["all_equations_passed"]
             and metrics["boundary_passed"]
+            and metrics["constraints_passed"]
             and metrics["global_passed"]
+            and metrics.get("invariants_passed", True)
             and tracker.passed
         )
 
@@ -373,6 +404,8 @@ def solve_transient(
     absent, solution_audit provides the backward-compatible fallback. A final
     steady branch constraint need not describe every transient intermediate.
     """
+    if getattr(model, "steady_only", False):
+        raise ValueError("The selected model equation policy is steady-only; disable it for physical-time integration")
     targets = np.asarray(tuple(output_times), dtype=float)
     if (
         targets.ndim != 1
@@ -408,12 +441,12 @@ def solve_transient(
         raise ValueError("Transient initial state must be admissible")
     sample = sampler(operator, ResidualPolicy())
     initial_totals = np.asarray(operator.storage(state[1:-1])).sum(axis=0)
-    influx = np.zeros(model.nvar)
+    influx = np.zeros(operator.ntransport)
     time = 0.0
     history = []
     snapshots = []
     start = perf_counter()
-    budget = np.zeros(model.nvar)
+    budget = np.zeros(operator.ntransport)
     accepted = 0
     for target in targets:
         target = float(target)
@@ -464,10 +497,8 @@ def solve_transient(
                 if reason != "invalid_timestep":
                     reason = "retry_limit"
                 break
-            flux = np.asarray(operator.face_flux(candidate))
-            source = np.asarray(operator.source(candidate)).sum(axis=0)
             transfer = (
-                dt * (flux[0] - flux[-1] + source)
+                dt * np.asarray(operator.balance_rate(candidate))
                 if scheme.time_integrator == "euler-implicit"
                 else np.asarray(step_balance)
             )
@@ -509,12 +540,13 @@ def solve_transient(
             and metrics["admissible"]
             and metrics["finite"]
             and metrics["boundary_passed"]
+            and metrics["constraints_passed"]
         )
         if time == target and not success:
             reason = (
                 "invalid_final_state"
                 if not metrics["admissible"] or not metrics["finite"]
-                else "boundary_defect"
+                else ("cell_constraint_defect" if not metrics["constraints_passed"] else "boundary_defect")
             )
         if success and audit is not None and not audit(state):
             success = False

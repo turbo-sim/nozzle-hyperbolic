@@ -430,7 +430,9 @@ class OsherFlux:
         if crossings is None:
             values = jax.vmap(evaluate)(nodes)
             return jnp.einsum("q,q...i->...i", weights, values)
-        zeros = jnp.zeros_like(left)
+        # Viscosity acts on transported contents, which can have fewer
+        # components than constrained iteration states.
+        zeros = jnp.zeros_like(_conserved(model, left))
         empty = jnp.stack((zeros, zeros, zeros)) if diagnostic else zeros
 
         def panel(total, bounds):

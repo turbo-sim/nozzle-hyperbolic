@@ -15,6 +15,10 @@ from .contracts import (
     FaceStatePathModel,
     RoeModel,
     FusedRoeModel,
+    BalanceModel,
+    ConstrainedCellModel,
+    FluxDifferenceNonconservativeModel,
+    CompatibilityFluxModel,
 )
 from .operator import Operator
 from .drivers import solve_single_grid, solve_grid_sequence, solve_transient, sampler
@@ -40,4 +44,8 @@ __all__ = [
     "FaceStatePathModel",
     "RoeModel",
     "FusedRoeModel",
+    "BalanceModel",
+    "ConstrainedCellModel",
+    "FluxDifferenceNonconservativeModel",
+    "CompatibilityFluxModel",
 ]

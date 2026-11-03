@@ -11,6 +11,10 @@ class AdvectionModel:
     """u_t + c u_x = 0 with exact inflow and coupled extrapolated outflow."""
 
     nvar = 1
+    ntransport = 1
+    nconstraints = 0
+    nboundary = 1
+    nonconservative_mode = "none"
     equation_names = ("Scalar transport",)
     source_dependency_radius = 0
     boundary_dependency_radius = 1

@@ -59,7 +59,7 @@ class Scheme:
             "muscl_van_albada",
         ):
             raise ValueError("Unsupported reconstruction")
-        if self.flux not in ("stadtke", "rusanov", "hll", "roe", "osher"):
+        if self.flux not in ("stadtke", "rusanov", "hll", "roe", "osher", "model_compatibility"):
             raise ValueError("Unsupported numerical flux")
         if type(self.quadrature_points) is not int or self.quadrature_points not in (3, 5, 9):
             raise ValueError("quadrature_points must be 3, 5 or 9")
@@ -72,6 +72,7 @@ class Scheme:
             "euler-implicit",
             "euler-explicit",
             "runge-kutta-3",
+            "runge-kutta-4",
         ):
             raise ValueError("Unsupported time integrator")
         if self.boundary_treatment not in ("auto", "coupled", "segregated"):

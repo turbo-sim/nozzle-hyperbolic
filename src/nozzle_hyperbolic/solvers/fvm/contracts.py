@@ -1,10 +1,10 @@
-"""Structural interface for user-programmed conservative physical models.
+"""Structural interface for user-programmed constrained balance models.
 
 No base-class inheritance, fixed equation identities, thermodynamic library or
 fixed variable count is required by numerical assembly. Models declare their
-own equation names and variable count. The supported system is square,
-cell-local storage on a fixed one-dimensional mesh with two endpoint traces.
-Nonconservative/rectangular systems require a later, explicit contract extension.
+own equation names and variable count. Ntransport balances plus Nconstraints
+cell-local algebraic rows form a square state system. Storage itself can be
+rectangular. Physical traces each have Nvar algebraic boundary equations.
 """
 
 from typing import Protocol, Sequence, Any
@@ -29,6 +29,10 @@ class BalanceModel(Protocol):
 
     mesh: Mesh
     nvar: int
+    ntransport: int
+    nconstraints: int
+    nboundary: int
+    nonconservative_mode: str
     equation_names: Sequence[str]
     variable_scales: Any
     conservative_scales: Any
@@ -39,7 +43,7 @@ class BalanceModel(Protocol):
     boundary_coupling: str
 
     def cell_conserved(self, physical):
-        """(N,V) -> (N,V), cell-local densities in the transported frame."""
+        """(N,V) -> (N,T), cell-local densities in the transported frame."""
         ...
 
     def flux_to_conserved_frame(self, face_flux): ...
@@ -54,7 +58,7 @@ class ConservativeModel(BalanceModel, Protocol):
     """Simple face callbacks, with no mandatory eigensystem or EOS."""
 
     def face_conserved(self, face_states):
-        """(N+1,V) -> (N+1,V), densities in the model's face frame."""
+        """(N+1,V) -> (N+1,T), densities in the model's face frame."""
         ...
 
     def face_physical_flux(self, face_states): ...
@@ -122,3 +126,48 @@ class FusedRoeModel(Protocol):
     def face_roe_data_from_data(
         self, left, right, delta_factor, aux_left, aux_right
     ): ...
+
+
+class ConstrainedCellModel(Protocol):
+    """Zero-storage algebraic cells, scaled independently of dt and volume.
+
+    The Jacobian of (cell_conserved, cell_constraints) must be locally
+    invertible. Constraint scales are fixed physical scales, never state/phase
+    weighted. Newton packs transported rows first, then these constraint rows.
+    """
+
+    nconstraints: int
+    constraint_names: Sequence[str]
+    constraint_scales: Any
+
+    def cell_constraints(self, physical):
+        """Return (N,C) dimensional, cell-local algebraic defects."""
+        ...
+
+
+class FluxDifferenceNonconservativeModel(Protocol):
+    """Explicit compatibility discretization, not an inferred path scheme.
+
+    integrated_nonconservative receives the unweighted transported numerical
+    face flux BEFORE additional stabilization and endpoint flux overrides.
+    Return already integrated (N,T) contributions ADDED to the spatial residual.
+    The model owns geometry pairing and the validity/singular limits of its
+    correction. Supported fluxes must be explicitly justified and declared.
+    """
+
+    nonconservative_mode: str  # 'flux_difference'; conservative models: 'none'
+    supported_fluxes: Sequence[str]
+    nonconservative_dependency_radius: int
+
+    def integrated_nonconservative(self, full, unfiltered_flux): ...
+
+
+class CompatibilityFluxModel(Protocol):
+    """Optional explicitly selected model-owned historical flux formulation.
+
+    Used only for Scheme(flux='model_compatibility'). Keep physical averaging,
+    eigenstructure and regularization in the model; never transplant a solver.
+    This callback is face-local and returns (N+1,T) unweighted face-frame flux.
+    """
+
+    def numerical_face_flux(self, left, right, scheme): ...

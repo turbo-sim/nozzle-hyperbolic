@@ -17,12 +17,13 @@ operator supplies the actual discrete spatial residual. The numerical driver
 reduces those rows and applies the selected convergence policy, without knowing
 the EOS or the meaning of the model variables.
 
-Three quantities answer different questions:
+Four quantities answer different questions:
 
 | Quantity | Meaning | Role |
 |---|---|---|
 | Per-equation spatial norm | Do the physical cells satisfy the steady discrete balances? | Every equation must pass its selected relative/absolute criterion |
 | Boundary defect | Do the endpoint traces satisfy the physical boundary equations? | Independent absolute check, for either coupled or segregated treatment |
+| Cell constraint defect | Do all cell-local algebraic equations hold? | Independent fixed-scale absolute maximum, with no initial-relative reduction or phase weights |
 | Global conservation defect | Do the domain's numerical boundary fluxes and integrated sources balance? | Independent absolute check for every conservation equation |
 
 The inner Newton residual and the size of a timestep update are additional
@@ -34,7 +35,7 @@ deciding that a steady solution has converged.
 For physical cell $i$ and conservation equation $k$, the operator assembles
 
 $$
-r_{i,k}=\Phi_{i+1/2,k}-\Phi_{i-1/2,k}-S_{i,k}^{\mathrm{integrated}}.
+r_{i,k}=\Phi_{i+1/2,k}-\Phi_{i-1/2,k}+N_{i,k}^{\mathrm{integrated}}-S_{i,k}^{\mathrm{integrated}}.
 $$
 
 $\Phi$ includes the actual numerical face flux, frame conversion and face area.
@@ -43,6 +44,30 @@ conservative filters are part of the discrete operator. Monitoring does not
 replace those fluxes with an analytical or cell-centred approximation. Only
 physical cell rows enter the spatial norms; endpoint constraints are checked
 separately.
+
+For a nonconservative model, $N$ is the actual discrete nonconservative work,
+evaluated using the model's declared compatibility formulation. Summed rows
+remain a **discrete balance defect**, not a claim that every phase momentum or
+energy is independently conserved. Inspect the model's exchange/work identities
+and invariant projections separately. `Operator.residual_contributions(state)`
+returns the signed conservative, stabilization, NC and source arrays.
+
+Cell constraints are monitored as
+`max(abs(cell_constraints/constraint_scales), axis=cells)`, one value per
+constraint in `constraint_norm`; `constraint_max` is their maximum.
+`ResidualPolicy.constraint_tolerance` defaults to $10^{-9}$. Every constraint
+must pass this absolute test for steady convergence and transient snapshots.
+They never enter the transported-equation relative baseline. Endpoint residuals
+also expose `boundary_equation_max` in addition to the overall `boundary_max`.
+
+A model may declare `invariant_projections`, `invariant_names` and positive
+fixed `invariant_flux_scales`. `invariant_defect` reports the signed projected
+sum of the **unmodified** physical spatial rows, including discrete NC work.
+Declared invariant budgets also gate steady convergence. The two-fluid model
+currently declares only total mass; it does not assume that summed phase-energy
+slots form a conserved invariant. Physical-time snapshots instead use the
+integrator-consistent content-change budget, since a transient spatial sum need
+not vanish.
 
 The dimensionless cell residual is
 

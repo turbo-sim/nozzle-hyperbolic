@@ -49,6 +49,10 @@ class AnnularModel:
     """
 
     nvar = 4
+    ntransport = 4
+    nconstraints = 0
+    nboundary = 4
+    nonconservative_mode = "none"
     equation_names = ("Mass", "Meridional momentum", "Angular momentum", "Energy")
     name = "euler_annular"
     source_dependency_radius = 0

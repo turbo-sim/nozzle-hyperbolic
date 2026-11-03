@@ -1,4 +1,4 @@
-"""Conservative forward Euler and SSPRK3 with algebraic stage constraints."""
+"""Conservative Euler, SSPRK3 and classical RK4 with algebraic stage constraints."""
 
 import jax
 import jax.numpy as jnp
@@ -15,7 +15,8 @@ def make_explicit_step(
     admissible,
     *,
     method,
-    evaluate_stage=None
+    evaluate_stage=None,
+    recover_initial=False,
 ):
     """Build a step using only model-independent numerical callbacks.
 
@@ -25,8 +26,10 @@ def make_explicit_step(
     integrated conserved contents, never to primitive iteration variables.
     Optional evaluate_stage(full) returns both spatial residual and balance in
     one evaluation so expensive model properties are reused by the assembler.
+    Constrained models set recover_initial=True to recover the initial cell
+    algebraic state from unchanged contents before any source or flux is read.
     """
-    if method not in ("euler-explicit", "runge-kutta-3"):
+    if method not in ("euler-explicit", "runge-kutta-3", "runge-kutta-4"):
         raise ValueError("Unsupported explicit integrator")
 
     def step(old, dt, time=0.0):
@@ -43,12 +46,41 @@ def make_explicit_step(
 
         # time denotes the end of the requested step, as for backward Euler.
         start = time - dt
-        initial, initial_info = complete_boundaries(old, start)
-        initial_info = normalize(initial_info)
+        # The transported count need not equal the iteration-state count.
+        zero = jnp.zeros((storage(old[1:-1]).shape[-1],), old.dtype)
+        if recover_initial:
+            cells, recovery = recover(storage(old[1:-1]), old[1:-1])
+            recovery = normalize(recovery)
+            provisional = old.at[1:-1].set(cells)
+
+            def initial_boundary(_):
+                full, info = complete_boundaries(provisional, start)
+                return full, normalize(info)
+
+            skipped = recovery._replace(
+                iterations=jnp.int32(0), relative_update=jnp.asarray(0., old.dtype),
+                residual_norm=jnp.asarray(0., old.dtype), converged=jnp.asarray(False),
+                rejected_trials=jnp.int32(0),
+            )
+            initial, bc = jax.lax.cond(
+                recovery.converged & recovery.admissible,
+                initial_boundary, lambda _: (old, skipped), operand=None,
+            )
+            initial_info = NewtonInfo(
+                recovery.iterations + bc.iterations,
+                jnp.maximum(recovery.relative_update, bc.relative_update),
+                jnp.maximum(recovery.residual_norm, bc.residual_norm),
+                recovery.converged & bc.converged,
+                recovery.admissible & bc.admissible,
+                recovery.rejected_trials + bc.rejected_trials,
+                jnp.where(~recovery.converged, recovery.status, bc.status),
+            )
+        else:
+            initial, initial_info = complete_boundaries(old, start)
+            initial_info = normalize(initial_info)
         initial_ok = (
             initial_info.converged & initial_info.admissible & admissible(initial)
         )
-        zero = jnp.zeros((old.shape[1],), old.dtype)
 
         def advance(target, seed, stage_time):
             physical, recovery = recover(target, seed[1:-1])
@@ -95,6 +127,54 @@ def make_explicit_step(
         def body(_):
             q0 = storage(initial[1:-1])
             residual0, rate0 = rates(initial)
+            if method == "runge-kutta-4":
+                # Classical RK4 on contents. Every rate sees recovered cell
+                # constraints and completed traces at its own stage time.
+                first, info1 = advance(q0 - 0.5 * dt * residual0, initial, start + 0.5 * dt)
+
+                def combine(previous, current):
+                    return current._replace(
+                        iterations=previous.iterations + current.iterations,
+                        rejected_trials=previous.rejected_trials + current.rejected_trials,
+                        residual_norm=jnp.maximum(previous.residual_norm, current.residual_norm),
+                        relative_update=jnp.maximum(previous.relative_update, current.relative_update),
+                        converged=previous.converged & current.converged,
+                        admissible=previous.admissible & current.admissible,
+                    )
+
+                def stage_two(_):
+                    residual1, rate1 = rates(first)
+                    second, info2 = advance(q0 - 0.5 * dt * residual1, first, start + 0.5 * dt)
+                    info2 = combine(info1, info2)
+
+                    def stage_three(_):
+                        residual2, rate2 = rates(second)
+                        third, info3 = advance(q0 - dt * residual2, second, start + dt)
+                        info3 = combine(info2, info3)
+
+                        def stage_four(_):
+                            residual3, rate3 = rates(third)
+                            target = q0 - dt * (residual0 + 2 * residual1 + 2 * residual2 + residual3) / 6.0
+                            final, info4 = advance(target, third, start + dt)
+                            info4 = combine(info3, info4)
+                            increment = dt * (rate0 + 2 * rate1 + 2 * rate2 + rate3) / 6.0
+                            return final, info4, jnp.where(info4.converged, increment, zero)
+
+                        return jax.lax.cond(
+                            info3.converged, stage_four,
+                            lambda _: (third, info3, zero), operand=None,
+                        )
+
+                    return jax.lax.cond(
+                        info2.converged, stage_three,
+                        lambda _: (second, info2, zero), operand=None,
+                    )
+
+                return jax.lax.cond(
+                    info1.converged, stage_two,
+                    lambda _: (first, info1, zero), operand=None,
+                )
+
             q1 = q0 - dt * residual0
             first, info1 = advance(q1, initial, start + dt)
             if method == "euler-explicit":
@@ -144,8 +224,10 @@ def make_explicit_step(
             operand=None,
         )
         info = info._replace(
-            iterations=info.iterations + initial_info.iterations,
-            rejected_trials=info.rejected_trials + initial_info.rejected_trials,
+            # The failed-initial branch already returns initial_info; do not
+            # count its work twice.
+            iterations=info.iterations + jnp.where(initial_ok, initial_info.iterations, 0),
+            rejected_trials=info.rejected_trials + jnp.where(initial_ok, initial_info.rejected_trials, 0),
         )
         return new, info, increment
 

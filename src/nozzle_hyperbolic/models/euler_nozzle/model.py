@@ -31,6 +31,10 @@ class NozzleModel:
     """
 
     nvar = 3
+    ntransport = 3
+    nconstraints = 0
+    nboundary = 3
+    nonconservative_mode = "none"
     equation_names = ("Mass", "Momentum", "Energy")
     name = "euler_nozzle"
     source_dependency_radius = 0
