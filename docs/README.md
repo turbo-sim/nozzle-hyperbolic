@@ -7,6 +7,7 @@ Numerical source remains the authority for defaults and callback signatures.
 | Guide | Purpose |
 |---|---|
 | [Test suite](../tests/README.md) | Organization, fast/full checks, physical regressions, saved baselines and CI |
+| [Standalone demos](../demos/README.md) | Inline Python setup for all three flow models, consistent reporting and two transient MP4 examples |
 | [Architecture](architecture/ARCHITECTURE.md) | Models, numerical fluxes, reconstruction, boundaries, integration and solver hierarchy; [offline viewer](architecture/ARCHITECTURE.html) and [SVG](architecture/ARCHITECTURE.svg) |
 | [Physical model interface](model_interface.md) | Required callbacks, shapes, frames, stencil declarations and optional Stadtke/Osher/Roe capabilities |
 | [Physical closures](physical_closures.md) | Wall policies, Haaland/Darcy conventions, transport properties and retained mixture correlations |

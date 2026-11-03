@@ -1,7 +1,7 @@
 # Residual monitoring and steady convergence
 
 This document describes the shared production FVM implementation checked on
-31 October 2026. It replaces the earlier design note in
+3 November 2026. It replaces the earlier design note in
 `development/residual_monitoring/`. The monitoring machinery is implemented and
 used by nozzle, annular and compatible user-programmed models; it is no longer
 an opt-in annular migration proposal.
@@ -9,7 +9,7 @@ an opt-in annular migration proposal.
 For the surrounding package structure, see the
 [architecture guide](architecture/ARCHITECTURE.md).
 
-## Responsibilities and the three residual checks
+## Responsibilities and independent residual checks
 
 The physical model supplies conserved-variable scales, a fixed reference time,
 global flux scales, equation names and scaled boundary equations. The shared
@@ -376,7 +376,41 @@ rejections separately. Preserve exact zeros in saved data even if logarithmic
 plots must omit or annotate them. A common plot-label/metadata interface is not
 currently part of the shared solver.
 
-## Known limits and reporting mismatch
+## Consistent console histories and summaries
+
+`ConvergenceTable(model.equation_names, every=20)` can be passed directly as
+`solve_single_grid(..., callback=table)`. Its G column reads the shared driver's
+`global_defect` vector and C exposes the independent cell-constraint defect.
+The older scalar `conservation_max` remains a display fallback. Equation columns
+are grouped in threes to retain readable output within 100 columns.
+
+For physical time, use
+`ConvergenceTable(model.equation_names, mode="transient", every=100)` with
+`solve_transient(..., callback=table)`. Each callback receives the same accepted
+or rejected attempt dictionary retained in the result history. The transient
+table reports physical time, actual CFL, inner residual/corrections and the
+normalized content-change budget. It does not present transient spatial
+imbalance as a failed steady convergence test. `requested_cfl` remains available
+separately in each transient history row.
+
+`solution_summary(solution)` in `solvers.convergence_output` supplies consistent
+accepted/rejected step and inner-work counts, together with the separate final
+equation, boundary, cell-constraint, global spatial-balance and transient budget
+diagnostics. Initial rows are excluded from accepted updates; inner work includes
+rejected attempts. Missing metrics remain `None` and nonfinite values remain
+visible through `strict_json`, rather than becoming artificial successes.
+Inner iteration meanings remain integrator-dependent; reduced implicit counts
+exclude nested boundary work. The summary does not reinterpret those counts as
+comparable residual-evaluation totals.
+
+`solve_single_grid` emits progress through its callback rather than printing an
+additional periodic line. `solve_transient` also accepts an already bound
+`operator` matching the exact model identity and scheme. This supports initial
+trace completion and integration with the same compiled binding, without
+changing initial physical cell contents or convergence rules. The
+[standalone demos](../demos/README.md) exercise these reporting paths.
+
+## Known reporting limits
 
 - `ResidualPolicy` provides scalar tolerances, not per-equation tolerance maps.
   L∞ is recorded but has no separate built-in stopping threshold.
@@ -385,12 +419,6 @@ currently part of the shared solver.
   step by default.
 - Versioned export metadata and a combined stopping ratio require explicit
   application handling, as described above.
-- `ConvergenceTable` currently reads `conservation_max`, while the shared driver
-  supplies `global_defect`. Passing native rows directly therefore prints `--`
-  in the G column. A display callback can supply
-  `conservation_max=max(row["global_defect"])` for rows containing that vector.
-  This is a reporting mismatch, not a missing conservation check. It remains
-  open; this documentation migration does not change production code.
 
 ## Transients and historical results
 
@@ -420,18 +448,17 @@ available through Git history.
 | [solvers/fvm/drivers.py](../src/nozzle_hyperbolic/solvers/fvm/drivers.py) | Sampling, initial baselines, histories, final assessment and monitor integration |
 | [solvers/fvm/config.py](../src/nozzle_hyperbolic/solvers/fvm/config.py) | `SteadySettings` and `Solution` |
 | [solvers/monitoring.py](../src/nozzle_hyperbolic/solvers/monitoring.py) | `MonitorSpec` and accepted-sample stationarity windows |
-| [solvers/convergence_output.py](../src/nozzle_hyperbolic/solvers/convergence_output.py) | Console table and strict JSON serialization |
+| [solvers/convergence_output.py](../src/nozzle_hyperbolic/solvers/convergence_output.py) | Console table, outcome/work summaries and strict JSON serialization |
 | [NozzleModel](../src/nozzle_hyperbolic/models/euler_nozzle/model.py), [AnnularModel](../src/nozzle_hyperbolic/models/euler_annular/model.py) | Physical reference scales, admissibility and boundary equations |
 | [annular diagnostics](../src/nozzle_hyperbolic/models/euler_annular/diagnostics.py) | Physical engineering-quantity evaluation |
-| [test_residual_monitoring.py](../tests/test_residual_monitoring.py) | Independently calculated norms, weighting, cancellation, initial-zero rules, finite checks and monitor windows |
-| [test_generic_fvm.py](../tests/test_generic_fvm.py) | Criterion semantics and shared-driver contracts for user models |
-| [test_euler_annular_monitoring.py](../tests/test_euler_annular_monitoring.py) | Original-row scaling, physical quantities, rejected history and final-state checks |
+| [test_residual_monitoring.py](../tests/solvers/test_residual_monitoring.py) | Independently calculated norms, weighting, cancellation, initial-zero rules, finite checks and monitor windows |
+| [test_stopping_criteria.py](../tests/solvers/test_stopping_criteria.py), [test_drivers.py](../tests/solvers/test_drivers.py) | Criterion semantics and shared-driver contracts for user models |
+| [test_monitoring.py](../tests/models/euler_annular/test_monitoring.py) | Original-row scaling, physical quantities, rejected history and final-state checks |
+| [test_convergence_output.py](../tests/solvers/test_convergence_output.py), [test_transient_audits.py](../tests/solvers/test_transient_audits.py) | Table/summary semantics, callbacks and transient operator reuse |
 
-The documentation review ran 22 focused residual/stopping tests successfully.
-That result covers those tests, not every physical model or numerical
-configuration. From the repository root, the same focused check is:
+From the repository root, run the focused residual/stopping checks with:
 
 ```powershell
 $env:JAX_ENABLE_X64 = "true"
-poetry run python -B -m pytest -q -p no:cacheprovider tests/test_residual_monitoring.py tests/test_generic_fvm.py -k "residual or stopping or initially_zero_equations"
+poetry run python -B -m pytest -q -p no:cacheprovider tests/solvers/test_residual_monitoring.py tests/solvers/test_stopping_criteria.py
 ```

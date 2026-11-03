@@ -3,6 +3,8 @@
 ## Repository layout
 
 - [src/nozzle_hyperbolic/](src/nozzle_hyperbolic/): installable solver package.
+- [demos/](demos/README.md): standalone, commented physical-model scripts with
+  inline configuration, convergence plots and transient MP4s.
 - [cases/](cases/README.md): physical applications and literature datasets,
   including [validation data](cases/validation/notes.md).
 - [development/](development/README.md): Alberto's legacy research scripts and

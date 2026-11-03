@@ -105,6 +105,14 @@ reuse to `solve_grid_sequence`. Constraint-consistent preparation can reuse
 Reuse retains compiled kernels, not numerical state; callers still synchronize
 device work and check compilation events when claiming compilation-free timings.
 
+For reuse across separate Python processes, the [standalone demos](../demos/README.md#reusing-jax-executables)
+enable JAX's persistent executable cache before constructing arrays. The opt-in
+`solvers.compilation.CompilationReport` observes compile/load events,
+disk-cache hits and elapsed durations. The demos print one final status line
+by default. The observer does not infer reuse from cache files.
+Disk caching complements workspace reuse and does not eliminate tracing or all
+compilation for changed configurations or ineligible kernels.
+
 `solve_grid_sequence` defaults to `carry_cfl=True`: after a successful state
 transfer it inherits the preceding solve's last accepted CFL, capped at
 `settings.cfl_max`, and computes a new timestep on the target mesh. It does not
