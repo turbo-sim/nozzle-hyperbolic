@@ -22,5 +22,3 @@ case catalogue, current tests and
 
 Run modules from the repository root with the existing Poetry environment.
 Keep numerical settings and measured findings with their owning study.
-The separate frozen source under [legacy/](../../legacy/README.md) is outside
-this cleanup and remains subject to its manifest checks.

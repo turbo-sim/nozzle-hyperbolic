@@ -33,7 +33,6 @@ The user's current scope and corrections take precedence over these conventions.
 | Physical cases and analytical comparisons | [Verification API](src/nozzle_hyperbolic/verification/README.md), [reference assumptions](docs/analytical_references.md) |
 | Test organization, regression data and CI | [Test suite](tests/README.md) |
 | Numerical experiment, timing or report | [Study conventions](docs/numerical_studies.md), then the relevant [study README](development/README.md) |
-| Native/current comparison | [Benchmark](development/roberto/benchmarking/README.md), [frozen baseline](legacy/README.md) |
 
 Read relevant guides when their topic is involved; small edits do not require
 reviewing the full documentation set. Check historical instructions against the
@@ -62,8 +61,6 @@ current source before using them.
   Distinguish accepted steps, inner corrections and rejected work.
 - Reuse physical cases and independent references. Preserve failures, settings,
   states and source provenance; disclose analytical or numerical warm starts.
-- Treat `legacy/pre_generic_fvm` source and tests as frozen. Verify its manifest
-  before comparisons; keep adapters and new numerical code outside the snapshot.
 
 ## Environment and verification
 

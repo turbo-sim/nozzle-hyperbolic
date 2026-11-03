@@ -8,7 +8,6 @@
 - [development/](development/README.md): Alberto's legacy research scripts and
   Roberto's controlled verification and numerical studies.
 - [tests/](tests/README.md): organized production tests, analytical checks and saved numerical regressions.
-- [legacy/](legacy/README.md): frozen production baseline for old/new solver benchmarks.
 - [docs/](docs/README.md): current guides, proposals, physical derivations and historical audits.
 
 Explore the [interactive architecture map](docs/architecture/ARCHITECTURE.html),

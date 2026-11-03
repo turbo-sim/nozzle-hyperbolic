@@ -168,7 +168,7 @@ class VerificationProblem:
 
     @property
     def legacy_payload(self):
-        """Resolved plain data usable by an isolated frozen-package worker."""
+        """Resolved plain physical data for isolated numerical workers."""
         data = self.definition.data
         inlet = data["inlet"]
         inlet_data = {key: np.asarray(value).tolist() if isinstance(value, (np.ndarray, jax.Array)) else value for key, value in self.inlet_data.items()}

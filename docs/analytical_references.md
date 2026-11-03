@@ -169,9 +169,9 @@ heat-transfer closures. Dominant-phase/Bernoulli helpers in legacy two-fluid
 code are not exact solutions of the complete coupled two-fluid equations.
 Case-specific thermodynamic trajectories are not PDE solutions either.
 
-Historical copies in [legacy/pre_generic_fvm](../legacy/pre_generic_fvm/README.md)
-are frozen comparison evidence. Development reference wrappers and the former
-`generic_interface_v3` study are not current APIs. New clients should import the
+The frozen implementation archive has been removed. Development reference
+wrappers and the former `generic_interface_v3` study are not current APIs.
+New clients should import the
 canonical modules or the installed verification API directly.
 
 Preserve source fingerprints when reusing saved reference arrays. Reference

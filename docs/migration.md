@@ -67,12 +67,12 @@ The [steady benchmark](../development/roberto/benchmarking/README.md),
 production source. Their reports state actual completed coverage and limitations.
 The former `generic_interface_v3` directory is not a current entry point.
 
-The frozen native implementation is retained in
-[`legacy/pre_generic_fvm`](../legacy/pre_generic_fvm/README.md), with its source
-manifest. Historical scripts calling retired factories need individual migration;
+The frozen implementation archive and its dependent tests have been removed.
+Historical scripts calling retired factories need individual migration;
 preserving their reports does not make their original commands supported today.
 
-The legacy two-fluid implementation has not been ported to the shared contract.
-Its own eigenstructure, nonconservative terms, storage constraints and stiff
-closures require a separate physical and numerical review. Existing low-level
-utilities and empirical closures are not evidence of a completed two-fluid port.
+The active `TwoFluidModel` implements the shared contract; see the
+[two-fluid migration guide](two_fluid_migration.md) for its supported physics and
+verification limits. A parallel deprecated two-fluid solver remains in `src/`
+for historical research callers. Removing that implementation is separate from
+removing the frozen archive. See the [removal audit](../LEGACY_REMOVAL.md).

@@ -1,3 +1,0 @@
-# Frozen manifests describe bytes, including original line endings.
-# Disable Git text conversion without changing the preserved source itself.
-pre_generic_fvm/** -text

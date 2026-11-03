@@ -34,9 +34,10 @@ choices are rejected. Application mappings can be validated with
 
 `VerificationProblem` exposes the production model and mesh, physical geometry,
 fluid, analytical reference, resolved pressure and shock location. Its
-`legacy_payload` contains only resolved plain data for an isolated legacy
-worker, including fixed scales and the same cold state; it contains no live
-current-package model object.
+`resolved` contains plain physical data for isolated numerical workers, including
+fixed scales and the same cold state; it contains no live model object.
+`legacy_payload` is the compatibility name for the same mapping. Neither property
+loads or requires an archived implementation.
 
 Use `numerical_fields(full)` for physical-cell numerical diagnostics.
 `reference_fields(coordinates)` returns independent analytical point values.

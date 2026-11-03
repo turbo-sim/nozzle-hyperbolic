@@ -140,3 +140,9 @@ The wheel smoke check installs a built wheel into a disposable environment with
 no numerical dependencies. It verifies the lazy top-level import and byte identity
 of all shipped Python modules and 20 physical-case resources, from outside the
 checkout. Numerical model behavior is checked separately in the locked environment.
+
+The frozen archive and original-suite backup were removed at the user's request.
+The numerical baselines in `regression/data/` remain independent of that archive.
+See the [removal audit](../LEGACY_REMOVAL.md) for remaining historical references.
+Earlier measured results and remaining limits are recorded in
+[TEST_SUITE_REVIEW.md](../TEST_SUITE_REVIEW.md).
