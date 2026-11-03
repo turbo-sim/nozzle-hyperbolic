@@ -1,9 +1,21 @@
 # Lettieri HEM validation results
 
+The updated [solver-verification study](SOLVER_COMPARISON.md) uses HLL,
+MUSCL reconstruction and the van Leer limiter, sequenced through 50, 100 and
+200 cells for all five cases, both with and without Haaland friction.
+All 30 new FVM stages and ten resampled critical space marches converged.
+At 200 cells, pressure RMS differences span 0.0164-0.6437%;
+L1 remains nonmonotonic across the three grids, so grid independence is not
+claimed. The report includes method/friction/grid selectors, geometry,
+white-faced FVM samples, logarithmic errors and a grid-accuracy summary.
+The earlier comparison and original validation tables below retain their
+recorded source epochs. See the solver study for exact audits and limits.
+
 The [interactive HTML report](REPORT.html) has been modernized with Plotly,
 operating-case/mesh/attempt selectors, light/dark themes, and interpretation.
 The original numerical tables and static exports below remain unchanged.
-No cases, property evaluations or saved-field residual checks were rerun.
+The earlier presentation-only update reran no numerical cases; the new
+comparison campaign is documented separately above.
 
 Generated from saved outputs on 2 November 2026. All cases use the shared Euler/HEM
 model, zero wall friction/heating, measured contour, and equilibrium JAXProp bicubic
@@ -115,5 +127,7 @@ CFD data were used to initialize the numerical solver.
 The original PNG pressure/residual exports are retained. The modern HTML uses
 Plotly and embeds its runtime, plotted values and original input downloads.
 Structural and application checks cover selectors, navigation, themes, arrays,
-reference availability and exact quality masking. Actual browser preview could
-not be completed because the browser access host was unavailable.
+reference availability and exact quality masking. The solver-comparison update
+also uses an isolated Edge audit of the actual embedded Plotly figures,
+including all operating cases and grids, solver visibility, marker skipping,
+geometry, equations, sensitivity evidence and mobile/offline rendering.

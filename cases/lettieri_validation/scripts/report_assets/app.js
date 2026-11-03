@@ -1,7 +1,7 @@
 (() => {
   'use strict';
   const D=JSON.parse(document.getElementById('payload').textContent),U=StudyReportUI,{$,escape:E,fmt:F,badge:B,stat:S}=U;
-  let caseId=D.cases[0].id,cells='96',selected=new Set(),controller;
+  let caseId=D.cases[0].id,cells='96',selected=new Set(),controller,comparison;
   const info=()=>D.cases.find(c=>c.id===caseId);
   const available=()=>D.records.filter(r=>r.case_id===caseId&&(cells==='all'||r.cells===Number(cells))&&($('attempt-scope').value==='all'||r.property_domain_audited)&&($('grid-kind').value==='all'||($('grid-kind').value==='uniform'?r.stretch===1:r.stretch!==1)));
   const rows=()=>available().filter(r=>selected.has(r.id));
@@ -56,12 +56,12 @@
     const mesh=U.layout('Mesh sensitivity · this operating point','Pressure RMSE versus experiment [bar]');mesh.xaxis.title={text:'Physical cells'};mesh.xaxis.tickvals=[24,48,96];U.plot('mesh-plot',refinement,mesh);
     $('selected-rows').innerHTML=rr.map(r=>{const v=r.saved_verification,m=v||r.metrics,eq=v?.equation_l2||r.metrics?.equation_norm||[];return `<tr><td>${E(title(r))}</td><td>${eq.map(F).join(' / ')}</td><td>${F(m?.boundary_max)} / ${F(Math.max(...(m?.global_defect||[])))}</td><td>${v?B(v.verified):'Not supplied'}</td><td>${F(r.comparison?.pressure_rmse_bar)}</td><td>${r.quality_diagnostic.masked_samples}/${r.quality_diagnostic.samples}</td><td>${F(v?.mass_flow?.numerical_inlet_kg_s)}</td></tr>`;}).join('');
   }
-  function render(page){const rr=rows(),c=info();$('empty-selection').hidden=!!rr.length;$('case-heading').textContent=`${caseId} · ${F(c.definition.p0_bar)} bar, ${F(c.definition.T0_K)} K`;
+  function render(page){const rr=rows(),c=info();comparison?.activate(page);$('empty-selection').hidden=!!rr.length;$('case-heading').textContent=`${caseId} · ${F(c.definition.p0_bar)} bar, ${F(c.definition.T0_K)} K`;
     $('selection-summary').innerHTML=`<strong>${E(caseId)}</strong> · HLL / constant · ${cells==='all'?'all saved meshes':cells+' cells'} · ${E($('grid-kind').value)} grids · ${rr.length} selected attempts <code>${$('attempt-scope').value==='all'?'preflight included':'property-domain audited scope'}</code>`;
     const statements=rr.map(r=>`${title(r)}: ${r.success?'recorded convergence':'unfinished '+r.reason}; saved audit ${r.saved_verification?.verified?'passes':'not established'}; pressure RMSE ${F(r.comparison?.pressure_rmse_bar)} bar; ${r.quality_diagnostic.masked_samples} raw-quality sample(s) masked for the liquid-fraction plot.`);
     $('selection-interpretation').innerHTML='<h3>Interpret this selection</h3>'+statements.map(s=>`<p>${E(s)}</p>`).join('')+'<p>Residual and physical-budget checks characterize the numerical equations. Pressure RMSE measures agreement with the experiment. Their meanings are distinct; the measured onset marker is not a computed equilibrium onset.</p>';
     $('selected-details').textContent=JSON.stringify(rr.map(r=>({id:r.id,success:r.success,reason:r.reason,property_domain_audited:!!r.property_domain_audited,comparison:r.comparison,quality_diagnostic:r.quality_diagnostic,scheme:r.scheme,steady:r.steady,initialization:r.initialization,source:r.source,saved_verification:r.saved_verification})),null,2);
-    if(page==='overview')overview();if(page==='explorer')explorer(rr);
+    if(page==='overview')overview();if(page==='explorer')explorer(rr);if(page==='comparison')comparison?.render(caseId);
   }
   function selectCase(id,page){caseId=id;$('case').value=id;configure(true);controller.showPage(page||'explorer');}
   $('case').innerHTML=D.cases.map(c=>`<option value="${c.id}">${c.id} · ${F(c.definition.p0_bar)} bar / ${F(c.definition.T0_K)} K</option>`).join('');
@@ -72,5 +72,8 @@
   for(const id of ['show-cfd','show-onset'])$(id).addEventListener('change',()=>controller.render());
   for(const op of ['all','none'])$('runs-'+op).addEventListener('click',()=>{selected=new Set(op==='all'?available().map(r=>r.id):[]);configure(false);controller.render();});
   $('provenance-details').textContent=JSON.stringify({publication:D.publication,settings:D.settings,presentation:D.presentation},null,2);
-  controller=U.mount(render);window.studyReport={data:D,...controller,selectCase,snapshot:()=>({...controller.snapshot(),caseId,cells,rows:rows().map(r=>r.id)})};
+  comparison=window.LettieriComparison?.install(D,U,{info,experimentTrace,referenceTrace,redraw:()=>controller.render()});
+  controller=U.mount(render);window.studyReport={data:D,...controller,selectCase,comparison,
+    snapshot:()=>({...controller.snapshot(),caseId,cells,rows:rows().map(r=>r.id),comparison:comparison?.snapshot()||null})};
+  if(comparison?.available())controller.showPage('comparison');
 })();

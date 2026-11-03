@@ -1,0 +1,23 @@
+{
+  "cases": ["L1", "L2", "L3", "L4", "L5"],
+  "campaign_id": "hll_muscl_van_leer_50_100_200",
+  "grids": [50, 100, 200],
+  "scheme_overrides": {"flux": "hll", "reconstruction": "muscl_van_leer"},
+  "grid_sequencing": "Cold 50-cell start; componentwise linear prolongation to 100 then 200; fresh residual normalization and CFL reset on every grid; stop a sequence if a stage fails",
+  "physics": {
+    "inviscid": {"wall_friction": 0.0, "roughness_m": 0.0, "heat_transfer": 0.0},
+    "haaland": {"wall_friction": 1.0, "roughness_m": 0.0, "heat_transfer": 0.0}
+  },
+  "critical": {
+    "rtol": 1e-9, "atol": 1e-11, "critical_tolerance": 1e-9,
+    "location_tolerance": 1e-12, "restart_fraction": 1e-5,
+    "regularity_samples": 257, "max_iterations": 60,
+    "max_step_fraction": 0.01, "first_step_fraction": 0.5,
+    "finite_diff_step": 1e-5, "max_function_evaluations": 160,
+    "max_ivp_evaluations": 30000, "wall_seconds": 300.0, "throw": false
+  },
+  "reference_profile_points": 801,
+  "fvm_max_steps": 4000,
+  "wall_law": "Darcy: 64/Re below 2300, Haaland -1.81 above; signed stress; local 4*A/P; adiabatic smooth wall",
+  "thermodynamics": "Original cached JAXProp bicubic table, including tabulated sound speed and Gruneisen parameter"
+}

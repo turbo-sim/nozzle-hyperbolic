@@ -1,5 +1,12 @@
 # Lettieri equilibrium HEM validation
 
+The current solver-verification campaign uses HLL with MUSCL reconstruction
+and the van Leer limiter, sequenced through 50, 100 and 200 cells, for both
+inviscid and smooth-wall Haaland cases. It compares these new FVM solutions
+with independent NozzleX critical-point space marching. Its controls and reproduction
+instructions are in [SOLVER_COMPARISON.md](SOLVER_COMPARISON.md). The original
+validation evidence described below is retained at its recorded source epoch.
+
 The modernized [REPORT.html](REPORT.html) is a portable offline Plotly report.
 Its five operating-case cards and shared selectors choose L1–L5, mesh, grid
 geometry, audited/preflight scope and individual saved attempts. Pressure,
@@ -7,20 +14,22 @@ liquid fraction, residuals, CFL, mass-flow diagnostics and mesh sensitivity use
 the selected data. The campaign overview also retains all thirteen attempts
 and a five-panel finest-grid pressure comparison.
 
-This presentation update reran no numerical case, property preparation or
-residual verification. All 49 saved numerical/reference input files retain
+The earlier presentation update reran no numerical case, property preparation
+or residual verification. Its 49 saved numerical/reference input files retain
 their pre-edit hashes. The original NPZ/JSON records, workbooks and settings are
 embedded in the evidence download. Recorded verification results are displayed
 at their original source epoch, not relabeled as fresh audits of today's code.
 The existing static exports and numerical [REPORT.md](REPORT.md) tables remain.
 
-Application/data checks passed for all five cases, mesh and attempt filters,
-quality masks, reference availability, themes and keyboard navigation. Browser
-preview was unavailable because the browser access host could not be reached;
-this limitation is separate from the automated application checks.
+The current campaign adds thirty FVM grid stages and resamples ten critical
+space marches at the new cell centers. The earlier 48/96-cell comparison and
+four reference refinements are retained without overwriting the original records.
+The report sources provide saved-data and isolated-browser audits, including
+solver visibility, marker skipping, geometry and logarithmic error panels.
 
-This case uses the shared `NozzleModel` and generic FVM solver, equilibrium
-JAXProp CO2 bicubic properties, and exactly zero wall shear and heat transfer.
+The original case uses the shared `NozzleModel` and generic FVM solver,
+equilibrium JAXProp CO2 bicubic properties, and zero wall shear and heat transfer.
+The added Haaland variant is also adiabatic.
 It is separate from the nonequilibrium two-fluid port. The experiment contains
 delayed condensation; disagreement of an equilibrium calculation is a physical
 validation result, not automatically a solver defect.

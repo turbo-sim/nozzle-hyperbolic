@@ -1,0 +1,6 @@
+# Numerical manifests and the offline report hash exact file bytes.
+# Preserve them across Git installations with different core.autocrlf settings.
+settings.json -text
+data/** -text
+outputs/** -text
+REPORT.html -text
