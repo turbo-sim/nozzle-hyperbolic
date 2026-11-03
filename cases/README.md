@@ -10,24 +10,25 @@ and refactoring checks live in [`development/`](../development/README.md).
 | [TurboExpo2025/](TurboExpo2025/README.md) | Published perfect-gas and equilibrium HEM case matrix, first-order paper fluxes with current implicit integration, scalar/mesh comparisons and a standalone HTML report |
 | [NICFD2026/](NICFD2026/README.md) | All six published flashing-water and nitrogen–water cases, current-solver measurements and standalone comparison reports |
 | [lettieri_validation/](lettieri_validation/README.md) | Five-case equilibrium HEM comparison, measured contour, original L1/L5 Excel/CFD and transcribed published L2–L4 pressure data |
-| [validation/](validation/notes.md) | Literature data from Barana, Simoneau, Spinelli, and Zhu/Elbel, plus data processing and plotting scripts |
-| [validation_shock_fvs/](validation_shock_fvs/) | Lettieri nozzle FVS shock comparison, settings and nozzle geometry |
-| [data_assimilation/](data_assimilation/) | Inverse-designed CO2 nozzle runs, staged cold starts and interfacial-area postprocessing |
-| [nicfd/](nicfd/) | Grid-convergence analysis and publication figure scripts |
-| [r1233zde_inlet_sensitivity/](r1233zde_inlet_sensitivity/README.md) | R1233zd(E) flashing-nozzle inlet studies and property-table utilities |
-| [flashing-nozzle-data/](flashing-nozzle-data/README.md) | Flashing-nozzle dataset metadata, indexing and thermodynamic plotting tools |
+| [archive/validation/](archive/validation/notes.md) | Literature data from Barana, Simoneau, Spinelli, and Zhu/Elbel, plus historical processing and plotting scripts |
+| [archive/validation_shock_fvs/](archive/validation_shock_fvs/) | Historical Lettieri nozzle FVS shock comparison, settings and nozzle geometry |
+| [archive/data_assimilation/](archive/data_assimilation/) | Inverse-designed CO2 nozzle runs, staged cold starts and interfacial-area postprocessing |
+| [archive/nicfd/](archive/nicfd/) | Historical grid-convergence analysis and publication figure scripts |
+| [archive/r1233zde_inlet_sensitivity/](archive/r1233zde_inlet_sensitivity/README.md) | R1233zd(E) flashing-nozzle inlet studies and property-table utilities |
+| [archive/flashing-nozzle-data/](archive/flashing-nozzle-data/README.md) | Flashing-nozzle dataset metadata, indexing and thermodynamic plotting tools |
 
 The historical folder name `validation_shock_fvs` is retained. Comparison with
 an analytical solution is verification; comparison with experiments is
-validation. The [reference-data notes](validation/notes.md) discuss that distinction.
+validation. The [reference-data notes](archive/validation/notes.md) discuss that distinction.
 
-Imports referring to the former `case_study` package now use `cases`, for example
-`cases.nicfd.grid_convergence_gci`. Update local bookmarks and commands to use
-`cases/<case>/` and `cases/validation/<dataset>/`.
+The six historical collections now live under `cases/archive/`; duplicate
+copies at their former top-level paths have been removed. Their tracked archive
+contents are unchanged. Use the active case directories above for maintained
+workflows and `cases/archive/validation/<dataset>/` for the archived literature
+data. Historical import paths and commands may require individual migration.
 
-This consolidation preserves case settings, function bodies and saved data;
-only locations, package references and associated documentation were updated.
-No case programs or simulations were rerun. Older scripts retain their existing
+The archive preserves case settings, function bodies and saved data. No case
+programs or simulations were rerun for duplicate removal. Older scripts retain their existing
 working-directory assumptions and pre-existing dependencies: in particular,
 the data-assimilation wrappers still refer to the retired `dev_scripts/`
 driver. Their execution needs a separate review against the maintained
