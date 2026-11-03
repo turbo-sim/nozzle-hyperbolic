@@ -10,11 +10,25 @@
 - [development/](development/README.md): Alberto's legacy research scripts and
   Roberto's controlled verification and numerical studies.
 - [tests/](tests/README.md): organized production tests, analytical checks and saved numerical regressions.
-- [docs/](docs/README.md): current guides, proposals, physical derivations and historical audits.
+- [docs/](docs/README.md): Sphinx documentation, with earlier guides and research material in [docs/notes/](docs/notes/README.md).
 
-Explore the [interactive architecture map](docs/architecture/ARCHITECTURE.html),
-[vector diagram](docs/architecture/ARCHITECTURE.svg), and
-[detailed architecture guide](docs/architecture/ARCHITECTURE.md).
+## Documentation
+
+The [Sphinx sources](docs/source/index.md) cover getting started, the three
+physical models, numerical methods, demo examples and the generated API reference.
+Build a local preview with:
+
+```bash
+poetry run python docs/build_docs.py
+```
+
+Use `--no-autobuild` for a single HTML build. See [docs/README.md](docs/README.md)
+for the build workflow. The original documents remain available as repository
+notes outside the Sphinx source tree.
+
+Explore the [interactive architecture map](docs/notes/architecture/ARCHITECTURE.html),
+[vector diagram](docs/notes/architecture/ARCHITECTURE.svg), and
+[detailed architecture guide](docs/notes/architecture/ARCHITECTURE.md).
 
 ## Shared finite-volume solver
 
@@ -46,7 +60,7 @@ includes Sod and nozzle pressure-release animations. Steady verification and
 runtime regression monitoring live in
 [`development/roberto/benchmarking/`](development/roberto/benchmarking/README.md).
 
-The [two-fluid migration guide](docs/two_fluid_migration.md) records Alberto's
+The [two-fluid migration guide](docs/notes/two_fluid_migration.md) records Alberto's
 frozen physical reference, eight-state/six-balance/two-EOS formulation,
 explicit `model_compatibility` flux, closure policies and verification limits.
 The [limiter comparison](development/limiters/README.md) covers Minmod, Superbee
@@ -68,9 +82,9 @@ analytical projections. Numerical methods, meshes, timing repetitions and
 acceptance settings belong to the benchmark profile.
 
 The production steady defaults are CFL 0.2, accepted-step growth 1.2, maximum
-CFL 1e6, and ten Newton corrections. The [architecture guide](docs/architecture/ARCHITECTURE.md)
-describes the supported choices. The [model interface](docs/model_interface.md)
-and [migration guide](docs/migration.md) explain extensions and breaking changes.
+CFL 1e6, and ten Newton corrections. The [architecture guide](docs/notes/architecture/ARCHITECTURE.md)
+describes the supported choices. The [model interface](docs/notes/model_interface.md)
+and [migration guide](docs/notes/migration.md) explain extensions and breaking changes.
 
 ```powershell
 poetry run python -B -m development.roberto.benchmarking.scripts.run

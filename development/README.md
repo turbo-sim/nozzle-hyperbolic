@@ -1,7 +1,7 @@
 # Development workspace
 
 For experiment layout, verification, timing and report packaging, follow the
-[numerical study conventions](../docs/numerical_studies.md).
+[numerical study conventions](../docs/notes/numerical_studies.md).
 
 All development work is grouped under this single directory:
 
@@ -27,7 +27,7 @@ All development work is grouped under this single directory:
 
 The implemented shared solver's residual definitions, convergence policy and
 monitoring API are documented in
-[residual monitoring](../docs/residual_monitoring.md).
+[residual monitoring](../docs/notes/residual_monitoring.md).
 
 Roberto's [study index](roberto/README.md) lists the retained sensitivity and
 transient studies. The retired nozzle and annular example folders and their

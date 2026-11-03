@@ -443,6 +443,6 @@ and small-grid linearization checks, not convergence results for the
 - [Nozzle storage, flux, sources, boundary rows and physical audits](../../src/nozzle_hyperbolic/models/euler_nozzle/model.py).
 - [Shared coupled spatial and implicit operator](../../src/nozzle_hyperbolic/solvers/fvm/operator.py).
 - [Model-owned acoustic and finite-wave outlet laws](../../src/nozzle_hyperbolic/models/euler_outlet.py).
-- [Residual definitions and stopping semantics](../../docs/residual_monitoring.md).
+- [Residual definitions and stopping semantics](../../docs/notes/residual_monitoring.md).
 - [General-EOS backpressure derivation and scope](../BC_backpressure/THEORY.md).
 - [Direct adapter](scripts/direct.py), [initial-field construction](scripts/problem.py) and [independent audit](scripts/audit.py).

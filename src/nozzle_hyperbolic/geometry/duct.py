@@ -7,7 +7,7 @@ Each function returns a Geometry object containing:
   D_h     â€” hydraulic diameter                 (N,)  [m]
   roughness â€” wall roughness                   scalar [m]
 
-All functions accept (x, roughness=0.0, **kwargs) and return Geometry.
+All functions accept ``(x, roughness=0.0, **kwargs)`` and return Geometry.
 x must be a 1-D NumPy array of cell-centre positions.
 """
 
@@ -490,12 +490,14 @@ def get_nozzle_simoneau_sharp(
     Î”slope = 0.119 at the entry and 0.066 at the exit).  0.0 (default) â†’ the
     sharp corner, bit-for-bit.  The blend never goes below radius_throat.
 
-    Sections (blend sections have zero length when the blend length is 0):
+    Sections (blend sections have zero length when the blend length is 0)::
+
         0: Linear convergent,   x < x_entry - L_entry/2
         1: Entry blend,         x in [x_entry - L_entry/2, x_entry + L_entry/2]
         2: Constant throat,     x in [x_entry + L_entry/2, x_exit - L_exit/2]
         3: Exit blend,          x in [x_exit - L_exit/2, x_exit + L_exit/2]
         4: Linear divergent,    x > x_exit + L_exit/2
+
     with x_entry = convergent_length, x_exit = convergent_length + throat_length.
     """
     x_entry = convergent_length

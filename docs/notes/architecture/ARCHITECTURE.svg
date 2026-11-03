@@ -1,0 +1,272 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="2490" viewBox="0 0 1800 2490" role="img" aria-labelledby="architecture-title architecture-description">
+<title id="architecture-title">nozzle-hyperbolic: model-agnostic finite-volume architecture</title>
+<desc id="architecture-description">A source-verified architecture map. Physical models supply EOS, geometry, closures, rectangular storage, fluxes, nonconservative terms, cell constraints and boundary equations to a common finite-volume engine. Numerical choices include constant or MUSCL reconstruction, Stadtke FVS, implemented HLL, Rusanov and model-owned Roe FDS alternatives, coupled or segregated boundaries, explicit Euler, SSPRK3 and classical RK4, backward Euler, automatic differentiation, direct linear solves, Newton policy, coarse-to-fine initialization and convergence audits. Model compatibility choices are explicit opt-ins, with documented verification limits.</desc>
+<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0L8 4L0 8Z" fill="#8A9CAD"/></marker></defs>
+<style>text{font-family:Arial,Helvetica,sans-serif} [data-topic]{cursor:pointer} [data-topic]:focus{outline:none} [data-topic]:focus>rect:first-of-type{stroke:#D59B2F;stroke-width:3}</style>
+<rect width="1800" height="2490" fill="#FFFFFF"/>
+
+<text x="70" y="54" font-size="15" font-weight="700" fill="#2F62C4" letter-spacing="2">NOZZLE-HYPERBOLIC  /  PACKAGE MAP</text>
+<text x="70" y="104" font-size="38" font-weight="700" fill="#142C44" letter-spacing="-0.8">Model-owned physics. Shared numerical machinery.</text>
+<text x="70" y="139" font-size="18" font-weight="400" fill="#5C7083" >A constrained fixed-mesh FVM architecture · source checked 2 November 2026</text>
+<rect x="1255" y="126" width="92" height="25" rx="12" fill="#FFF3CB" stroke="#E8D495" stroke-dasharray="none"/>
+<text x="1265" y="143" font-size="12.5" font-weight="700" fill="#775818" >DEFAULT</text>
+<text x="1360" y="144" font-size="14" font-weight="400" fill="#5C7083" >current default</text>
+<rect x="1490" y="126" width="125" height="25" rx="12" fill="#EAF5F0" stroke="#C3DFD1" stroke-dasharray="none"/>
+<text x="1500" y="143" font-size="12.5" font-weight="700" fill="#247557" >MODEL POLICY</text>
+<text x="1625" y="144" font-size="14" font-weight="400" fill="#5C7083" >explicit opt-in</text>
+<g id="architecture-card-api" data-topic="api" role="button" tabindex="0" aria-labelledby="architecture-card-api-title" aria-describedby="architecture-card-api-description">
+<title id="architecture-card-api-title">User configuration and public entry points</title><desc id="architecture-card-api-description">Construct a physical model and fixed mesh. Choose Scheme, SteadySettings and ResidualPolicy. Bind an Operator or call the steady, grid-sequence or physical-time drivers. These are independent selections, not a model-specific numerical backend.</desc>
+<rect x="70" y="180" width="1660" height="115" rx="18" fill="white" stroke="#D7E1EA" />
+<rect x="71" y="198" width="4" height="79" rx="2" fill="#7253A5" stroke="#7253A5" />
+<text x="93" y="216" font-size="21" font-weight="700" fill="#142C44" >User configuration and public entry points</text>
+<text x="95" y="250" font-size="19" font-weight="600" fill="#142C44" >Model + mesh + fluid / closures</text>
+<text x="610" y="250" font-size="19" font-weight="600" fill="#142C44" >Scheme · SteadySettings · ResidualPolicy</text>
+<text x="1220" y="250" font-size="19" font-weight="600" fill="#142C44" >Operator / solve_* drivers</text>
+</g>
+<path d="M900 295L900 330" fill="none" stroke="#D7E1EA" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="50" y="330" width="1700" height="340" rx="24" fill="#EFF7F6" stroke="none" />
+<text x="76" y="365" font-size="17" font-weight="700" fill="#127D85" letter-spacing="1.1">01  /  MODEL-OWNED PHYSICS</text>
+<text x="750" y="365" font-size="16" font-weight="400" fill="#5C7083" >Model callbacks define the equations; solver choices stay independent.</text>
+<g id="architecture-card-models" data-topic="models" role="button" tabindex="0" aria-labelledby="architecture-card-models-title" aria-describedby="architecture-card-models-description">
+<title id="architecture-card-models-title">Physical models</title><desc id="architecture-card-models-description">Shared models include nozzle Euler, annular Euler with swirl, scalar advection and Burgers, and the eight-state constrained two-fluid model. Two-fluid uses the frozen Alberto compatibility discretization with explicit limits; final physical validation remains separate. User models extend through generic contracts.</desc>
+<rect x="70" y="390" width="400" height="253" rx="18" fill="white" stroke="#D7E1EA" />
+<rect x="71" y="408" width="4" height="217" rx="2" fill="#127D85" stroke="#127D85" />
+<text x="93" y="426" font-size="21" font-weight="700" fill="#142C44" >Physical models</text>
+<text x="94" y="458" font-size="18" font-weight="700" fill="#142C44" >Euler nozzle / duct</text>
+<text x="94" y="481" font-size="15" font-weight="400" fill="#5C7083" >(p, u, h) · 3 conservative balances</text>
+<text x="94" y="512" font-size="18" font-weight="700" fill="#142C44" >Annular Euler + swirl</text>
+<text x="94" y="535" font-size="15" font-weight="400" fill="#5C7083" >(p, v_m, ell, h) · ell = r v_theta</text>
+<text x="94" y="566" font-size="16" font-weight="400" fill="#142C44" >Advection · Burgers · user model</text>
+<text x="94" y="590" font-size="16" font-weight="400" fill="#142C44" >Two-fluid: 8 states / 6 balances + 2 EOS</text>
+<rect x="94" y="607" width="156" height="25" rx="12" fill="#EAF5F0" stroke="#C3DFD1" stroke-dasharray="none"/>
+<text x="104" y="624" font-size="12.5" font-weight="700" fill="#247557" >COMPATIBILITY</text>
+<text x="265" y="624" font-size="13" font-weight="400" fill="#5C7083" >explicit verification limits</text>
+</g>
+<g id="architecture-card-eos" data-topic="eos" role="button" tabindex="0" aria-labelledby="architecture-card-eos-title" aria-describedby="architecture-card-eos-description">
+<title id="architecture-card-eos-title">Thermodynamics</title><desc id="architecture-card-eos-description">Euler evolution obtains state and thermodynamic derivatives through JAXProp get_state. Native JAX fluids pass through; configured host-only fluids use JAXProp&#x27;s callback/custom-JVP adapter. The numerical engine contains no EOS assumptions. The finite-wave outlet computes general-EOS PH wave curves and retains closed forms for a perfect-gas backend. Separately scoped analytical verification references may assume a perfect gas.</desc>
+<rect x="490" y="390" width="400" height="253" rx="18" fill="white" stroke="#D7E1EA" />
+<rect x="491" y="408" width="4" height="217" rx="2" fill="#127D85" stroke="#127D85" />
+<text x="513" y="426" font-size="21" font-weight="700" fill="#142C44" >Thermodynamics</text>
+<text x="514" y="461" font-size="20" font-weight="700" fill="#127D85" >JAXProp fluid.get_state()</text>
+<text x="514" y="495" font-size="16.5" font-weight="400" fill="#5C7083" >General EOS / configured fluid backend</text>
+<text x="514" y="523" font-size="16.5" font-weight="400" fill="#5C7083" >Native JAX or host-fluid bridge</text>
+<text x="514" y="551" font-size="16.5" font-weight="400" fill="#5C7083" >Properties, derivatives and domain checks</text>
+<rect x="513" y="583" width="354" height="38" rx="9" fill="#FFF8E8" stroke="#EDDBAE" />
+<text x="525" y="607" font-size="14" font-weight="600" fill="#815F21" >Finite-wave outlet: general-EOS curves</text>
+</g>
+<g id="architecture-card-geometry" data-topic="geometry" role="button" tabindex="0" aria-labelledby="architecture-card-geometry-title" aria-describedby="architecture-card-geometry-description">
+<title id="architecture-card-geometry-title">Fixed geometry + mesh</title><desc id="architecture-card-geometry-description">Geometry builders preprocess stationary nozzle and annular geometries into physical cells, endpoint traces, face measures, cell volumes and integrated source geometry. Annular NURBS construction is host preprocessing; geometry is not evolved in time.</desc>
+<rect x="910" y="390" width="400" height="253" rx="18" fill="white" stroke="#D7E1EA" />
+<rect x="911" y="408" width="4" height="217" rx="2" fill="#127D85" stroke="#127D85" />
+<text x="933" y="426" font-size="21" font-weight="700" fill="#142C44" >Fixed geometry + mesh</text>
+<text x="934" y="459" font-size="16.5" font-weight="400" fill="#5C7083" >Nozzle A(x) / constant-area duct</text>
+<text x="934" y="488" font-size="16.5" font-weight="400" fill="#5C7083" >Annular NURBS midline + height</text>
+<text x="934" y="517" font-size="16.5" font-weight="400" fill="#5C7083" >Physical cells + endpoint traces</text>
+<text x="934" y="546" font-size="16.5" font-weight="400" fill="#5C7083" >Face areas · volumes · source measures</text>
+<text x="934" y="575" font-size="16.5" font-weight="400" fill="#5C7083" >Stationary 1D geometry</text>
+</g>
+<g id="architecture-card-closures" data-topic="closures" role="button" tabindex="0" aria-labelledby="architecture-card-closures-title" aria-describedby="architecture-card-closures-description">
+<title id="architecture-card-closures-title">Sources + closure laws</title><desc id="architecture-card-closures-description">Physical models inject wall shear, heat transfer and other sources. Nozzle-owned closure helpers, reused by annular Euler, include prescribed wall data, Haaland/Darcy friction and retained mixture correlations. Two-fluid closures provide the frozen interfacial area, drag, heat and mass exchange laws; upstream TODO wall physics is not invented. Some annular empirical laws remain placeholders. Models declare dependency reach and explicit source timestep restrictions.</desc>
+<rect x="1330" y="390" width="400" height="253" rx="18" fill="white" stroke="#D7E1EA" />
+<rect x="1331" y="408" width="4" height="217" rx="2" fill="#127D85" stroke="#127D85" />
+<text x="1353" y="426" font-size="21" font-weight="700" fill="#142C44" >Sources + closure laws</text>
+<text x="1354" y="459" font-size="16.5" font-weight="400" fill="#5C7083" >Prescribed wall shear and heat</text>
+<text x="1354" y="488" font-size="16.5" font-weight="400" fill="#5C7083" >Haaland / Darcy friction</text>
+<text x="1354" y="517" font-size="16.5" font-weight="400" fill="#5C7083" >Interphase mass / heat / drag / area</text>
+<text x="1354" y="546" font-size="16.5" font-weight="400" fill="#5C7083" >Model-owned integrated sources</text>
+<text x="1354" y="575" font-size="16.5" font-weight="400" fill="#5C7083" >Optional source timestep restriction</text>
+<text x="1354" y="616" font-size="13.5" font-weight="400" fill="#5C7083" >Annular empirical laws include placeholders</text>
+</g>
+<path d="M900 670L900 708" fill="none" stroke="#D7E1EA" stroke-width="2" marker-end="url(#arrow)"/>
+<g id="architecture-card-contract" data-topic="contract" role="button" tabindex="0" aria-labelledby="architecture-card-contract-title" aria-describedby="architecture-card-contract-description">
+<title id="architecture-card-contract-title">02  /  Structural model contract</title><desc id="architecture-card-contract-description">A model declares V state variables, T transported balances and C cell constraints, with V=T+C. Storage can be rectangular. Models own physical fluxes, geometry/source and nonconservative terms, EOS constraints, trace equations, fixed scales and dependency stencils. Conservative models explicitly declare zero nonconservative terms.</desc>
+<rect x="70" y="710" width="1660" height="127" rx="18" fill="white" stroke="#D7E1EA" />
+<rect x="71" y="728" width="4" height="91" rx="2" fill="#2F62C4" stroke="#2F62C4" />
+<text x="93" y="746" font-size="21" font-weight="700" fill="#142C44" >02  /  Structural model contract</text>
+<rect x="1438" y="729" width="265" height="25" rx="12" fill="#EAF5F0" stroke="#C3DFD1" stroke-dasharray="none"/>
+<text x="1448" y="746" font-size="12.5" font-weight="700" fill="#247557" >MODEL AGNOSTIC</text>
+<text x="95" y="782" font-size="18" font-weight="400" fill="#142C44" >V states = T balances + C constraints; rectangular Q(W); physical flux / waves; integrated source and NC work</text>
+<text x="95" y="812" font-size="17" font-weight="400" fill="#5C7083" >Boundary B(W,t) · admissibility · scales · dependency reach · initial state · optional fused face data</text>
+</g>
+<path d="M900 837L900 873" fill="none" stroke="#D7E1EA" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="50" y="875" width="1700" height="370" rx="24" fill="#F0F4FB" stroke="none" />
+<text x="76" y="910" font-size="17" font-weight="700" fill="#2F62C4" letter-spacing="1.1">03  /  SHARED SPATIAL DISCRETIZATION</text>
+<text x="750" y="910" font-size="16" font-weight="400" fill="#5C7083" >One shared balance assembly for all compatible physical models.</text>
+<g id="architecture-card-reconstruction" data-topic="reconstruction" role="button" tabindex="0" aria-labelledby="architecture-card-reconstruction-title" aria-describedby="architecture-card-reconstruction-description">
+<title id="architecture-card-reconstruction-title">Reconstruction</title><desc id="architecture-card-reconstruction-description">Scheme selects constant reconstruction or MUSCL with Van Leer, smooth Van Leer, Minmod, Superbee or sign-preserving Van Albada. Reconstruction uses physical coordinates on uniform/nonuniform meshes and zero-slope endpoint traces. Optional model-owned representation maps recover constrained face states without EOS branches in the engine.</desc>
+<rect x="70" y="935" width="400" height="280" rx="18" fill="white" stroke="#D7E1EA" />
+<rect x="71" y="953" width="4" height="244" rx="2" fill="#2F62C4" stroke="#2F62C4" />
+<text x="93" y="971" font-size="21" font-weight="700" fill="#142C44" >Reconstruction</text>
+<text x="95" y="1007" font-size="18" font-weight="700" fill="#142C44" >Constant / first order</text>
+<rect x="306" y="989" width="139" height="25" rx="12" fill="#FFF3CB" stroke="#E8D495" stroke-dasharray="none"/>
+<text x="316" y="1006" font-size="12.5" font-weight="700" fill="#775818" >DEFAULT</text>
+<text x="95" y="1045" font-size="17" font-weight="700" fill="#142C44" >MUSCL: Van Leer / smooth Van Leer</text>
+<text x="95" y="1075" font-size="17" font-weight="400" fill="#5C7083" >Minmod / Superbee / Van Albada</text>
+<text x="95" y="1122" font-size="15.5" font-weight="400" fill="#5C7083" >Coordinate-aware; nonuniform meshes</text>
+<text x="95" y="1150" font-size="15.5" font-weight="400" fill="#5C7083" >Model state map / EOS inverse at faces</text>
+<text x="95" y="1190" font-size="14" font-weight="600" fill="#2F62C4" >Scheme.reconstruction</text>
+</g>
+<path d="M470 1074L488 1074" fill="none" stroke="#D7E1EA" stroke-width="2" marker-end="url(#arrow)"/>
+<g id="architecture-card-fluxes" data-topic="fluxes" role="button" tabindex="0" aria-labelledby="architecture-card-fluxes-title" aria-describedby="architecture-card-fluxes-description">
+<title id="architecture-card-fluxes-title">Numerical interface flux</title><desc id="architecture-card-fluxes-description">The default Stadtke FVS uses model projectors/waves, Harten regularization and conservative sonic viscosity. HLL and Rusanov use model signal bounds without requiring an eigensystem. Implemented Roe FDS contracts model-owned finite-jump eigenspaces, with acoustic Harten regularization and exact contact/shear absolute value. Euler uses PH property calls, a centered secant and C2 roundoff blend with a 4096-times-machine-epsilon audit; invalid faces are rejected without fallback. Explicit timesteps also bound interface dissipation speeds. A conservative fourth-difference filter is optional and off by default.</desc>
+<rect x="490" y="935" width="640" height="280" rx="18" fill="white" stroke="#D7E1EA" />
+<rect x="491" y="953" width="4" height="244" rx="2" fill="#2F62C4" stroke="#2F62C4" />
+<text x="513" y="971" font-size="21" font-weight="700" fill="#142C44" >Numerical interface flux</text>
+<text x="515" y="1007" font-size="19" font-weight="700" fill="#142C44" >Stadtke FVS</text>
+<rect x="738" y="989" width="139" height="25" rx="12" fill="#FFF3CB" stroke="#E8D495" stroke-dasharray="none"/>
+<text x="748" y="1006" font-size="12.5" font-weight="700" fill="#775818" >DEFAULT</text>
+<text x="515" y="1035" font-size="15.5" font-weight="400" fill="#5C7083" >Model eigenstructure · Harten regularization · sonic viscosity</text>
+<text x="515" y="1073" font-size="18" font-weight="700" fill="#142C44" >HLL / Rusanov / Roe / Osher</text>
+<rect x="909" y="1055" width="163" height="25" rx="12" fill="#EAF5F0" stroke="#C3DFD1" stroke-dasharray="none"/>
+<text x="919" y="1072" font-size="12.5" font-weight="700" fill="#247557" >IMPLEMENTED</text>
+<text x="515" y="1099" font-size="15.5" font-weight="400" fill="#5C7083" >Model signal bounds, eigenspaces and declared state paths</text>
+<rect x="514" y="1116" width="590" height="59" rx="9" fill="#EAF5F0" stroke="#C3DFD1" />
+<text x="528" y="1140" font-size="18" font-weight="700" fill="#142C44" >Model compatibility flux</text>
+<rect x="821" y="1124" width="178" height="25" rx="12" fill="#EAF5F0" stroke="#C3DFD1" stroke-dasharray="none"/>
+<text x="831" y="1141" font-size="12.5" font-weight="700" fill="#247557" >EXPLICIT OPT-IN</text>
+<text x="528" y="1162" font-size="13.5" font-weight="400" fill="#5C7083" >Frozen physical/discrete reference; restricted flux combinations</text>
+<text x="515" y="1190" font-size="15" font-weight="400" fill="#5C7083" >Optional conservative fourth-difference filter · default OFF</text>
+</g>
+<path d="M1130 1074L1148 1074" fill="none" stroke="#D7E1EA" stroke-width="2" marker-end="url(#arrow)"/>
+<g id="architecture-card-spatial" data-topic="spatial" role="button" tabindex="0" aria-labelledby="architecture-card-spatial-title" aria-describedby="architecture-card-spatial-description">
+<title id="architecture-card-spatial-title">Balance residual assembly</title><desc id="architecture-card-spatial-description">The engine assembles flux divergence, model-owned integrated nonconservative work and sources. Compatibility corrections receive the unfiltered numerical flux before additional stabilization. Rectangular storage plus zero-storage cell constraints forms a square system; traces also have zero storage. Geometry is applied once by its declared owner.</desc>
+<rect x="1150" y="935" width="580" height="280" rx="18" fill="white" stroke="#D7E1EA" />
+<rect x="1151" y="953" width="4" height="244" rx="2" fill="#2F62C4" stroke="#2F62C4" />
+<text x="1173" y="971" font-size="21" font-weight="700" fill="#142C44" >Balance residual assembly</text>
+<text x="1175" y="1007" font-size="17" font-weight="400" fill="#5C7083" >Face flux to transported frame; apply face area</text>
+<text x="1175" y="1041" font-size="17" font-weight="400" fill="#5C7083" >Flux divergence + NC work - integrated source</text>
+<text x="1175" y="1075" font-size="17" font-weight="400" fill="#5C7083" >Rectangular transported storage Q(W)</text>
+<text x="1175" y="1109" font-size="17" font-weight="400" fill="#5C7083" >Zero-storage EOS cells and endpoint traces</text>
+<rect x="1174" y="1143" width="530" height="48" rx="10" fill="#EFF4FC" stroke="none" />
+<text x="1190" y="1174" font-size="17" font-weight="600" fill="#2F62C4" >R_i = A_R F_R - A_L F_L + NC_i - S_i</text>
+</g>
+<path d="M900 1245L900 1278" fill="none" stroke="#D7E1EA" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="50" y="1280" width="1700" height="280" rx="24" fill="#EFF7F6" stroke="none" />
+<text x="76" y="1315" font-size="17" font-weight="700" fill="#127D85" letter-spacing="1.1">04  /  BOUNDARY LAWS AND THEIR NUMERICAL TREATMENT</text>
+<text x="750" y="1315" font-size="16" font-weight="400" fill="#5C7083" >The physical equations are defined once; their solution strategy is selectable.</text>
+<g id="architecture-card-boundary-laws" data-topic="boundary-laws" role="button" tabindex="0" aria-labelledby="architecture-card-boundary-laws-title" aria-describedby="architecture-card-boundary-laws-description">
+<title id="architecture-card-boundary-laws-title">Physical boundary conditions</title><desc id="architecture-card-boundary-laws-description">Nozzle reservoir inlet enforces enthalpy, entropy and acoustic compatibility. Annular inlet also prescribes angle or angular momentum, or a complete supersonic state. Outlets select general-EOS acoustic/entropy or finite-wave laws with pressure, sonic/automatic or fully outgoing regimes. Finite-wave curves assume classical wave structure and retain perfect-gas closed forms. Sod uses transmissive traces. Scalar models supply their own inflow/outflow equations. Two-fluid inlet laws prescribe quality, slip and phase enthalpies; characteristic outlets and trace EOS constraints use the same coupled or segregated physical equations.</desc>
+<rect x="70" y="1340" width="810" height="195" rx="18" fill="white" stroke="#D7E1EA" />
+<rect x="71" y="1358" width="4" height="159" rx="2" fill="#127D85" stroke="#127D85" />
+<text x="93" y="1376" font-size="21" font-weight="700" fill="#142C44" >Physical boundary conditions</text>
+<text x="95" y="1409" font-size="16" font-weight="400" fill="#5C7083" >Reservoir inlet: h0 / s0 + acoustic compatibility; annular swirl law</text>
+<text x="95" y="1438" font-size="16" font-weight="400" fill="#5C7083" >Outlet: acoustic / entropy or finite-wave curves (both general EOS)</text>
+<text x="95" y="1467" font-size="16" font-weight="400" fill="#5C7083" >Regimes: subsonic / supersonic / automatic pressure / sonic / outgoing</text>
+<text x="95" y="1496" font-size="16" font-weight="400" fill="#5C7083" >Two-fluid: quality / slip / phase enthalpy + characteristic outlet</text>
+</g>
+<path d="M880 1434L898 1434" fill="none" stroke="#D7E1EA" stroke-width="2" marker-end="url(#arrow)"/>
+<g id="architecture-card-boundary-treatment" data-topic="boundary-treatment" role="button" tabindex="0" aria-labelledby="architecture-card-boundary-treatment-title" aria-describedby="architecture-card-boundary-treatment-description">
+<title id="architecture-card-boundary-treatment-title">Boundary solution strategy</title><desc id="architecture-card-boundary-treatment-description">Backward Euler can solve cell variables and zero-storage endpoint equations together in a coupled Newton system, or eliminate fully converged nonlinear boundary roots with implicit-function derivatives. Explicit Euler, SSPRK3 and RK4 require segregated nonlinear boundary solves at the required stages. Explicit coupled treatment is rejected by configuration.</desc>
+<rect x="900" y="1340" width="830" height="195" rx="18" fill="white" stroke="#D7E1EA" />
+<rect x="901" y="1358" width="4" height="159" rx="2" fill="#2F62C4" stroke="#2F62C4" />
+<text x="923" y="1376" font-size="21" font-weight="700" fill="#142C44" >Boundary solution strategy</text>
+<text x="925" y="1408" font-size="17" font-weight="700" fill="#2F62C4" >COUPLED · implicit default</text>
+<text x="1322" y="1408" font-size="17" font-weight="700" fill="#2F62C4" >SEGREGATED · implicit or explicit</text>
+<text x="925" y="1438" font-size="15.5" font-weight="400" fill="#5C7083" >Cell + trace unknowns in one system</text>
+<text x="925" y="1465" font-size="15.5" font-weight="400" fill="#5C7083" >Boundary rows have zero storage</text>
+<text x="1322" y="1438" font-size="15.5" font-weight="400" fill="#5C7083" >Nonlinear trace solve; implicit root AD</text>
+<text x="1322" y="1465" font-size="15.5" font-weight="400" fill="#5C7083" >Explicit methods: stage completion</text>
+<text x="925" y="1512" font-size="15" font-weight="400" fill="#5C7083" >Physical laws stay model-owned. Explicit + coupled is not supported.</text>
+</g>
+<path d="M900 1560L900 1593" fill="none" stroke="#D7E1EA" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="50" y="1595" width="1700" height="360" rx="24" fill="#F0F4FB" stroke="none" />
+<text x="76" y="1630" font-size="17" font-weight="700" fill="#2F62C4" letter-spacing="1.1">05  /  TIME INTEGRATION AND IMPLICIT ALGEBRA</text>
+<text x="750" y="1630" font-size="16" font-weight="400" fill="#5C7083" >Conservative stages and Newton solves use the same spatial operator.</text>
+<g id="architecture-card-time-explicit" data-topic="time-explicit" role="button" tabindex="0" aria-labelledby="architecture-card-time-explicit-title" aria-describedby="architecture-card-time-explicit-description">
+<title id="architecture-card-time-explicit-title">Explicit integration</title><desc id="architecture-card-time-explicit-description">Forward Euler, SSPRK3 and classical RK4 advance transported contents. Constrained initial states and every stage recover all cell variables with EOS constraints and complete nonlinear boundary equations at their stage times. Thermodynamics, sources and fluxes are recomputed. RK4 is not SSP. Auxiliary solves retain safeguards.</desc>
+<rect x="70" y="1655" width="400" height="270" rx="18" fill="white" stroke="#D7E1EA" />
+<rect x="71" y="1673" width="4" height="234" rx="2" fill="#2F62C4" stroke="#2F62C4" />
+<text x="93" y="1691" font-size="21" font-weight="700" fill="#142C44" >Explicit integration</text>
+<text x="95" y="1725" font-size="19" font-weight="400" fill="#142C44" >Forward Euler</text>
+<text x="95" y="1759" font-size="19" font-weight="400" fill="#142C44" >SSPRK3 / classical RK4</text>
+<text x="95" y="1800" font-size="15.5" font-weight="400" fill="#5C7083" >Advance transported cell contents</text>
+<text x="95" y="1827" font-size="15.5" font-weight="400" fill="#5C7083" >Recover cell constraints at every stage</text>
+<text x="95" y="1854" font-size="15.5" font-weight="400" fill="#5C7083" >Recompute properties, sources and BCs</text>
+<text x="95" y="1881" font-size="15.5" font-weight="400" fill="#5C7083" >Safeguarded local solves; RK4 is not SSP</text>
+</g>
+<g id="architecture-card-time-implicit" data-topic="time-implicit" role="button" tabindex="0" aria-labelledby="architecture-card-time-implicit-title" aria-describedby="architecture-card-time-implicit-description">
+<title id="architecture-card-time-implicit-title">Implicit integration</title><desc id="architecture-card-time-implicit-description">Backward Euler combines nonlinear conservative storage differences with the new-state spatial residual. Cell EOS and boundary constraints carry zero storage. Coupled or exactly eliminated boundary treatment enters the same implicit equations. Strict nonlinear convergence is required; failed implicit attempts reject and reduce the timestep.</desc>
+<rect x="490" y="1655" width="400" height="270" rx="18" fill="white" stroke="#D7E1EA" />
+<rect x="491" y="1673" width="4" height="234" rx="2" fill="#2F62C4" stroke="#2F62C4" />
+<text x="513" y="1691" font-size="21" font-weight="700" fill="#142C44" >Implicit integration</text>
+<text x="515" y="1725" font-size="21" font-weight="700" fill="#142C44" >Backward Euler</text>
+<rect x="707" y="1707" width="158" height="25" rx="12" fill="#FFF3CB" stroke="#E8D495" stroke-dasharray="none"/>
+<text x="717" y="1724" font-size="12.5" font-weight="700" fill="#775818" >DEFAULT</text>
+<text x="515" y="1771" font-size="15.5" font-weight="400" fill="#5C7083" >Storage difference + dt × spatial R</text>
+<text x="515" y="1801" font-size="15.5" font-weight="400" fill="#5C7083" >Coupled traces or nonlinear elimination</text>
+<text x="515" y="1831" font-size="15.5" font-weight="400" fill="#5C7083" >Strict inner convergence required</text>
+<text x="515" y="1861" font-size="15.5" font-weight="400" fill="#5C7083" >Invalid / failed solve → reject + retry</text>
+</g>
+<path d="M890 1785L908 1785" fill="none" stroke="#D7E1EA" stroke-width="2" marker-end="url(#arrow)"/>
+<g id="architecture-card-jacobian" data-topic="jacobian" role="button" tabindex="0" aria-labelledby="architecture-card-jacobian-title" aria-describedby="architecture-card-jacobian-description">
+<title id="architecture-card-jacobian-title">Jacobian + linear solve</title><desc id="architecture-card-jacobian-description">The implicit residual is differentiated with JAX AD. Default colored JVPs use model-declared stencil reach and extract block bands directly. The direct block-banded solve is the default. Dense AD/dense solve are available for audit or global coupling. There is no Krylov solver or preconditioner option in this API.</desc>
+<rect x="910" y="1655" width="400" height="270" rx="18" fill="white" stroke="#D7E1EA" />
+<rect x="911" y="1673" width="4" height="234" rx="2" fill="#2F62C4" stroke="#2F62C4" />
+<text x="933" y="1691" font-size="21" font-weight="700" fill="#142C44" >Jacobian + linear solve</text>
+<text x="935" y="1725" font-size="16" font-weight="400" fill="#5C7083" >Exact JAX AD · JIT / 64-bit</text>
+<text x="935" y="1754" font-size="16" font-weight="400" fill="#5C7083" >Colored JVPs → block bands</text>
+<text x="935" y="1783" font-size="16" font-weight="400" fill="#5C7083" >Declared dependency stencils</text>
+<text x="935" y="1812" font-size="16" font-weight="400" fill="#5C7083" >Block-banded direct solve</text>
+<text x="935" y="1841" font-size="16" font-weight="400" fill="#5C7083" >Dense AD / dense solve alternative</text>
+<text x="935" y="1870" font-size="16" font-weight="400" fill="#5C7083" >Dense-versus-colored audit</text>
+</g>
+<path d="M1310 1785L1328 1785" fill="none" stroke="#D7E1EA" stroke-width="2" marker-end="url(#arrow)"/>
+<g id="architecture-card-newton" data-topic="newton" role="button" tabindex="0" aria-labelledby="architecture-card-newton-title" aria-describedby="architecture-card-newton-description">
+<title id="architecture-card-newton-title">Newton iteration</title><desc id="architecture-card-newton-description">Implicit flow Newton uses undamped full corrections by default, while retaining finite/admissible trial checks and strict update plus residual tests. Armijo damping is optional. The default correction cap is ten. Reaching the cap without convergence does not accept the timestep; a failed attempt triggers outer timestep reduction. Boundary and recovery auxiliary solves retain safeguards.</desc>
+<rect x="1330" y="1655" width="400" height="270" rx="18" fill="white" stroke="#D7E1EA" />
+<rect x="1331" y="1673" width="4" height="234" rx="2" fill="#2F62C4" stroke="#2F62C4" />
+<text x="1353" y="1691" font-size="21" font-weight="700" fill="#142C44" >Newton iteration</text>
+<text x="1355" y="1725" font-size="20" font-weight="700" fill="#142C44" >Full corrections</text>
+<rect x="1552" y="1707" width="153" height="25" rx="12" fill="#FFF3CB" stroke="#E8D495" stroke-dasharray="none"/>
+<text x="1562" y="1724" font-size="12.5" font-weight="700" fill="#775818" >DEFAULT</text>
+<text x="1355" y="1766" font-size="15.5" font-weight="400" fill="#5C7083" >Optional Armijo backtracking</text>
+<text x="1355" y="1796" font-size="15.5" font-weight="400" fill="#5C7083" >Cap 10 · update 1e−10 + residual 1e−12</text>
+<text x="1355" y="1826" font-size="15.5" font-weight="400" fill="#5C7083" >Finite / admissible trial checks</text>
+<text x="1355" y="1856" font-size="15.5" font-weight="400" fill="#5C7083" >Unconverged attempt → timestep retry</text>
+</g>
+<path d="M900 1955L900 1988" fill="none" stroke="#D7E1EA" stroke-width="2" marker-end="url(#arrow)"/>
+<rect x="50" y="1990" width="1700" height="275" rx="24" fill="#F4F1F9" stroke="none" />
+<text x="76" y="2025" font-size="17" font-weight="700" fill="#7253A5" letter-spacing="1.1">06  /  INITIALIZATION, DRIVERS AND ACCEPTANCE</text>
+<text x="750" y="2025" font-size="16" font-weight="400" fill="#5C7083" >Steady convergence and physical transient integration are separate tasks.</text>
+<g id="architecture-card-initialization" data-topic="initialization" role="button" tabindex="0" aria-labelledby="architecture-card-initialization-title" aria-describedby="architecture-card-initialization-description">
+<title id="architecture-card-initialization-title">Initialization acceleration</title><desc id="architecture-card-initialization-description">Use a single grid, a strictly increasing grid hierarchy, explicit physical-parameter stages or a portable restart. Successful source states seed transported-density interpolation, constrained content recovery and trace completion. Every stage records preparation/solve cost and all failed attempts. This is steady initialization, not conservative physical-time remapping or FAS multigrid.</desc>
+<rect x="70" y="2050" width="540" height="190" rx="18" fill="white" stroke="#D7E1EA" />
+<rect x="71" y="2068" width="4" height="154" rx="2" fill="#7253A5" stroke="#7253A5" />
+<text x="93" y="2086" font-size="21" font-weight="700" fill="#142C44" >Initialization acceleration</text>
+<text x="95" y="2120" font-size="18" font-weight="600" fill="#142C44" >Grid / physical parameter stages / restart</text>
+<text x="95" y="2154" font-size="15.5" font-weight="400" fill="#5C7083" >Content recovery + cell/trace constraints</text>
+<text x="95" y="2181" font-size="15.5" font-weight="400" fill="#5C7083" >Preparation costs and failed attempts retained</text>
+<text x="95" y="2217" font-size="14" font-weight="700" fill="#7253A5" >Initialization acceleration · not FAS multigrid</text>
+</g>
+<g id="architecture-card-control" data-topic="control" role="button" tabindex="0" aria-labelledby="architecture-card-control-title" aria-describedby="architecture-card-control-description">
+<title id="architecture-card-control-title">Drivers + timestep control</title><desc id="architecture-card-control-description">Steady pseudo-time marching, grid-sequence orchestration and requested-time transient solves share operator kernels. Timestep information combines waves with model/source and filter restrictions. Accepted and rejected attempts are retained; CFL grows or shrinks according to steady settings. Finite/admissible states and inner convergence control acceptance.</desc>
+<rect x="630" y="2050" width="540" height="190" rx="18" fill="white" stroke="#D7E1EA" />
+<rect x="631" y="2068" width="4" height="154" rx="2" fill="#7253A5" stroke="#7253A5" />
+<text x="653" y="2086" font-size="21" font-weight="700" fill="#142C44" >Drivers + timestep control</text>
+<text x="655" y="2120" font-size="16" font-weight="400" fill="#5C7083" >Steady pseudo-time / physical transient drivers</text>
+<text x="655" y="2148" font-size="16" font-weight="400" fill="#5C7083" >Wave + source + filter timestep restrictions</text>
+<text x="655" y="2176" font-size="16" font-weight="400" fill="#5C7083" >Accept → advance / grow; reject → shrink / retry</text>
+<text x="655" y="2204" font-size="16" font-weight="400" fill="#5C7083" >Requested output times · complete solve histories</text>
+</g>
+<g id="architecture-card-outputs" data-topic="outputs" role="button" tabindex="0" aria-labelledby="architecture-card-outputs-title" aria-describedby="architecture-card-outputs-description">
+<title id="architecture-card-outputs-title">Convergence + diagnostics</title><desc id="architecture-card-outputs-description">Every transported equation has fixed-scale residual checks. Cell constraints and trace equations have separate absolute checks; defaults are 1e-9. Relative transport reduction defaults to 1e-6. Budgets include actual NC work. Equation-changing pins report unmodified physical defects separately. Branch/reference checks and model audits remain independent.</desc>
+<rect x="1190" y="2050" width="540" height="190" rx="18" fill="white" stroke="#D7E1EA" />
+<rect x="1191" y="2068" width="4" height="154" rx="2" fill="#7253A5" stroke="#7253A5" />
+<text x="1213" y="2086" font-size="21" font-weight="700" fill="#142C44" >Convergence + diagnostics</text>
+<text x="1215" y="2120" font-size="15.5" font-weight="400" fill="#5C7083" >Transport residual: fixed scales per equation</text>
+<text x="1215" y="2148" font-size="15.5" font-weight="400" fill="#5C7083" >Independent cell EOS / trace equation checks</text>
+<text x="1215" y="2176" font-size="15.5" font-weight="400" fill="#5C7083" >Actual NC budgets; unmodified pin defects</text>
+<text x="1215" y="2217" font-size="14" font-weight="700" fill="#7253A5" >Default: rel 1e-6 OR abs 1e-9; algebraic 1e-9</text>
+</g>
+<path d="M900 2265L900 2298" fill="none" stroke="#D7E1EA" stroke-width="2" marker-end="url(#arrow)"/>
+<g id="architecture-card-verification" data-topic="verification" role="button" tabindex="0" aria-labelledby="architecture-card-verification-title" aria-describedby="architecture-card-verification-description">
+<title id="architecture-card-verification-title">Verification and extension boundary</title><desc id="architecture-card-verification-description">Model-owned analytical references in models/*/analytical provide the canonical verification formulas, independently of numerical fluxes and solver assembly. Production tests and development clients audit fields, spatial residuals, conservation, branches, Jacobians and boundary treatments. Compatible models extend through callbacks. Two-fluid compatibility and singular-state limits are explicit. Periodic topology, moving geometry and a new path-conservative two-fluid method remain outside this contract.</desc>
+<rect x="70" y="2300" width="1660" height="115" rx="18" fill="white" stroke="#D7E1EA" />
+<rect x="71" y="2318" width="4" height="79" rx="2" fill="#7253A5" stroke="#7253A5" />
+<text x="93" y="2336" font-size="21" font-weight="700" fill="#142C44" >Verification and extension boundary</text>
+<text x="95" y="2368" font-size="17" font-weight="400" fill="#142C44" >Model-owned analytical references · models/*/analytical · tests/ and development verification clients</text>
+<text x="95" y="2397" font-size="16" font-weight="400" fill="#5C7083" >Residual / field / conservation / branch audits. Extend through callbacks: fixed 1D, transported balances + algebraic cells and endpoint traces.</text>
+</g>
+<text x="70" y="2461" font-size="14" font-weight="400" fill="#5C7083" >Arrows show configuration and data dependencies—not a literal runtime call order. Cards describe implemented capabilities; physical validation and method limits remain explicit.</text>
+</svg>

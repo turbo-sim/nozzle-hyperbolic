@@ -35,7 +35,7 @@ def make_newton_solver(
     admissible=None, backtracking=False, max_backtracks=12, armijo=1e-4,
     residual_tolerance=0.0,
 ):
-    """Return solve(initial_flat, *residual_args) -> (solution, NewtonInfo).
+    """Return ``solve(initial_flat, *residual_args) -> (solution, NewtonInfo)``.
 
     ``direction(point,*args)`` solves J*correction=-residual. ``scale(point)``
     supplies positive variable scales; residual rows must already be scaled.

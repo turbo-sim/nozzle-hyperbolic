@@ -1,44 +1,39 @@
-# Package documentation
+# Sphinx documentation
 
-Start with the architecture for supported capabilities, then use the detailed
-guides for model extensions, physical closures and convergence assessment.
-Numerical source remains the authority for defaults and callback signatures.
+The published documentation sources live in [source/](source/index.md).
+They use MyST Markdown, dollar-delimited mathematics and the Sphinx Book Theme,
+following Turbodash and NURBSpy.
 
-| Guide | Purpose |
-|---|---|
-| [Test suite](../tests/README.md) | Organization, fast/full checks, physical regressions, saved baselines and CI |
-| [Standalone demos](../demos/README.md) | Inline Python setup for all three flow models, consistent reporting and two transient MP4 examples |
-| [Architecture](architecture/ARCHITECTURE.md) | Models, numerical fluxes, reconstruction, boundaries, integration and solver hierarchy; [offline viewer](architecture/ARCHITECTURE.html) and [SVG](architecture/ARCHITECTURE.svg) |
-| [Physical model interface](model_interface.md) | Required callbacks, shapes, frames, stencil declarations and optional Stadtke/Osher/Roe capabilities |
-| [Physical closures](physical_closures.md) | Wall policies, Haaland/Darcy conventions, transport properties and retained mixture correlations |
-| [Acoustic backpressure derivation](backpressure_acoustic_derivation.md) | General-EOS characteristics, frozen impedance, entropy extrapolation and the relation to finite-wave outlets |
-| [Residual monitoring](residual_monitoring.md) | Fixed-scale spatial, boundary and global checks, stopping criteria and physical monitors |
-| [Migration](migration.md) | Breaking changes from the model-specific factories to the shared FVM API |
-| [Two-fluid migration](two_fluid_migration.md) | Frozen Alberto reference, constrained cells, compatibility flux, boundaries, closures and verification limits |
-| [Pseudo-time and dual time](pseudo_time_stepping.md) | Benefits, costs and distinction from physical-time integration; documentation only |
-| [Continuation and restart](continuation_and_restart.md) | Explicit physical-parameter stages, constrained preparation, retained failures and portable arrays |
-| [Analytical references](analytical_references.md) | Reference assumptions, invariants, source attribution and conservative cell projections |
-| [Numerical studies](numerical_studies.md) | Controlled experiments, fair timing, provenance, figures and standalone report conventions |
+From the repository root, with the project's Poetry environment installed:
 
-Other material has an explicit role:
+```bash
+poetry install --with dev
+poetry run python docs/build_docs.py
+```
 
-- [Proposals](proposals/README.md) contain unimplemented numerical ideas and a
-  research backlog. Inclusion here is not an implementation or validation claim.
-- [Historical audits](archive/README.md) retain dated branch and restructuring
-  observations. Their original source locations and test counts are historical.
-- [Historical Newton notes](../development/roberto/historical/newton_solve/README.md)
-  preserve the stagnation analysis and earlier flux/limiter experiments beside
-  the study that explains their measured evidence.
-- [Annular model notes](euler_annular/) retain the original physical derivations
-  and research notes. They have not been revised as part of this cleanup;
-  consult the current model interface for production storage and numerical APIs.
-- [Flux studies](../development/flux_methods/README.md),
-  [steady benchmarks](../development/roberto/benchmarking/README.md) and
-  [transient studies](../development/roberto/transient_problems/README.md)
-  own their numerical profiles, saved results and report-generation scripts.
+This generates the API pages, builds the site and serves a live preview at
+`http://127.0.0.1:8000`. Stop it with Ctrl+C. For a single build:
 
-Keep active guides in this directory, proposals in `proposals/`, and dated
-audits in `archive/`. Put experiment-specific evidence beside its development
-study. Generated `_build/` files are disposable and ignored; do not maintain
-additional guide copies there. Preserve measurement-time paths and source
-fingerprints in original numerical records when reorganizing documentation.
+```bash
+poetry run python docs/build_docs.py --no-autobuild
+```
+
+Open `docs/_build/html/index.html` afterward. Warnings fail the one-shot build.
+`--no-open-browser`, `--port 8080`, `--force-apidoc` and `--clean-only` are also
+available. The builder is copied **verbatim from `turbodash/docs/build_docs.py`**;
+keep project-specific paths, exclusions, extensions and theme settings in
+[conf.py](conf.py). No Zotero library is configured; bibliography export is
+optional and requires setting its group ID before using `--build-bib`.
+
+Edit the narrative pages under `source/`. The contents of `source/api/` are
+regenerated from the installed editable package; edit Python docstrings to
+change them. `source/_static/jacobian_coloring.svg` is regenerated by:
+
+```bash
+poetry run python docs/generate_coloring_diagram.py
+```
+
+The earlier guides, derivations, proposals and architecture viewer are retained
+under [notes/](notes/README.md). **They are not Sphinx sources.** Keep study
+records there or beside their owning development study; the maintained user
+documentation belongs in `source/`. Builds do not run demos or CFD campaigns.

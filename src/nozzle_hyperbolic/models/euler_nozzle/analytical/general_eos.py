@@ -239,19 +239,30 @@ def nozzle_exact_real_gas(
     """
     Evaluate a choked quasi-1D continuous reference on sampled geometry.
 
-    x, A      : (N,) stations and areas (any resolution; A should resolve the
-                throat — pass A_throat for the true minimum if it does not).
-    fluid     : jaxprop fluid (FluidBicubic LUT or Fluid).
-    p0, T0    : reservoir state.
-    x_shock   : normal-shock position in the divergent section (None = no shock).
-    p_bounds  : optional (minimum, maximum) pressure [Pa]. Default uses fluid
-                p_min/p_max, inset by 0.01%; absent metadata falls back to
-                (1000.1, 99990000) Pa. These are search limits, not EOS physics.
-    h_min     : optional lower enthalpy bound [J/kg]. Default uses fluid.h_min+1;
-                absent metadata retains h0-0.9*abs(h0)+1 from the old reference.
-                That fallback depends on enthalpy datum: set h_min explicitly
-                for shifted/negative datums or a different EOS validity range.
-    compression_max : upper density ratio searched for a shock (default 8).
+    Parameters
+    ----------
+    x, A : array_like, shape (N,)
+        Stations and areas. Resolve the throat or supply ``A_throat`` for the
+        true minimum area when the sampled geometry misses it.
+    fluid : object
+        JAXProp fluid, including FluidBicubic tables or host fluids.
+    p0, T0 : float
+        Reservoir pressure in Pa and temperature in K.
+    x_shock : float, optional
+        Normal-shock position in the divergent section; None selects no shock.
+    A_throat : float, optional
+        Physical minimum area, overriding the sampled minimum.
+    p_bounds : tuple of float, optional
+        Minimum/maximum search pressure in Pa. Defaults to fluid bounds inset
+        by 0.01%, or (1000.1, 99990000) Pa without metadata. These are search
+        limits, not EOS physics.
+    h_min : float, optional
+        Lower search enthalpy in J/kg. Defaults to ``fluid.h_min + 1`` or,
+        without metadata, the historical ``h0 - 0.9*abs(h0) + 1``. That fallback
+        depends on enthalpy datum; specify a bound for shifted/negative datums
+        or a different EOS validity range.
+    compression_max : float, optional
+        Upper density ratio searched for a shock; default 8.
 
     Returns a dict with 'sub', 'sup' (isentropic subsonic / supersonic branches
     downstream of the throat; upstream both are the subsonic solution) and, with

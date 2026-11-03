@@ -1,0 +1,5 @@
+/* Keep equations, tables and vector diagrams readable within the book layout. */
+.bd-main .bd-content .bd-article-container { max-width: 58rem; }
+figure.coloring-diagram { margin: 1.75rem 0; }
+figure.coloring-diagram img { width: 100%; background: #fff; border-radius: 12px; }
+.sd-card-title { font-weight: 650; }

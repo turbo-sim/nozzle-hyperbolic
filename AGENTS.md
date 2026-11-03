@@ -27,12 +27,12 @@ The user's current scope and corrections take precedence over these conventions.
 |---|---|
 | Setup and repository layout | [README.md](README.md) |
 | Documentation and supported capabilities | [docs/README.md](docs/README.md) |
-| Architecture or physical-model extension | [Architecture](docs/architecture/ARCHITECTURE.md), [model interface](docs/model_interface.md) |
-| Residuals, stopping or physical monitors | [Residual monitoring](docs/residual_monitoring.md) |
-| Physical closures | [Closure guide](docs/physical_closures.md) |
-| Physical cases and analytical comparisons | [Verification API](src/nozzle_hyperbolic/verification/README.md), [reference assumptions](docs/analytical_references.md) |
+| Architecture or physical-model extension | [Architecture](docs/notes/architecture/ARCHITECTURE.md), [model interface](docs/notes/model_interface.md) |
+| Residuals, stopping or physical monitors | [Residual monitoring](docs/notes/residual_monitoring.md) |
+| Physical closures | [Closure guide](docs/notes/physical_closures.md) |
+| Physical cases and analytical comparisons | [Verification API](src/nozzle_hyperbolic/verification/README.md), [reference assumptions](docs/notes/analytical_references.md) |
 | Test organization, regression data and CI | [Test suite](tests/README.md) |
-| Numerical experiment, timing or report | [Study conventions](docs/numerical_studies.md), then the relevant [study README](development/README.md) |
+| Numerical experiment, timing or report | [Study conventions](docs/notes/numerical_studies.md), then the relevant [study README](development/README.md) |
 
 Read relevant guides when their topic is involved; small edits do not require
 reviewing the full documentation set. Check historical instructions against the
@@ -79,7 +79,7 @@ current source before using them.
 - Use `$...$` for inline Markdown math and `$$...$$` for display math.
 - Update the owning guide or study README rather than duplicating solver
   defaults, campaign results or historical commands here.
-- For numerical studies, follow [the study conventions](docs/numerical_studies.md)
+- For numerical studies, follow [the study conventions](docs/notes/numerical_studies.md)
   for fair timings, provenance, figures and standalone report packaging.
 - Give concise progress updates and separate measurements, deductions and
   hypotheses. State what changed, what was checked and any material limitation.
