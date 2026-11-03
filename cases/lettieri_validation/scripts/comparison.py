@@ -26,7 +26,7 @@ import numpy as np
 
 from nozzlex.functions.nozzle_model_critical import CriticalSettings, solve_choked_nozzle
 from nozzlex.functions.nozzle_model_solver import NozzleParams
-from nozzle_hyperbolic.models.closures.wall import HaalandWall
+from nozzle_hyperbolic.models.euler_nozzle.closures.wall import HaalandWall
 from nozzle_hyperbolic.models.euler_nozzle.model import NozzleModel
 from nozzle_hyperbolic.solvers.convergence_output import strict_json
 from nozzle_hyperbolic.solvers.fvm import (Operator, ResidualPolicy, Scheme,
