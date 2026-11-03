@@ -28,7 +28,7 @@ Sign convention throughout: sigma_Mg > 0 is evaporation (liquid -> gas).
 import numpy as np
 import pytest
 
-from nozzle_hyperbolic.fvm_solver.source_two_fluid import calculate_mass_transfer_lv
+from nozzle_hyperbolic.models.two_fluid.closures.source_two_fluid import calculate_mass_transfer_lv
 
 
 # --------------------------------------------------------------------------

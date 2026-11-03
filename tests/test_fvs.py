@@ -13,9 +13,10 @@ import jax
 jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 
-from nozzle_hyperbolic.fvm_solver.fvm import _jax_F_fvs_stadtke, muscl_van_leer_ph
-from nozzle_hyperbolic.fvm_solver.two_fluid.flux import fvs_interface_flux
-from nozzle_hyperbolic.fvm_solver.two_fluid.solver import _apply_ramped_inlet
+from nozzle_hyperbolic.models.euler_nozzle.flux_jax import _jax_F_fvs_stadtke
+from nozzle_hyperbolic.numerics.reconstruction import muscl_van_leer_ph
+from nozzle_hyperbolic.models.two_fluid.flux import fvs_interface_flux
+from nozzle_hyperbolic.models.two_fluid.solver import _apply_ramped_inlet
 
 
 # ---------------------------------------------------------------------------
@@ -34,7 +35,9 @@ class _IdealGas:
         rho = p / (self._R * T)
         a   = jnp.sqrt(self._gamma * self._R * T)
         G   = jnp.full_like(rho, self._gamma - 1.0)
-        return {"rho": rho, "a": a, "G": G}
+        # The phase-property interface also consumes temperature. Return the
+        # temperature already used to evaluate density and sound speed.
+        return {"rho": rho, "a": a, "G": G, "T": T}
 
 
 _FLUID = _IdealGas()
