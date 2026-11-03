@@ -1,19 +1,22 @@
 """Selectable Euler endpoint laws for nozzle and annular face traces.
 
-Primitive order is (p, normal_velocity, [advected components], h). The acoustic
-law is EOS independent. The finite-wave law is currently restricted to JAXProp's
-calorically perfect-gas backend; this restriction is explicit at construction.
+Primitive order is (p, normal_velocity, [advected components], h). Both laws
+use the configured EOS. The finite-wave law retains its closed-form calorically
+perfect-gas specialization and otherwise computes PH-EOS wave curves.
 Neither law clips velocities or substitutes a wall during nonlinear iteration.
 Sustained physical inflow requires exterior data beyond a backpressure value.
 """
 
 from dataclasses import dataclass
+from functools import partial
 from typing import NamedTuple
 
 import jax
 import jax.numpy as jnp
 import jaxprop as jxp
 import numpy as np
+
+from .euler_wave import compression_curve, expansion_curve
 
 
 class OutletTrace(NamedTuple):
@@ -49,6 +52,9 @@ class EulerOutlet:
     factor: float
     formulation: str = "acoustic"
     kind: str = "pressure"
+    wave_panels: int = 128
+    wave_log_step: float = 0.05
+    wave_tolerance: float = 2e-7
 
     def __post_init__(self):
         if self.formulation not in ("acoustic", "finite_wave"):
@@ -81,21 +87,21 @@ class EulerOutlet:
             or self.pressure <= 0
         ):
             raise ValueError("A pressure outlet needs positive finite backpressure")
-        # TODO: generalize finite compression Hugoniot and isentropic fan curves
-        # to arbitrary EOS through get_state(). Perfect-gas algebra is confined
-        # to _perfect_gas_wave below; all other physical evaluations use the EOS.
         if self.formulation == "finite_wave":
             if self.kind not in ("pressure", "automatic_outflow"):
                 raise ValueError(
                     "finite_wave selects its outgoing branch; use a pressure outlet kind"
                 )
-            if not isinstance(self.fluid, jxp.FluidPerfectGas):
-                raise ValueError(
-                    "finite_wave currently requires jaxprop.FluidPerfectGas; use acoustic for general EOS (TODO)"
-                )
-            gamma = float(self.fluid.constants.gamma)
-            if not np.isfinite(gamma) or gamma <= 1:
-                raise ValueError("Perfect-gas gamma must exceed one")
+            if (
+                not isinstance(self.wave_panels, int) or self.wave_panels < 1
+                or not np.isfinite(self.wave_log_step) or self.wave_log_step <= 0
+                or not np.isfinite(self.wave_tolerance) or self.wave_tolerance <= 0
+            ):
+                raise ValueError("Positive finite-wave panel count, log step and tolerance required")
+            if isinstance(self.fluid, jxp.FluidPerfectGas):
+                gamma = float(self.fluid.constants.gamma)
+                if not np.isfinite(gamma) or gamma <= 1:
+                    raise ValueError("Perfect-gas gamma must exceed one")
 
     def thermodynamics(self, W):
         return self.fluid.get_state(jxp.HmassP_INPUTS, W[..., -1], W[..., 0])
@@ -109,9 +115,54 @@ class EulerOutlet:
             raise ValueError("Wave diagnostics require finite_wave")
         interior = cells[-1]
         state = self.thermodynamics(interior)
-        return self._perfect_gas_wave(
-            interior, self.extrapolate(cells), state["rho"], state["a"]
-        )
+        if isinstance(self.fluid, jxp.FluidPerfectGas):
+            return self._perfect_gas_wave(
+                interior, self.extrapolate(cells), state["rho"], state["a"]
+            )
+        return self._general_eos_wave(interior, self.extrapolate(cells), state["a"])
+
+    @partial(jax.jit, static_argnums=(0,), inline=False)
+    def _general_eos_wave(self, interior, outgoing, sound):
+        """Conservative shock / tabulated-acoustic expansion wave selection.
+
+        Classical compressive shocks and monotone expansion fans are required;
+        arbitrary nonconvex compound waves are outside this boundary model.
+        An invalid wave returns NaNs so the enclosing Newton solve rejects it.
+        Separately interpolated entropy is diagnostic, not an extra constraint
+        on the density-defined Hugoniot or the dh=dp/rho expansion path.
+        """
+        back = jnp.asarray(self.pressure, dtype=interior.dtype)
+        acoustic = interior[1] - sound
+
+        def checked(target, mode, head, tail, valid):
+            return OutletTrace(
+                jax.lax.cond(valid, lambda: target, lambda: jnp.full_like(target, jnp.nan)),
+                jnp.int32(mode), head, tail,
+            )
+
+        def outgoing_result(_):
+            return OutletTrace(outgoing, jnp.int32(1), acoustic, acoustic)
+
+        def compression(_):
+            target, speed, valid = compression_curve(self.fluid, interior, back)
+            return jax.lax.cond(
+                valid & (speed >= 0),
+                lambda _: OutletTrace(outgoing, jnp.int32(1), speed, speed),
+                lambda _: checked(target, 3, speed, speed, valid),
+                operand=None,
+            )
+
+        def expansion(_):
+            def incoming(_):
+                target, mode, tail, valid = expansion_curve(
+                    self.fluid, interior, back, panels=self.wave_panels,
+                    log_step=self.wave_log_step, tolerance=self.wave_tolerance,
+                )
+                return checked(target, mode, acoustic, tail, valid)
+
+            return jax.lax.cond(acoustic < 0, incoming, outgoing_result, operand=None)
+
+        return jax.lax.cond(back > interior[0], compression, expansion, operand=None)
 
     def _perfect_gas_wave(self, interior, outgoing, density, sound):
         """The sole perfect-gas wave approximation; no h=cp*T zero assumption.
