@@ -54,6 +54,74 @@ settings, with unchanged final checks:
 poetry run python -B -m cases.NICFD2026.scripts.diagnose_convergence --regime subsonic --cells 400 --solve-cfl 0.02 --growth 1.02 --cfl-max 0.2 --iterations 80 --backtracks 40 --reconstruction constant --max-steps 3000 --limit-s 300 --label first_order_conservative
 ```
 
+## Starting at 100 cells
+
+The original campaign already attempted all three water cases on 100 physical
+cells before refinement. None of those stages converged. The additional coarse
+mesh check uses the same published-profile initialization, MUSCL reconstruction,
+20 Newton corrections, 20 backtracks and unchanged steady checks. CFL starts at
+0.02, grows by 1.02 per accepted step and is capped at 0.2. Each diagnostic solve
+has a 300 s budget, including compilation, and a 5,000 accepted-step cap.
+
+| Water case | Accepted steps | Termination | Final maximum equation norm |
+|---|---:|---|---:|
+| Subsonic | 2,022 | Time limit | 0.02762 |
+| Supersonic with shock | 111 | Stagnation | 434.1 |
+| Supersonic adapted | 1,032 | Time limit | 0.01831 |
+
+The subsonic and adapted runs sustain CFL 0.2 and reduce their initial residuals,
+but then oscillate instead of meeting the original residual and balance gates.
+The shocked run reaches only CFL 0.0631 before repeated rejections drive its
+timestep down. These results show improved stepping stability for two cases,
+without a converged 100-cell state suitable for refinement. They do not prove
+that no other settings or a longer run could converge.
+
+A second subsonic and adapted attempt keeps the same settings and initialization
+but raises the configured CFL cap to 2. Both stagnate: the subsonic case after
+381 accepted steps (maximum attempted CFL 1.722), and the adapted case after
+539 steps (maximum attempted CFL 1.688). Their final maximum equation norms are
+67,031 and 0.07314, respectively. Increasing the cap therefore does not turn
+the stable low-CFL trajectories into converged steady solutions in these tests.
+The shocked case already fails below the lower cap, so it is not repeated with
+the higher cap. None of these unfinished states is transferred to 200 or 400
+cells. Source fingerprints remain unchanged throughout all five coarse trials.
+
+```bash
+poetry run python -B -m cases.NICFD2026.scripts.diagnose_convergence --regime subsonic --cells 100 --cfl 0.02 --solve-cfl 0.02 --growth 1.02 --cfl-max 0.2 --iterations 20 --backtracks 20 --max-steps 5000 --limit-s 300 --label mesh100_conservative
+```
+
+The same command is run for `supersonic_shock` and `supersonic_adapted`. Saved
+histories, final fields, settings and source fingerprints are under
+`single_component/outputs/convergence_diagnosis/`. The corresponding case HTML
+reports distinguish cell counts and show final/initial maximum norm ratios.
+For the two higher-cap trials, use `--cfl-max 2 --label mesh100_ramp_to2`.
+
+The additional sweep with **initial CFL 0.5, growth 1.2, cap 10,000 and 25
+Newton corrections per timestep** retains 100 cells, MUSCL reconstruction,
+20 backtracks, the published-profile seed and the same strict stopping targets.
+The Newton count is a maximum; inner solves stop earlier when their existing
+criteria are satisfied. The solve budget remains 300 s and 5,000 accepted steps.
+
+| Water case | Accepted steps | Termination | Final maximum equation norm | Highest requested CFL |
+|---|---:|---|---:|---:|
+| Subsonic | 432 | Time limit | 0.006905 | 23.39 |
+| Supersonic with shock | 62 | Stagnation | 657.4 | 0.864 |
+| Supersonic adapted | 393 | Stagnation | $1.262\times10^8$ | 20.51 |
+
+None passes the unchanged convergence and balance checks. The subsonic run
+ends with a smaller residual than the lower-CFL attempts, while the other two
+stagnate after repeated timestep reductions. The configured 10,000 cap is never
+reached. These unsuccessful states are retained for inspection and are not
+used as refinement seeds. All three records verify unchanged source files.
+
+```bash
+poetry run python -B -m cases.NICFD2026.scripts.diagnose_convergence --regime subsonic --cells 100 --cfl 0.5 --solve-cfl 0.5 --growth 1.2 --cfl-max 10000 --iterations 25 --backtracks 20 --max-steps 5000 --limit-s 300 --label mesh100_CFL05_growth12_cap1e4_Newton25
+```
+
+Repeat for `supersonic_shock` and `supersonic_adapted`. The case reports include
+the actual accepted-step residuals and all trial CFL values for every 100-cell
+settings variant, with interactive legends to isolate individual runs.
+
 ## Published-case reports
 
 Open [REPORT.html](REPORT.html) for the six-case index. Each standalone case
