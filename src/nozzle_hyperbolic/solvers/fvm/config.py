@@ -127,9 +127,9 @@ class Scheme:
 class SteadySettings:
     residual: ResidualPolicy = field(default_factory=ResidualPolicy)
     cfl: float = 0.2
-    cfl_growth: float = 1.4
+    cfl_growth: float = 1.2
     cfl_shrink: float = 0.5
-    cfl_max: float = 1e7
+    cfl_max: float = 1e6
     max_steps: int = 4000
     max_retries: int = 14
     stagnation_steps: int = 12

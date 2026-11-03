@@ -21,7 +21,11 @@ from .contracts import (
     CompatibilityFluxModel,
 )
 from .operator import Operator
-from .drivers import solve_single_grid, solve_grid_sequence, solve_transient, sampler
+from .drivers import SteadyWorkspace, solve_single_grid, solve_grid_sequence, solve_transient, sampler
+from .continuation import (
+    RestartState, prepare_continuation_state, solve_parameter_sequence,
+    save_restart, load_restart,
+)
 from ..residuals import ResidualPolicy
 from ...numerics.mesh import Mesh
 
@@ -32,9 +36,15 @@ __all__ = [
     "Solution",
     "ResidualPolicy",
     "Operator",
+    "SteadyWorkspace",
     "solve_single_grid",
     "solve_grid_sequence",
     "solve_transient",
+    "RestartState",
+    "prepare_continuation_state",
+    "solve_parameter_sequence",
+    "save_restart",
+    "load_restart",
     "sampler",
     "TimestepInfo",
     "ConservativeModel",

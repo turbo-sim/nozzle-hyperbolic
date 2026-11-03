@@ -20,6 +20,10 @@ _EXPORTS = {
         "solve_single_grid",
         "solve_grid_sequence",
         "solve_transient",
+        "solve_parameter_sequence",
+        "prepare_continuation_state",
+        "save_restart",
+        "load_restart",
     )
 }
 _EXPORTS.update(

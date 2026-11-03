@@ -1,6 +1,7 @@
 """Common single-grid, coarse-to-fine and physical-time solution drivers."""
 
 from .config import SteadySettings, Solution
+from dataclasses import dataclass, field, replace
 from time import perf_counter
 
 import jax
@@ -102,6 +103,34 @@ def sampler(operator, policy):
     return sample
 
 
+@dataclass(frozen=True)
+class SteadyWorkspace:
+    """Reusable kernels for one model, scheme and residual policy.
+
+    Binding does not advance a solution. Repeated solves retain compiled
+    functions while resetting the initial field, controller, histories and
+    residual baselines. Model identity is intentional: bound callbacks and
+    physical scales must not be replaced underneath an existing workspace.
+    """
+
+    model: object
+    scheme: Scheme = field(default_factory=Scheme)
+    residual: ResidualPolicy = field(default_factory=ResidualPolicy)
+    operator: Operator = field(init=False, repr=False)
+    sample: object = field(init=False, repr=False)
+
+    def __post_init__(self):
+        if not isinstance(self.residual, ResidualPolicy):
+            raise ValueError("workspace residual must be a ResidualPolicy")
+        operator = Operator(self.model, self.scheme)
+        object.__setattr__(self, "operator", operator)
+        object.__setattr__(self, "sample", sampler(operator, self.residual))
+
+    def validate(self, model, scheme, residual):
+        if self.model is not model or self.scheme != scheme or self.residual != residual:
+            raise ValueError("workspace must match model identity, scheme and residual policy")
+
+
 def solve_single_grid(
     model,
     scheme=Scheme(),
@@ -111,6 +140,7 @@ def solve_single_grid(
     monitor_specs=(),
     quantity_evaluator=None,
     callback=None,
+    workspace=None,
 ):
     """Solve the original coupled steady equations on exactly one physical grid.
 
@@ -123,7 +153,11 @@ def solve_single_grid(
     audit = getattr(model, "solution_audit", None)
     if audit is not None and not callable(audit):
         raise ValueError("solution_audit must be a callback when supplied")
-    operator = Operator(model, scheme)
+    if workspace is not None:
+        if not isinstance(workspace, SteadyWorkspace):
+            raise ValueError("workspace must be a SteadyWorkspace")
+        workspace.validate(model, scheme, settings.residual)
+    operator = Operator(model, scheme) if workspace is None else workspace.operator
     state = jnp.asarray(
         model.initial_state() if initial_state is None else initial_state,
         dtype=jnp.float64,
@@ -146,7 +180,7 @@ def solve_single_grid(
             elapsed_s=perf_counter() - start,
             operator=operator,
         )
-    sample = sampler(operator, settings.residual)
+    sample = sampler(operator, settings.residual) if workspace is None else workspace.sample
     current = sample(state)
     initial = np.asarray(current["equation_norm"])
 
@@ -266,6 +300,18 @@ def solve_single_grid(
     )
 
 
+def _last_accepted_cfl(solution):
+    """Actual accepted CFL; use the initial value for a zero-update success."""
+    for phase in ("accepted", "initial"):
+        for row in reversed(solution.history):
+            if row.get("phase") == phase:
+                value = row.get("cfl")
+                if value is not None and np.isfinite(value) and value > 0:
+                    return float(value)
+                return None
+    return None
+
+
 def solve_grid_sequence(
     model_factory,
     cells=(50, 100, 200, 400),
@@ -276,6 +322,11 @@ def solve_grid_sequence(
     monitor_specs=(),
     initial_solution=None,
     quantity_evaluator_factory=None,
+    carry_cfl=True,
+    scheme_factory=None,
+    workspace_factory=None,
+    stop_on_failure=False,
+    retry_cold=True,
 ):
     """Nested-grid initialization, not a defect-correction/FAS multigrid cycle.
 
@@ -285,7 +336,27 @@ def solve_grid_sequence(
     componentwise linear interpolation of the model's declared state variables;
     it assumes identical variable meanings and domain endpoints on every grid.
     Model admissibility is checked before solving, with a cold retry on failure.
+    By default a warm transfer also inherits the preceding successful solve's
+    last accepted CFL, capped by settings.cfl_max. The timestep is recomputed
+    on the new grid. A zero-update success forwards its initial CFL; unavailable
+    controller history falls back to settings.cfl. Cold starts/retries always
+    use settings.cfl. Set carry_cfl=False to reset CFL on every grid.
+
+    ``scheme_factory(count)`` can explicitly choose a different Scheme on each
+    mesh, for example constant reconstruction only on the coarsest mesh.
+    ``workspace_factory(model, scheme, settings)`` can reuse bound kernels
+    between complete hierarchy replays. Defaults retain cold fallback/retry;
+    set ``retry_cold=False, stop_on_failure=True`` for a strict sequence that
+    never replaces a failed transfer or solve with an independent start.
     """
+    if not isinstance(carry_cfl, bool):
+        raise ValueError("carry_cfl must be a boolean")
+    if not isinstance(stop_on_failure, bool) or not isinstance(retry_cold, bool):
+        raise ValueError("stop_on_failure and retry_cold must be booleans")
+    if scheme_factory is not None and not callable(scheme_factory):
+        raise ValueError("scheme_factory must be callable")
+    if workspace_factory is not None and not callable(workspace_factory):
+        raise ValueError("workspace_factory must be callable")
     cells = tuple(cells)
     monitor_specs = tuple(monitor_specs)
     if (
@@ -304,12 +375,25 @@ def solve_grid_sequence(
     if previous is not None and cells[0] <= previous.operator.mesh.n_cells:
         raise ValueError("Extended grids must be finer than the supplied solved grid")
     for count in cells:
+        stage_started = perf_counter()
+        setup_started = perf_counter()
         model = model_factory(count)
+        stage_scheme = scheme if scheme_factory is None else scheme_factory(count)
+        if not isinstance(stage_scheme, Scheme):
+            raise ValueError("scheme_factory must return a Scheme")
+        workspace = (None if workspace_factory is None else
+                     workspace_factory(model, stage_scheme, settings))
+        if workspace is not None:
+            if not isinstance(workspace, SteadyWorkspace):
+                raise ValueError("workspace_factory must return a SteadyWorkspace")
+            workspace.validate(model, stage_scheme, settings.residual)
+        setup_s = perf_counter() - setup_started
         if model.mesh.n_cells != count:
             raise ValueError(
                 "model_factory must return the requested physical cell count"
             )
         initial = None
+        preparation = None
         if previous is not None and previous.success:
             old = previous.operator.mesh.points
             new = model.mesh.points
@@ -319,24 +403,43 @@ def solve_grid_sequence(
                 raise ValueError(
                     "Prolongation requires matching state dimensions and domain endpoints"
                 )
-            initial = np.column_stack(
-                [np.interp(new, old, previous.state[:, j]) for j in range(model.nvar)]
-            )
+            if getattr(model, "nconstraints", 0):
+                from .continuation import prepare_continuation_state
+                reuse = {} if workspace is None else {"operator": workspace.operator}
+                initial, preparation = prepare_continuation_state(model, previous, stage_scheme, **reuse)
+            else:
+                initial = np.column_stack(
+                    [np.interp(new, old, previous.state[:, j]) for j in range(model.nvar)]
+                )
         evaluator = (
             getattr(model, "quantities", None)
             if quantity_evaluator_factory is None
             else quantity_evaluator_factory(model)
         )
-        solution = solve_single_grid(
-            model,
-            scheme,
-            settings,
-            initial_state=initial,
-            monitor_specs=monitor_specs,
-            quantity_evaluator=evaluator,
-        )
+        stage_settings = settings
+        if carry_cfl and initial is not None:
+            inherited = _last_accepted_cfl(previous)
+            if inherited is not None:
+                stage_settings = replace(settings, cfl=min(inherited, settings.cfl_max))
+        reuse = {} if workspace is None else {"workspace": workspace}
+        failed_preparation = preparation is not None and not preparation["success"]
+        if failed_preparation and not retry_cold:
+            candidate = preparation.get("state", model.initial_state())
+            solution = Solution(np.asarray(candidate), False, "continuation_preparation_failed",
+                                [], {}, elapsed_s=0.0,
+                                operator=Operator(model, stage_scheme) if workspace is None else workspace.operator)
+        else:
+            solution = solve_single_grid(
+                model,
+                stage_scheme,
+                stage_settings,
+                initial_state=initial,
+                monitor_specs=monitor_specs,
+                quantity_evaluator=evaluator,
+                **reuse,
+            )
         attempts = []
-        if initial is not None and not solution.success:
+        if retry_cold and initial is not None and not solution.success:
             # Prolongation can make a nine-order target smaller than available
             # floating-point resolution. Preserve that failed solve in full;
             # an independent cold restart must satisfy its own original tests.
@@ -349,6 +452,7 @@ def solve_grid_sequence(
                     metrics=solution.metrics,
                     history=solution.history,
                     elapsed_s=solution.elapsed_s,
+                    initial_cfl=stage_settings.cfl,
                 )
             )
             print(
@@ -357,31 +461,47 @@ def solve_grid_sequence(
             )
             solution = solve_single_grid(
                 model,
-                scheme,
+                stage_scheme,
                 settings,
                 monitor_specs=monitor_specs,
                 quantity_evaluator=evaluator,
+                **reuse,
             )
+            stage_settings = settings
         metadata = dict(
             cells=count,
             success=solution.success,
             reason=solution.reason,
             initialization=(
+                "failed continuation preparation" if failed_preparation and not retry_cold else
                 "cold restart after retained warm failure"
                 if attempts
                 else (
-                    "componentwise linear prolongation"
+                    ("transported-density interpolation with constraint recovery"
+                     if preparation is not None else "componentwise linear prolongation")
                     if initial is not None
                     else "cold physical guess"
                 )
             ),
             attempts=attempts,
+            setup_s=setup_s,
+            preparation=preparation,
+            solve_elapsed_s=solution.elapsed_s + sum(attempt["elapsed_s"] for attempt in attempts),
+            elapsed_s=perf_counter() - stage_started,
             residual_normalization="fresh per-equation initial norm on this grid",
+            cfl_policy="carry" if carry_cfl else "reset",
+            initial_cfl=(solution.history[0]["cfl"] if solution.history
+                         else stage_settings.cfl),
+            last_accepted_cfl=_last_accepted_cfl(solution),
+            reconstruction=stage_scheme.reconstruction,
+            flux=stage_scheme.flux,
         )
         stages.append(metadata)
         if on_stage is not None:
             on_stage(model, solution, list(stages))
         previous = solution
+        if stop_on_failure and not solution.success:
+            break
     return previous, stages
 
 

@@ -25,6 +25,10 @@ and the [architecture](architecture/ARCHITECTURE.md) for configuration examples.
 
 ## Numerical choices to review when migrating a script
 
+- `solve_grid_sequence` now carries the last accepted CFL across successful
+  warm grid transfers by default. Set `carry_cfl=False` to retain per-grid CFL
+  reset. The new mesh determines the timestep; cold starts/retries still use
+  `settings.cfl`. Residual tolerances and per-grid baselines are unchanged.
 - The default Stadtke flux enables both `custom_jump_correction` and
   `custom_endpoint_envelope`. Disable both to select the original Stadtke
   contraction. An old flux name or final-field resemblance does not establish
