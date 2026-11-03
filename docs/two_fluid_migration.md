@@ -312,41 +312,25 @@ with the frozen source; cold guesses and explicit unfinished diagnostic
 restarts are identified. These limitations should guide Alberto's next physical
 checks rather than being hidden by changes to tolerances or properties.
 
-The subsequent [NICFD nitrogen–water reproduction](../cases/nicfd_validation/README.md)
-uses the authors' published settings and profiles at supplementary revision
-`2dc04ad9d474afb727857139df89537fcadb5769`. All three backpressure regimes
-converged at 498 physical cells with a Newton cap of 20 and unchanged generic
-tolerances. These close fine-grid comparisons used explicitly declared reference
-seeds. An independent cold-to-fine subsonic attempt converged numerically but
-selected a different root with a supersonic pocket and failed the intended-regime
-audit. Selecting the
-historical number-density interfacial-area law is essential: the later polynomial
-default is not the NICFD closure. The missing YAML selector was resolved against
-September's `e185f571f8ea0512a7a16ce53a4b2458f72c33c2` source and audited.
-See the [NICFD results](../cases/nicfd_validation/RESULTS.md) for errors, numerical
-differences and unsuccessful coarse/default-law attempts. This adds a realistic
-two-component check; it does not establish the flashing-water reproduction.
+The [NICFD2026 reproduction](../cases/NICFD2026/README.md) contains all six
+published cases: single-component flashing water and two-component
+nitrogen–water, each with subsonic, shocked and adapted regimes. Unchanged
+settings and profiles are pinned to supplementary revision
+`2dc04ad9d474afb727857139df89537fcadb5769`. The number-density area law and
+subcooled-reservoir ghost-vapor rule follow September's
+`e185f571f8ea0512a7a16ce53a4b2458f72c33c2` setup source.
 
-The independent NICFD comparison uses 50, 100, 200 and 400 physical cells with
-the same numerical settings as the previous 498-cell comparison. All twelve
-regime/mesh combinations were run independently from published-profile seeds.
-Fresh residual, constraint, boundary, budget and regime checks verify eight:
-all four subsonic meshes and the 100/400-cell shock and adapted meshes. The
-50/200-cell shock and adapted runs remain unfinished. At 400 cells, pressure
-RMSE against the published profiles is 0.0268 bar (subsonic), 0.0446 bar (shock)
-and 0.0125 bar (adapted). The standalone [Plotly report](../cases/nicfd_validation/REPORT.html)
-provides published/new/both visibility, mesh and regime selectors, signed
-differences, convergence histories and exports. Earlier attempts remain archived;
-these reference-seeded results do not establish independent cold-start recovery
-or grid independence.
-
-The active timing campaign starts over at 100 cells and sequences through 200
-and 400 cells, using MUSCL Van Albada throughout. Only its first mesh uses a
-published-profile seed. Separate cold/warm executions distinguish compilation
-from a repeat with identical initial/controller state and reused kernels.
-The former 50-cell strict sequences and explicitly authorized unfinished-coarse
-diagnostic remain historical evidence, outside these new totals. The NICFD
-report owns the measured times and independent final-state audits.
+The [standalone reports](../cases/NICFD2026/REPORT.html) own fresh measurements,
+an opening verdict for each case, property diagnostics, equation and branch
+checks, profile errors and the code-comparison limitations. They compare saved
+published solutions with the current solver. Upstream supplies neither an
+executable solver nor historical timing/convergence logs, so no old runtime or
+speedup is inferred. A compilation-inclusive 100 → 200 → 400 sequence and its
+identical replay use explicitly disclosed published first-grid seeds and
+successful transfers only. Unfinished coarse states are never transferred;
+any independent finest-grid attempt after failure is separately identified.
+These comparisons do not establish independent cold-start recovery or grid
+independence. Superseded NICFD campaigns and clients have been removed.
 
 Lettieri L2–L4 original Excel/CFD, precise tap coordinates and uncertainty
 metadata were not recovered. Published pressure tables are included with

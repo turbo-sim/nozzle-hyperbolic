@@ -1,0 +1,28 @@
+{
+  "meshes": [
+    100,
+    200,
+    400
+  ],
+  "initialization": "published profile at first grid; successful constrained transfers thereafter",
+  "failure_policy": "retain failed coarse stage and attempt 400 independently from the published profile; never transfer an unfinished state",
+  "timing_modes": [
+    "cold",
+    "warm"
+  ],
+  "max_steps": 2000,
+  "newton_iterations": 20,
+  "stage_time_limit_s": 300,
+  "reconstruction": "muscl_van_albada",
+  "carry_cfl": false,
+  "timing_note": "One compilation-inclusive execution and one replay of the same initial hierarchy using retained bindings. Individual timing observations, not a repeated-sample speed benchmark. Property preparation and final audits excluded and reported separately.",
+  "old_timing": "Not provided by the supplementary repository; no old runtime is inferred from CSV files.",
+  "agreement": {
+    "pressure_normalized_rmse": 0.02,
+    "phase_velocity_normalized_rmse": 0.05,
+    "void_absolute_rmse": 0.02,
+    "temperature_normalized_rmse": 0.01,
+    "mass_flow_relative_difference": 0.02,
+    "note": "Study-declared engineering screening criteria, not tolerances claimed by the publication. Numerical convergence and intended regime must pass independently."
+  }
+}

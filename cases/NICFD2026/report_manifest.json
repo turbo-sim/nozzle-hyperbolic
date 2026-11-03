@@ -1,0 +1,127 @@
+{
+  "generated_utc": "2026-11-03T10:57:23.658058+00:00",
+  "cases": [
+    {
+      "family": "single_component",
+      "regime": "subsonic",
+      "verdict": {
+        "status": "not_reproduced",
+        "title": "This case has not been reproduced.",
+        "detail": "The installed metastable liquid-table generator freezes rows after a bulk-modulus-ratio test. The generated table returns approximately room-temperature liquid at the published hot-liquid enthalpies. The current model rejects these copied stencils. No clipping, replacement EOS or weakened admissibility test was used. A valid flashing-water reproduction requires repairing and independently validating property generation first.",
+        "checks": {},
+        "reported_cells": 400
+      },
+      "path": "single_component/subsonic/REPORT.html",
+      "current_field_available": false,
+      "cold_s": 11.037062000003061,
+      "replay_s": 0.46743640000204323
+    },
+    {
+      "family": "single_component",
+      "regime": "supersonic_shock",
+      "verdict": {
+        "status": "not_reproduced",
+        "title": "This case has not been reproduced.",
+        "detail": "The installed metastable liquid-table generator freezes rows after a bulk-modulus-ratio test. The generated table returns approximately room-temperature liquid at the published hot-liquid enthalpies. The current model rejects these copied stencils. No clipping, replacement EOS or weakened admissibility test was used. A valid flashing-water reproduction requires repairing and independently validating property generation first.",
+        "checks": {},
+        "reported_cells": 400
+      },
+      "path": "single_component/supersonic_shock/REPORT.html",
+      "current_field_available": false,
+      "cold_s": 10.5501007999992,
+      "replay_s": 0.31007600000157254
+    },
+    {
+      "family": "single_component",
+      "regime": "supersonic_adapted",
+      "verdict": {
+        "status": "not_reproduced",
+        "title": "This case has not been reproduced.",
+        "detail": "The installed metastable liquid-table generator freezes rows after a bulk-modulus-ratio test. The generated table returns approximately room-temperature liquid at the published hot-liquid enthalpies. The current model rejects these copied stencils. No clipping, replacement EOS or weakened admissibility test was used. A valid flashing-water reproduction requires repairing and independently validating property generation first.",
+        "checks": {},
+        "reported_cells": 400
+      },
+      "path": "single_component/supersonic_adapted/REPORT.html",
+      "current_field_available": false,
+      "cold_s": 7.434415999989142,
+      "replay_s": 0.28304519999801414
+    },
+    {
+      "family": "two_component",
+      "regime": "subsonic",
+      "verdict": {
+        "status": "matches",
+        "title": "This case matches the published solution well.",
+        "detail": "The current solve passes the original convergence and regime checks and all declared profile criteria.",
+        "checks": {
+          "pressure": true,
+          "gas_velocity": true,
+          "liquid_velocity": true,
+          "void_fraction": true,
+          "gas_temperature": true,
+          "liquid_temperature": true,
+          "mass_flow": true
+        },
+        "reported_cells": 400
+      },
+      "path": "two_component/subsonic/REPORT.html",
+      "current_field_available": true,
+      "cold_s": 234.56899169999815,
+      "replay_s": 20.338204900013807
+    },
+    {
+      "family": "two_component",
+      "regime": "supersonic_shock",
+      "verdict": {
+        "status": "matches",
+        "title": "This case matches the published solution well.",
+        "detail": "The current solve passes the original convergence and regime checks and all declared profile criteria.",
+        "checks": {
+          "pressure": true,
+          "gas_velocity": true,
+          "liquid_velocity": true,
+          "void_fraction": true,
+          "gas_temperature": true,
+          "liquid_temperature": true,
+          "mass_flow": true
+        },
+        "reported_cells": 400
+      },
+      "path": "two_component/supersonic_shock/REPORT.html",
+      "current_field_available": true,
+      "cold_s": 226.88975640000717,
+      "replay_s": 23.38061110000126
+    },
+    {
+      "family": "two_component",
+      "regime": "supersonic_adapted",
+      "verdict": {
+        "status": "matches",
+        "title": "This case matches the published solution well.",
+        "detail": "The current solve passes the original convergence and regime checks and all declared profile criteria.",
+        "checks": {
+          "pressure": true,
+          "gas_velocity": true,
+          "liquid_velocity": true,
+          "void_fraction": true,
+          "gas_temperature": true,
+          "liquid_temperature": true,
+          "mass_flow": true
+        },
+        "reported_cells": 400
+      },
+      "path": "two_component/supersonic_adapted/REPORT.html",
+      "current_field_available": true,
+      "cold_s": 337.33050709999225,
+      "replay_s": 43.65640809999604
+    }
+  ],
+  "reports": {
+    "single_component/subsonic/REPORT.html": "11092a7d8d686a7863d3e976ce698b7c653a4db85d4d4acf63bbb96bee1aff48",
+    "single_component/supersonic_shock/REPORT.html": "6282fc529164581f901877a32e28e34c5246abdef39ce63b17357240a51f5dd6",
+    "single_component/supersonic_adapted/REPORT.html": "faeb1f91a16905e3318f7e267be3affe194d48782cc121f2e4e27222b474643a",
+    "two_component/subsonic/REPORT.html": "bcc3a530605891fe292a594b1698fec5e82444c5cb95c9a0f55d143e71302f23",
+    "two_component/supersonic_shock/REPORT.html": "8ee2d097f115efa5e92ab303780b7e6156376343dbdb6195fe0436ba1ab6a604",
+    "two_component/supersonic_adapted/REPORT.html": "85401300e3cb8957bf59f544d322b0bdb0d364d6a0846f9a01716d7904ecc953"
+  }
+}

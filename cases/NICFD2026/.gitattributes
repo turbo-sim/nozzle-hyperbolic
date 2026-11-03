@@ -1,0 +1,11 @@
+# Preserve the upstream bytes used by provenance.json on every platform.
+single_component/*/settings.yaml -text
+single_component/*/reference.csv -text
+two_component/*/settings.yaml -text
+two_component/*/reference.csv -text
+LICENSE_UPSTREAM.txt -text
+# Generated manifests hash these bytes; keep them stable after checkout.
+*.html -text
+*.json -text
+*.npz -text
+*.log -text
