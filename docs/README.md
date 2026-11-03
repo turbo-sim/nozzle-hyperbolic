@@ -37,3 +37,22 @@ The earlier guides, derivations, proposals and architecture viewer are retained
 under [notes/](notes/README.md). **They are not Sphinx sources.** Keep study
 records there or beside their owning development study; the maintained user
 documentation belongs in `source/`. Builds do not run demos or CFD campaigns.
+
+## Publishing
+
+The documentation site is published at
+<https://turbo-sim.github.io/nozzle-hyperbolic/> using GitHub Pages with
+GitHub Actions as its publishing source.
+
+[The Documentation workflow](../.github/workflows/docs.yml) builds and deploys
+the site when a push to `main` changes `src/`, `docs/`, `pyproject.toml`,
+`poetry.lock` or the documentation workflow itself. Source changes regenerate
+the API reference from the installed package's docstrings. The workflow runs
+the same strict one-shot build shown above, without running pytest, demos or
+numerical studies. The generated HTML is uploaded as a Pages artifact rather
+than committed to a deployment branch.
+
+To rebuild without changing files, select **Actions > Documentation > Run
+workflow** on `main`. Manual runs on other branches build an artifact but do
+not deploy it. Tests run separately on pull requests or through the manual
+**Tests** workflow; ordinary pushes do not run them.

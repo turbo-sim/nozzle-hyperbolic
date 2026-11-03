@@ -14,6 +14,9 @@
 
 ## Documentation
 
+Read the [online documentation](https://turbo-sim.github.io/nozzle-hyperbolic/).
+It updates automatically when source or documentation changes reach `main`.
+
 The [Sphinx sources](docs/source/index.md) cover getting started, the three
 physical models, numerical methods, demo examples and the generated API reference.
 Build a local preview with:

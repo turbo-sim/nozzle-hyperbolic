@@ -63,11 +63,12 @@ def setup(app):
 exclude_patterns = ["Thumbs.db", ".DS_Store"]
 html_theme = "sphinx_book_theme"
 html_title = project
+html_baseurl = "https://turbo-sim.github.io/nozzle-hyperbolic/"
 html_static_path = ["source/_static"]
 html_css_files = ["custom.css"]
 html_theme_options = {
     "repository_url": "https://github.com/turbo-sim/nozzle-hyperbolic",
-    "repository_branch": "roberto-branch",
+    "repository_branch": "main",
     "use_repository_button": True,
     "use_issues_button": True,
     "use_edit_page_button": True,

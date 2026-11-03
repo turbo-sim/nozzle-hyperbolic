@@ -124,9 +124,10 @@ also check rejection of material field changes, NaNs and incomplete profiles.
 
 ## Coverage and CI
 
-`.github/workflows/tests.yml` runs fast checks on Python 3.12/3.13, the full core
-suite with coverage, formatting and a wheel smoke
-check. A manually selected optional job installs a pinned NozzleX revision using
+`.github/workflows/tests.yml` runs on pull requests and manual launches, not on
+ordinary pushes. It runs fast checks on Python 3.12/3.13, the full core suite
+with coverage, formatting and a wheel smoke check. A manually selected optional
+job installs a pinned NozzleX revision using
 the package's locked numerical stack and refuses silent dependency skips.
 
 Python coverage measures executed Python lines and branches, including tracing;

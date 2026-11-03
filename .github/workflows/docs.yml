@@ -1,0 +1,65 @@
+name: Documentation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "docs/**"
+      - "pyproject.toml"
+      - "poetry.lock"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  JAX_PLATFORMS: cpu
+  MPLBACKEND: Agg
+  POETRY_VIRTUALENVS_IN_PROJECT: "true"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: read
+    steps:
+      - name: Check out the documentation sources
+        uses: actions/checkout@v7
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - name: Install Poetry
+        run: pip install poetry==2.1.2
+      - name: Install the project and documentation dependencies
+        run: poetry install --with dev --no-interaction
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v6
+      - name: Build the Sphinx documentation
+        run: poetry run python -B docs/build_docs.py --no-autobuild
+      - name: Upload the documentation site
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: docs/_build/html
+
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Publish GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
