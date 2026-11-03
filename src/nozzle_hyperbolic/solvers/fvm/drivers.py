@@ -238,6 +238,8 @@ def solve_single_grid(
     required monitors are checked separately, followed by any model audit.
     """
     monitor_specs = tuple(monitor_specs)
+    if callback is not None and not callable(callback):
+        raise ValueError("callback must be callable when supplied")
     if monitor_specs and not callable(quantity_evaluator):
         raise ValueError("Configured monitors require a quantity_evaluator callback")
     audit = getattr(model, "solution_audit", None)
@@ -366,11 +368,6 @@ def solve_single_grid(
         ):
             reason = "stagnation"
             break
-        if accepted % 250 == 0:
-            print(
-                f'  {accepted:5d} R={current["overall_relative"]:.3e} CFL={cfl:.2e}',
-                flush=True,
-            )
     final = sample(state, initial)
     final["monitors"] = current["monitors"]
     success = done(final)
@@ -643,6 +640,8 @@ def solve_transient(
     cfl=0.45,
     initial_state=None,
     max_steps=100000,
+    callback=None,
+    operator=None,
 ):
     """Conservative physical-time integration, starting at time zero.
 
@@ -671,6 +670,13 @@ def solve_transient(
         Admissible full iteration state, defaulting to the model's initial guess.
     max_steps : int, optional
         Maximum accepted steps across all outputs, default 100000.
+    callback : callable, optional
+        Receives each accepted/rejected attempt dictionary as it is appended
+        to the cumulative history. Accepted rows include physical time and the
+        content-change budget. Exceptions from the callback propagate.
+    operator : Operator, optional
+        Reuse an operator bound to this exact model and scheme, for example
+        after completing initial algebraic traces. Otherwise bind a new one.
 
     Returns
     -------
@@ -686,6 +692,8 @@ def solve_transient(
     finite diagnostics, boundary and cell-constraint defects, and any model
     audit; spatial steady-state convergence is not required.
     """
+    if callback is not None and not callable(callback):
+        raise ValueError("callback must be callable when supplied")
     if getattr(model, "steady_only", False):
         raise ValueError("The selected model equation policy is steady-only; disable it for physical-time integration")
     targets = np.asarray(tuple(output_times), dtype=float)
@@ -712,7 +720,14 @@ def solve_transient(
         raise ValueError(
             "The transient solution audit must be a callback when supplied"
         )
-    operator = Operator(model, scheme)
+    if operator is None:
+        operator = Operator(model, scheme)
+    elif (
+        not isinstance(operator, Operator)
+        or operator.model is not model
+        or operator.scheme != scheme
+    ):
+        raise ValueError("operator must match model identity and scheme")
     state = jnp.asarray(
         model.initial_state() if initial_state is None else initial_state,
         dtype=jnp.float64,
@@ -730,6 +745,12 @@ def solve_transient(
     start = perf_counter()
     budget = np.zeros(operator.ntransport)
     accepted = 0
+
+    def emit(row):
+        history.append(row)
+        if callback is not None:
+            callback(row)
+
     for target in targets:
         target = float(target)
         reason = "time_reached"
@@ -757,7 +778,7 @@ def solve_transient(
                 if bool(info.converged and info.admissible):
                     okay = True
                     break
-                history.append(
+                emit(
                     dict(
                         step=accepted + 1,
                         phase="rejected",
@@ -767,6 +788,7 @@ def solve_transient(
                         trial_time=time + dt,
                         dt=dt,
                         cfl=dt / base_dt,
+                        requested_cfl=cfl,
                         retry=retry,
                         inner_iterations=int(info.iterations),
                         inner_status=int(info.status),
@@ -792,7 +814,7 @@ def solve_transient(
             budget = (totals - initial_totals - influx) / (
                 np.sum(model.mesh.volumes) * np.asarray(model.conservative_scales)
             )
-            history.append(
+            emit(
                 dict(
                     step=accepted,
                     phase="accepted",
@@ -801,6 +823,7 @@ def solve_transient(
                     time_s=time,
                     dt=dt,
                     cfl=dt / base_dt,
+                    requested_cfl=cfl,
                     retry=retry,
                     budget=budget,
                     integrated_transfer=transfer,

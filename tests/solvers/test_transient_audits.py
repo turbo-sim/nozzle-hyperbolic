@@ -56,3 +56,40 @@ def test_invalid_transient_audit_callback_is_rejected():
     model.transient_solution_audit = True
     with pytest.raises(ValueError, match="transient solution audit"):
         solve_transient(model, (0.001,), Scheme(flux="hll"))
+
+
+def test_transient_callback_reports_the_retained_attempt_history():
+    from nozzle_hyperbolic.solvers.convergence_output import solution_summary
+
+    rows = []
+    result = solve_transient(
+        AdvectionModel(6),
+        (0.01, 0.03),
+        Scheme(flux="hll", time_integrator="runge-kutta-3"),
+        callback=rows.append,
+    )[-1]
+    assert result.success
+    assert len(rows) == len(result.history) > 0
+    for emitted, retained in zip(rows, result.history, strict=True):
+        assert emitted is retained
+        assert emitted["requested_cfl"] == 0.45
+        assert 0 < emitted["cfl"] <= 0.45
+    assert (
+        solution_summary(result)["accepted_steps"] == result.metrics["accepted_steps"]
+    )
+    with pytest.raises(ValueError, match="callback must be callable"):
+        solve_transient(object(), (0.01,), callback=True)
+
+
+def test_transient_reuses_supplied_operator_and_validates_binding():
+    from unittest.mock import patch
+    from nozzle_hyperbolic.solvers.fvm import Operator
+
+    model = AdvectionModel(6)
+    scheme = Scheme(flux="hll", time_integrator="runge-kutta-3")
+    operator = Operator(model, scheme)
+    with patch.object(Operator, "__init__", side_effect=AssertionError("rebound")):
+        result = solve_transient(model, (0.01,), scheme, operator=operator)[-1]
+    assert result.success and result.operator is operator
+    with pytest.raises(ValueError, match="operator must match"):
+        solve_transient(AdvectionModel(6), (0.01,), scheme, operator=operator)

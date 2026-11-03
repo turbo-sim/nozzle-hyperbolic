@@ -420,6 +420,27 @@ class TwoFluidModel:
             valid = valid & (U[-1, 1] >= 0) & (U[-1, 2] >= 0)
         return valid
 
+    def acoustic_diagnostics(self, states):
+        """Evaluate mixture kinematics from the model's two acoustic families.
+
+        Parameters
+        ----------
+        states : jax.Array, shape (P, 8)
+            Admissible iteration states at any P cells or endpoint traces.
+
+        Returns
+        -------
+        dict
+            ``velocity`` is the acoustic-pair center in m/s; ``sound_speed``
+            is its positive half-width in m/s; ``mach`` is the absolute ratio.
+            These are the compatibility model's mixture definitions, evaluated
+            through the configured phase EOSs, rather than a perfect-gas law.
+        """
+        eigenvalues = jax.vmap(lambda u: self._wave_data(u)[0])(primitives(states))
+        velocity = 0.5 * (eigenvalues[:, 2] + eigenvalues[:, 3])
+        sound = 0.5 * (eigenvalues[:, 2] - eigenvalues[:, 3])
+        return dict(velocity=velocity, sound_speed=sound, mach=jnp.abs(velocity) / sound)
+
     def fields(self, full):
         U = primitives(full)
         return {name: U[:, i] for i, name in enumerate(("pressure", "velocity_gas", "velocity_liquid", "void_fraction", "enthalpy_gas", "enthalpy_liquid"))}

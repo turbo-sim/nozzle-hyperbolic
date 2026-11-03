@@ -37,6 +37,67 @@ def test_strict_json_requires_result_mapping():
         strict_json([1.0, 2.0])
 
 
+def test_solution_summary_separates_updates_rejections_and_physical_defects():
+    from types import SimpleNamespace
+    from nozzle_hyperbolic.solvers.convergence_output import solution_summary
+
+    result = SimpleNamespace(
+        success=False,
+        reason="retry_limit",
+        time=0.1,
+        elapsed_s=2.0,
+        history=[
+            dict(phase="initial", accepted=True),
+            dict(phase="accepted", accepted=True, inner_iterations=3, cfl=0.4),
+            dict(
+                phase="rejected",
+                accepted=False,
+                inner_iterations=7,
+                rejected_newton_trials=2,
+            ),
+        ],
+        metrics=dict(
+            equation_norm=np.array([2e-4]),
+            boundary_max=1e-12,
+            constraint_max=3e-12,
+            global_defect=np.array([4e-5, 2e-5]),
+            conservation_budget=np.array([1e-13, -2e-13]),
+        ),
+    )
+    summary = solution_summary(result)
+    assert summary["accepted_steps"] == summary["rejected_steps"] == 1
+    assert summary["inner_iterations"] == 10
+    assert summary["accepted_inner_iterations"] == 3
+    assert summary["rejected_inner_iterations"] == 7
+    assert summary["rejected_newton_trials"] == 2
+    assert summary["global_balance_max"] == 4e-5
+    assert summary["conservation_budget_max"] == 2e-13
+    result.metrics["global_defect"][0] = np.nan
+    assert np.isnan(solution_summary(result)["global_balance_max"])
+
+
+def test_transient_table_labels_time_inner_work_and_content_budget():
+    stream = io.StringIO()
+    table = ConvergenceTable(
+        ["mass", "momentum", "energy"], stream=stream, mode="transient"
+    )
+    table(
+        dict(
+            step=12,
+            time_s=0.03,
+            cfl=0.4,
+            dt=1e-4,
+            inner_iterations=6,
+            inner_residual=1e-13,
+            budget=np.array([1e-12, -2e-12]),
+        )
+    )
+    output = stream.getvalue()
+    assert "t [s]" in output and "Inner" in output and "Budget" in output
+    assert "R1" not in output and "2.00e-12" in output
+    assert max(map(len, output.splitlines())) <= 100
+
+
 @pytest.mark.parametrize(
     "defects, expected",
     [([1e-13, 2e-13], "2.00e-13"), ([np.nan, 1e-13], "nan"), ([np.inf], "+inf")],
