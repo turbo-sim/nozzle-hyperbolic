@@ -18,8 +18,8 @@ STUDY = Path(__file__).resolve().parents[1]
 ROOT = STUDY.parents[1]
 ASSETS = Path(__file__).resolve().parent / "report_assets"
 SHARED = ROOT / "development/flux_methods/shared/assets"
-DEFAULT_INPUT = STUDY / "outputs/initial_20261102/summary.json"
-COLORS = ["#6a00a8", "#a11b9b", "#cc4778", "#ed7953", "#fca636"]
+DEFAULT_INPUT = STUDY / "outputs/cfl_carryover_20261103/summary.json"
+COLORS = ["#6a00a8", "#9410a2", "#b52f8c", "#d5536f", "#ed7953", "#fca636"]
 
 
 def packed_json(value):
@@ -75,12 +75,15 @@ def payload(summary, source):
 
 def markdown(summary, data):
     c = data["counts"]
-    lines = ["# Production solver benchmark", "",
+    lines = ["# Solver time benchmarking", "",
              f"{c['configurations']} configurations and {c['measured_solves']} measured complete solves. "
-             f"All {c['converged']} fine-grid solves converge; {c['accurate']} meet original analytical targets.", "",
+             f"{c['converged']} fine-grid configurations converge; {c['accurate']} meet original analytical targets.", "",
              "Open [REPORT.html](REPORT.html) for the Plotly case explorer. Select the model, physical case, "
              "reconstruction and methods. Timing, field and convergence views share the selection.", "",
-             "The report reads the saved campaign only. No timing or numerical solution was rerun.", ""]
+             "The report is generated from the saved campaign; rendering performs no solves or timing measurements.", ""]
+    lines.extend(["Grid sequencing carries the preceding successful solve's last accepted CFL, capped at "
+                  "the configured maximum, and recomputes the timestep on each grid. Cold starts and retries "
+                  "use the configured initial CFL; residual normalization is fresh on every grid.", ""])
     for paragraph in data["findings"]:
         lines.extend([paragraph, ""])
     lines.extend(["## Cost per correction", "",
@@ -102,6 +105,16 @@ def markdown(summary, data):
         t = r["timing"]
         lines.append(f"| {r['case_id']} | {r['reconstruction']} | {NAMES[r['method']['id']]} | {len(r['samples'])} | "
                      f"{number(t['mean_s'])} | {number(t['min_s'])} | {number(t['max_s'])} | {r['assessment']['analytical_passed']} |")
+    lines.extend(["", "## Single grid versus sequencing", "",
+                  "Each row compares the same Stadtke variant. A timing ratio is descriptive when original "
+                  "checks or the separate field-agreement check fail.", "",
+                  "| Case | Reconstruction | Variant | Single [s] | Sequence [s] | Sequence / single | Original checks | Field agreement |",
+                  "|---|---|---|---:|---:|---:|---|---|"])
+    for pair in data["comparisons"]:
+        lines.append(f"| {pair['case']} | {pair['reconstruction']} | {pair['variant']} | "
+                     f"{number(pair['single_mean_s'])} | {number(pair['sequence_mean_s'])} | "
+                     f"{number(pair['sequence_over_single_total'])} | {pair['original_checks_passed']} | "
+                     f"{pair['comparison_field_agreement_passed']} |")
     lines.extend(["", f"Measured source SHA-256: `{data['provenance']['source']['sha256']}`.", ""])
     return "\n".join(lines)
 
@@ -136,6 +149,9 @@ def main():
             evidence = source.parent / "presentation" / name
             if evidence.is_file():
                 archive.write(evidence, "checks/" + name)
+        measurement_audit = source.parent / "audit.json"
+        if measurement_audit.is_file():
+            archive.write(measurement_audit, "checks/measurement_audit.json")
         for p in assets:
             if p.is_file():
                 archive.write(p, "presentation/" + p.relative_to(ROOT).as_posix())

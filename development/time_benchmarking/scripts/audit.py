@@ -41,9 +41,39 @@ class HTMLAudit(HTMLParser):
         if tag=="script":self.in_payload=False
 
 
+def audit_cfl(stages, protocol):
+    """Verify actual controller history, including failed transfers and cold retries."""
+    carry = protocol["grid_sequence"]["carry_cfl"]
+    initial = protocol["steady"]["cfl"]
+    cap = protocol["steady"]["cfl_max"]
+    previous = None
+    for stage in stages:
+        expected = initial
+        if previous and previous["success"] and carry:
+            expected = min(previous["last_accepted_cfl"] or initial, cap)
+        assert stage["cfl_policy"] == ("carry" if carry else "reset")
+        for attempt in stage["attempts"]:
+            assert math.isclose(attempt["initial_cfl"], expected, rel_tol=1e-12)
+            if attempt["history"]:
+                assert math.isclose(attempt["history"][0]["cfl"], expected, rel_tol=1e-12)
+            else:
+                assert not attempt["success"]
+        if stage["attempts"]:
+            expected = initial
+        assert math.isclose(stage["initial_cfl"], expected, rel_tol=1e-12)
+        accepted = [h for h in stage["history"] if h["phase"] in ("initial", "accepted")]
+        if stage["history"]:
+            assert stage["initial_cfl"] == stage["history"][0]["cfl"]
+        else:
+            assert not stage["success"]
+        assert stage["last_accepted_cfl"] == (accepted[-1]["cfl"] if accepted else None)
+        assert stage["residual_normalization"] == "fresh per-equation initial norm on this grid"
+        previous = stage
+
+
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--input",type=Path,default=STUDY/"outputs/initial_20261102/summary.json")
+    parser.add_argument("--input",type=Path,default=STUDY/"outputs/cfl_carryover_20261103/summary.json")
     parser.add_argument("--skip-report",action="store_true")
     args=parser.parse_args();path=args.input.resolve();s=json.loads(path.read_text(encoding="utf-8"));p=s["protocol"]
     assert s["completed"]
@@ -56,7 +86,7 @@ def main():
         for category in ("source","harness"):
             for name,digest in s["provenance"][category]["files"].items():assert sha256(z.read(name)).hexdigest()==digest,name
         for case in s["cases"]:assert sha256(z.read(case["path"])).hexdigest()==case["sha256"]
-    samples=0;kernels=0;warnings=[]
+    samples=0;kernels=0;cfl_stages=0;warnings=[]
     for r in s["results"]:
         assert r["source_unchanged"],r["id"]
         assert r["timing_environment"]["status"]=="clean",r["id"]
@@ -66,6 +96,9 @@ def main():
             data=(path.parent/sample["file"]).read_bytes()
             assert sha256(data).hexdigest()==sample["sha256"],sample["file"]
             raw=json.loads(data)
+            if "grid_sequence" in p:
+                audit_cfl(raw["stages"],p)
+                cfl_stages+=len(raw["stages"])
             assert raw["elapsed_s"]==sample["elapsed_s"]>0
             assert [stage["cells"] for stage in raw["stages"]]==r["method"]["grids"]
             assert raw["fine"]["cells"]==400
@@ -85,7 +118,13 @@ def main():
             assert raw["fallback_count"]==sum(bool(stage["attempts"]) for stage in raw["stages"])
             samples+=1
         assert [sample["elapsed_s"] for sample in r["samples"]]==r["timing"]["samples_s"]
-        for warm in r["warmups"]:assert (path.parent/warm["file"]).is_file()
+        for warm in r["warmups"]:
+            warm_path=path.parent/warm["file"]
+            assert warm_path.is_file()
+            if "grid_sequence" in p:
+                stages=json.loads(warm_path.read_text(encoding="utf-8"))["stages"]
+                audit_cfl(stages,p)
+                cfl_stages+=len(stages)
         if r.get("kernel_timing"):
             assert r["kernel_metadata"]["fixed_corrections"]==20
             assert r["kernel_metadata"]["inner_admissibility"]
@@ -134,6 +173,7 @@ def main():
         preserved=json.loads(manifest.read_text(encoding="utf-8"))
         for name,digest in preserved.items():assert sha256((path.parent/name).read_bytes()).hexdigest()==digest,name
     result=dict(configurations=expected,measured_solves=samples,kernel_blocks=kernels,
+        cfl_stage_records_checked=cfl_stages,
         offline_images=report.images if report else None,embedded_downloads=report.downloads if report else None,
         warnings=warnings,measurement_artifacts_unchanged=len(preserved) if manifest.is_file() else None,
         browser_interaction="See presentation/browser_audit.json when available; structural and application audits are separate")

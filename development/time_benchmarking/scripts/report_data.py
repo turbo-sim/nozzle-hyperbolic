@@ -11,6 +11,7 @@ from pathlib import Path
 import numpy as np
 
 NAMES={"single_stadtke":"Stadtke · single","multigrid_stadtke":"Stadtke · sequence",
+    "single_stadtke_modified":"Modified Stadtke · single",
     "multigrid_stadtke_modified":"Modified Stadtke · sequence","multigrid_hll":"HLL · sequence","multigrid_rusanov":"Rusanov · sequence"}
 
 def number(value):return "—" if value is None else f"{value:.4g}"
@@ -33,8 +34,10 @@ def same_flux_comparison(records):
     result=[]
     index={(r["case_id"],r["reconstruction"],r["method"]["id"]):r for r in records}
     for (case,recon,method),single in index.items():
-        if method!="single_stadtke":continue
-        sequence=index.get((case,recon,"multigrid_stadtke"))
+        sequence_method={"single_stadtke":"multigrid_stadtke",
+                         "single_stadtke_modified":"multigrid_stadtke_modified"}.get(method)
+        if sequence_method is None:continue
+        sequence=index.get((case,recon,sequence_method))
         if sequence is None or not single["samples"] or not sequence["samples"]:continue
         a,b=single["assessment"],sequence["assessment"]
         deviations={name:float(np.max(np.abs(np.asarray(a["state"]["fields"][name])-np.asarray(b["state"]["fields"][name]))))/norm["scale"]
@@ -45,7 +48,9 @@ def same_flux_comparison(records):
         if "fixed20" in single.get("kernel_timing",{}) and "fixed20" in sequence.get("kernel_timing",{}):
             correction=sequence["kernel_timing"]["fixed20"]["mean_s"]/single["kernel_timing"]["fixed20"]["mean_s"]
         deviation=max(deviations.values())
-        result.append(dict(case=case,reconstruction=recon,single_mean_s=single["timing"]["mean_s"],sequence_mean_s=sequence["timing"]["mean_s"],
+        result.append(dict(case=case,reconstruction=recon,single_method=method,sequence_method=sequence_method,
+            variant="Modified Stadtke" if method=="single_stadtke_modified" else "Vanilla Stadtke",
+            single_mean_s=single["timing"]["mean_s"],sequence_mean_s=sequence["timing"]["mean_s"],
             sequence_over_single_total=ratio,sequence_over_single_correction=correction,original_checks_passed=bool(acceptable),
             maximum_field_scaled_state_deviation=deviation,field_scaled_deviations=deviations,
             comparison_field_agreement_tolerance=1e-6,comparison_field_agreement_passed=deviation<=1e-6,
@@ -54,9 +59,11 @@ def same_flux_comparison(records):
 
 def measured_findings(records,comparisons,folder):
     paragraphs=[]
-    ratios=[c["sequence_over_single_correction"] for c in comparisons if c["sequence_over_single_correction"] is not None]
-    if ratios:
-        paragraphs.append(f"With vanilla Stadtke, sequencing changes measured 400-cell correction cost by {(min(ratios)-1)*100:+.1f}% to {(max(ratios)-1)*100:+.1f}% across these cases. Complete-solve totals also reflect different convergence paths and coarse-grid overhead.")
+    for variant in ("Vanilla Stadtke","Modified Stadtke"):
+        ratios=[c["sequence_over_single_correction"] for c in comparisons
+                if c["variant"]==variant and c["sequence_over_single_correction"] is not None]
+        if ratios:
+            paragraphs.append(f"With {variant}, sequencing changes measured 400-cell correction cost by {(min(ratios)-1)*100:+.1f}% to {(max(ratios)-1)*100:+.1f}% across these cases. Complete-solve totals also reflect different convergence paths and coarse-grid overhead.")
     validation=folder/"api_removal_validation.json"
     if validation.is_file():
         v=json.loads(validation.read_text(encoding="utf-8"))
@@ -65,19 +72,30 @@ def measured_findings(records,comparisons,folder):
     identical=sum(r.get("repeat_consistency",{}).get("max_variable_scaled_state_difference")==0 for r in records)
     paragraphs.append(f"Repeated final states are numerically identical in {identical}/{len(records)} configurations. Original analytical targets pass in {sum(bool(r.get('assessment',{}).get('analytical_passed')) for r in records)}/{len(records)} configurations; misses remain flagged below.")
     lookup={(r["case_id"],r["reconstruction"],r["method"]["id"]):r for r in records}
-    for method in ("multigrid_stadtke_modified","multigrid_hll","multigrid_rusanov"):
+    cold_ratios=[];cold_checks=[]
+    for (case,recon,key),modified in lookup.items():
+        if key!="single_stadtke_modified" or not case.startswith("euler_annular/shock"):continue
+        vanilla=lookup.get((case,recon,"single_stadtke"))
+        if not vanilla or not modified["samples"] or not vanilla["samples"]:continue
+        cold_ratios.append(modified["timing"]["mean_s"]/vanilla["timing"]["mean_s"])
+        cold_checks.append(all(r.get("success") and r["assessment"]["branch_passed"] and
+                               r["assessment"]["analytical_passed"] for r in (modified,vanilla)))
+    if cold_ratios:
+        paragraphs.append(f"For cold starts on one grid in the shocked annular cases, modified Stadtke's mean complete-solve duration is {min(cold_ratios):.3g}–{max(cold_ratios):.3g} times vanilla across {len(cold_ratios)} case/reconstruction pairs. Both methods pass convergence, branch and original analytical checks in {sum(cold_checks)}/{len(cold_checks)} pairs. These are distinct flux discretizations evaluated at their own converged states.")
+    for method in ("single_stadtke_modified","multigrid_stadtke_modified","multigrid_hll","multigrid_rusanov"):
         relative=[]
         for (case,recon,key),r in lookup.items():
             if key!=method or "fixed20" not in r.get("kernel_timing",{}):continue
-            base=lookup.get((case,recon,"multigrid_stadtke"),{})
+            baseline="single_stadtke" if method=="single_stadtke_modified" else "multigrid_stadtke"
+            base=lookup.get((case,recon,baseline),{})
             if "fixed20" in base.get("kernel_timing",{}):relative.append(r["kernel_timing"]["fixed20"]["mean_s"]/base["kernel_timing"]["fixed20"]["mean_s"])
-        if relative:paragraphs.append(f"{NAMES[method]}: measured correction cost is {min(relative):.3g}–{max(relative):.3g} times sequenced vanilla Stadtke across {len(relative)} case/reconstruction pairs. These kernel diagnostics use each method's own final state, including cases missing analytical targets.")
+        if relative:paragraphs.append(f"{NAMES[method]}: measured correction cost is {min(relative):.3g}–{max(relative):.3g} times {NAMES[baseline]} across {len(relative)} case/reconstruction pairs. These kernel diagnostics use each method's own final state, including cases missing analytical targets.")
     for c in comparisons:
         if c["comparison_field_agreement_passed"]:continue
-        a=lookup[c["case"],c["reconstruction"],"single_stadtke"]["assessment"]["state"]["fields"]
-        b=lookup[c["case"],c["reconstruction"],"multigrid_stadtke"]["assessment"]["state"]["fields"]
+        a=lookup[c["case"],c["reconstruction"],c["single_method"]]["assessment"]["state"]["fields"]
+        b=lookup[c["case"],c["reconstruction"],c["sequence_method"]]["assessment"]["state"]["fields"]
         velocity=float(np.max(np.abs(np.asarray(a["velocity"])-np.asarray(b["velocity"]))))
-        paragraphs.append(f"{c['case']} with {c['reconstruction']}: single-grid and sequenced fine states differ by up to {c['maximum_field_scaled_state_deviation']:.4g} of a fixed field scale (maximum velocity difference {velocity:.3g} m/s). Their {c['single_mean_s']:.3g} s versus {c['sequence_mean_s']:.3g} s totals are descriptive convergence-path timings, not a verified time-to-identical-state speedup. Original checks passed for both: {c['original_checks_passed']}.")
+        paragraphs.append(f"{c['case']} with {c['reconstruction']} ({c['variant']}): single-grid and sequenced fine states differ by up to {c['maximum_field_scaled_state_deviation']:.4g} of a fixed field scale (maximum velocity difference {velocity:.3g} m/s). Their {c['single_mean_s']:.3g} s versus {c['sequence_mean_s']:.3g} s totals are descriptive convergence-path timings, not a verified time-to-identical-state speedup. Original checks passed for both: {c['original_checks_passed']}.")
     agreeing=[c["maximum_field_scaled_state_deviation"] for c in comparisons if c["comparison_field_agreement_passed"]]
     if agreeing:paragraphs.append(f"{len(agreeing)}/{len(comparisons)} same-flux pairs agree within the separate comparison threshold of 1e-6 of fixed field scales; their maximum deviation is {max(agreeing):.4g}. This check does not change solver or analytical acceptance.")
     return paragraphs

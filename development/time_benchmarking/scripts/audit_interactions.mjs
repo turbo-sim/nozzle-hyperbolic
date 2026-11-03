@@ -26,7 +26,7 @@ export async function auditInteractions(html) {
   const app=window.productionReport,D=app.data,$=id=>document.getElementById(id),checks=[];
   const change=(id,value)=>{$(id).value=value;$(id).dispatchEvent(new AuditEvent('change'));};
   const verify=(condition,name)=>{assert.ok(condition,name);checks.push(name);};
-  verify(D.rows.length===60 && D.cases.length===6,'all sixty configurations and six physical cases available');
+  verify(D.rows.length===D.methods.length*D.protocol.reconstructions.length*D.cases.length && D.cases.length===6,'all configurations and six physical cases available');
   verify($('case-cards').querySelectorAll('button').length===12,'all six cases expose both reconstructions');
   change('model','euler_annular');verify(app.snapshot().model==='euler_annular' && $('case').options.length===3,'model selector updates available operating cases');
   change('case','euler_annular/supersonic_expansion');verify(app.snapshot().caseId==='euler_annular/supersonic_expansion','case dropdown updates the comparison');
@@ -36,11 +36,11 @@ export async function auditInteractions(html) {
   for(const c of D.cases)for(const recon of D.protocol.reconstructions){
     app.selectCase(c.id,recon,'timing');
     const selected=D.rows.filter(r=>r.case_id===c.id && r.reconstruction===recon);
-    verify(app.snapshot().rows.length===5 && app.snapshot().caseId===c.id,'selection '+c.id+' '+recon);
+    verify(app.snapshot().rows.length===D.methods.length && app.snapshot().caseId===c.id,'selection '+c.id+' '+recon);
     assert.ok($('selection-summary').textContent.includes(c.id));
     for(const [id,[key,factor]] of Object.entries(metrics)){
       change('metric',id);const bars=plots.get('operation-plot').data;
-      assert.equal(bars.length,5);
+      assert.equal(bars.length,D.methods.length);
       bars.forEach((bar,i)=>assert.equal(bar.x[0],selected[i].kernel_timing[key].mean_s*factor));
       const samples=plots.get('samples-plot').data;
       samples.forEach((trace,i)=>assert.deepEqual(Array.from(trace.y),Array.from(selected[i].kernel_timing[key].samples_s,v=>v*factor)));
@@ -52,10 +52,10 @@ export async function auditInteractions(html) {
     selected.forEach((r,i)=>assert.ok(Math.abs(stage.reduce((s,t)=>s+t.x[i],0)-r.timing.mean_s)<1e-10));
     app.showPage('fields');
     const pressure=plots.get('pressure-plot').data;
-    pressure.slice(0,5).forEach((trace,i)=>assert.deepEqual(Array.from(trace.y),Array.from(selected[i].fields.values.p)));
+    pressure.slice(0,D.methods.length).forEach((trace,i)=>assert.deepEqual(Array.from(trace.y),Array.from(selected[i].fields.values.p)));
     for(const mode of ['equation','boundary','global']){
       change('residual-mode',mode);
-      assert.equal(plots.get('residual-plot').data.length,5);
+      assert.equal(plots.get('residual-plot').data.length,D.methods.length);
       assert.ok(plots.get('residual-plot').data.every(t=>t.x.length>0));
     }
     if(c.id.includes('shock')){change('profile-range','shock');assert.equal(plots.get('pressure-plot').layout.xaxis.range.length,2);}
@@ -64,14 +64,20 @@ export async function auditInteractions(html) {
   checks.push(`${selections} case/reconstruction selections; ${operations} exact operation/sample mappings; all stage totals and saved profiles match`);
   app.selectCase('euler_nozzle/shock_35','constant','fields');
   verify($('accuracy-notice').textContent.includes('Rusanov'),'constant nozzle Rusanov accuracy miss stays visible');
-  app.selectCase('euler_annular/shock35','muscl_van_leer','timing');
-  verify($('case-interpretation').textContent.includes('not a verified time-to-identical-state'),'annular MUSCL state disagreement disclosed');
+  for(const c of D.comparisons){
+    app.selectCase(c.case,c.reconstruction,'timing');
+    verify($('case-interpretation').textContent.includes(c.variant),'same-flux interpretation '+c.variant+' '+c.case+' '+c.reconstruction);
+    if(!c.comparison_field_agreement_passed)verify($('case-interpretation').textContent.includes('not a verified time-to-identical-state'),'state disagreement disclosed '+c.variant+' '+c.case);
+  }
+  const modified=D.methods.find(m=>m.id==='single_stadtke_modified');
+  verify(modified && modified.grids.length===1 && modified.grids[0]===400 && modified.custom_jump_correction && modified.custom_endpoint_envelope,'modified Stadtke single-grid method retains both corrections');
+  verify(D.comparisons.filter(c=>c.single_method===modified.id).length===D.cases.length*D.protocol.reconstructions.length,'modified Stadtke has every single-grid/sequence comparison');
   $('methods-none').click();
   verify(app.snapshot().rows.length===0 && !$('empty-selection').hidden,'empty method selection never substitutes a method');
   assert.equal(plots.get('operation-plot').data.length,0);
-  $('methods-all').click();verify(app.snapshot().rows.length===5,'all methods restored');
+  $('methods-all').click();verify(app.snapshot().rows.length===D.methods.length,'all methods restored');
   const first=$('methods').querySelector('input');first.click();
-  verify(app.snapshot().rows.length===4,'individual method checkbox filters all views');first.click();
+  verify(app.snapshot().rows.length===D.methods.length-1,'individual method checkbox filters all views');first.click();
   for(const page of ['overview','timing','fields','protocol']){
     app.showPage(page);assert.equal(document.querySelectorAll('.report-page').filter(e=>!e.hidden).length,1);
     assert.equal($('page-'+page).hidden,false);

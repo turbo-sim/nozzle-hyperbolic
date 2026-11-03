@@ -20,7 +20,7 @@ All development work is grouped under this single directory:
   nozzle, annular and CO2 target cases.
 - [historical/](historical/README.md): retained sensitivity, CFL carryover
   and local-timestep studies.
-- [benchmark_production/](benchmark_production/README.md): production flux and
+- [time_benchmarking/](time_benchmarking/README.md): production flux and
   grid-sequencing comparisons on 400 cells, with 50/100/200-cell coarse grids
   and separate fixed-work component timings.
 

@@ -11,7 +11,7 @@
   const reconName = id => id === 'constant' ? 'Constant' : 'MUSCL · Van Leer';
   const shortCase = c => c.id.includes('shock') ? `Shock ${c.id.includes('35') ? '35%' : '70%'}` : c.model === 'euler_nozzle' ? 'Adapted expansion' : 'Supersonic expansion';
   const badge = (value, yes='Pass', no='Miss') => `<span class="badge ${value ? 'pass' : 'warn'}">${escape(value ? yes : no)}</span>`;
-  const label = id => ({single_stadtke:'Vanilla Stadtke · single',multigrid_stadtke:'Vanilla Stadtke · sequence',multigrid_stadtke_modified:'Modified Stadtke · sequence',multigrid_hll:'HLL · sequence',multigrid_rusanov:'Rusanov · sequence'}[id] || id);
+  const label = id => ({single_stadtke:'Vanilla Stadtke · single',multigrid_stadtke:'Vanilla Stadtke · sequence',single_stadtke_modified:'Modified Stadtke · single',multigrid_stadtke_modified:'Modified Stadtke · sequence',multigrid_hll:'HLL · sequence',multigrid_rusanov:'Rusanov · sequence'}[id] || id);
   const rowFor = (caseId,recon,id) => DATA.rows.find(r => r.case_id === caseId && r.reconstruction === recon && r.method === id);
   const state = {model:DATA.cases[0].model,caseId:DATA.cases[0].id,reconstruction:'constant',metric:'correction',
     methods:new Set(DATA.methods.map(m => m.id)),page:'overview',renderNumber:0,rendered:0};
@@ -65,9 +65,9 @@
       const a=r.assessment,failed=Object.keys(a.accuracy_checks).filter(k=>!a.accuracy_checks[k]);
       return `${label(r.method)} misses: ${failed.join(', ')}.`;
     });
-    const comparison=DATA.comparisons.find(c=>c.case===state.caseId && c.reconstruction===state.reconstruction);
-    if (comparison && !comparison.comparison_field_agreement_passed && state.methods.has('single_stadtke') && state.methods.has('multigrid_stadtke'))
-      notices.push(`Both vanilla initializations pass original checks, but their fine states differ locally by up to ${fmt(comparison.maximum_field_scaled_state_deviation)} of a fixed field scale. Treat the total-time ratio as descriptive.`);
+    for (const c of DATA.comparisons.filter(c=>c.case===state.caseId && c.reconstruction===state.reconstruction))
+      if (!c.comparison_field_agreement_passed && state.methods.has(c.single_method) && state.methods.has(c.sequence_method))
+        notices.push(`${c.variant} initializations differ locally by up to ${fmt(c.maximum_field_scaled_state_deviation)} of a fixed field scale. Original checks passed for both: ${c.original_checks_passed}. Treat the total-time ratio as descriptive.`);
     $('accuracy-notice').textContent=notices.join(' ');
     $('accuracy-notice').hidden=!notices.length;
     const aRows=rows.map(r=>{
@@ -81,24 +81,27 @@
   }
   function caseInterpretation(rows) {
     const p=[];
-    const c=DATA.comparisons.find(c=>c.case===state.caseId && c.reconstruction===state.reconstruction);
-    if (c && state.methods.has('single_stadtke') && state.methods.has('multigrid_stadtke')) {
+    for (const c of DATA.comparisons.filter(c=>c.case===state.caseId && c.reconstruction===state.reconstruction)) {
+      if (!state.methods.has(c.single_method) || !state.methods.has(c.sequence_method)) continue;
       const direction=c.sequence_over_single_total<1?'lower':'higher';
-      p.push(`With vanilla Stadtke, sequencing gives ${fmt(c.sequence_mean_s)} s versus ${fmt(c.single_mean_s)} s on the single grid: a ${direction} total (${fmt(c.sequence_over_single_total)}×). Its fine-grid cost per correction is ${fmt(c.sequence_over_single_correction)}× the single-grid cost. The large total-time differences come from the convergence path, not a smaller final linear system.`);
+      p.push(`With ${c.variant}, sequencing gives ${fmt(c.sequence_mean_s)} s versus ${fmt(c.single_mean_s)} s on the single grid: a ${direction} total (${fmt(c.sequence_over_single_total)}×). Its fine-grid cost per correction is ${fmt(c.sequence_over_single_correction)}× the single-grid cost. Total-time differences reflect the convergence path and hierarchy overhead.`);
       if(!c.comparison_field_agreement_passed)p.push(`State-agreement caveat: the largest local difference is ${fmt(c.maximum_field_scaled_state_deviation)} of a fixed field scale. This total-time ratio is not a verified time-to-identical-state speedup.`);
-      else p.push(`The vanilla fine states agree within ${fmt(c.maximum_field_scaled_state_deviation)} of fixed field scales. Original analytical checks pass for both: ${c.original_checks_passed?'yes':'no'}.`);
+      else p.push(`The ${c.variant} fine states agree within ${fmt(c.maximum_field_scaled_state_deviation)} of fixed field scales. Original analytical checks pass for both: ${c.original_checks_passed?'yes':'no'}.`);
     }
     const base=rowFor(state.caseId,state.reconstruction,'multigrid_stadtke');
     if (base) for(const r of rows.filter(r=>['multigrid_hll','multigrid_rusanov','multigrid_stadtke_modified'].includes(r.method))) {
       const ratio=r.kernel_timing.fixed20.mean_s/base.kernel_timing.fixed20.mean_s;
       p.push(`${label(r.method)} costs ${fmt(ratio)}× vanilla sequenced Stadtke per checked correction. Its original analytical targets ${r.assessment.analytical_passed?'pass':'are missed'}; kernel cost alone is not an accuracy recommendation.`);
     }
-    if (!p.length)p.push('Select the vanilla single-grid and sequenced methods to compare initialization cost, or add flux variants to inspect their operation costs.');
+    const modified=rows.find(r=>r.method==='single_stadtke_modified');
+    const vanilla=rows.find(r=>r.method==='single_stadtke');
+    if (modified && vanilla) p.push(`On the single grid, modified Stadtke costs ${fmt(modified.kernel_timing.fixed20.mean_s/vanilla.kernel_timing.fixed20.mean_s)}× vanilla per checked correction. Its complete-solve total is ${fmt(modified.timing.mean_s/vanilla.timing.mean_s)}× vanilla; analytical targets ${modified.assessment.analytical_passed?'pass':'are missed'}.`);
+    if (!p.length)p.push('Select a Stadtke single-grid and sequenced pair to compare initialization cost, or add flux variants to inspect their operation costs.');
     $('case-interpretation').innerHTML='<h3>Interpret this selection</h3>'+p.map(t=>`<p>${escape(t)}</p>`).join('');
   }
   function renderOverview() {
     const c=DATA.counts;
-    $('campaign-kpis').innerHTML=stat('Physical operating cases',DATA.cases.length,'3 nozzle + 3 annular')+stat('Saved configurations',c.configurations,'5 methods × 2 reconstructions × 6 cases')+
+    $('campaign-kpis').innerHTML=stat('Physical operating cases',DATA.cases.length,'3 nozzle + 3 annular')+stat('Saved configurations',c.configurations,`${DATA.methods.length} methods × ${DATA.protocol.reconstructions.length} reconstructions × ${DATA.cases.length} cases`)+
       stat('Measured complete solves',c.measured_solves,`${c.excluded_solves} excluded complete solves`)+stat('Analytical targets passed',`${c.accurate} / ${c.configurations}`,`${c.converged} converged fine-grid solves`);
     $('case-cards').innerHTML=DATA.cases.map(c=>{
       const groups=['constant','muscl_van_leer'].map(recon=>{
@@ -155,7 +158,7 @@
     const ref=DATA.references[state.caseId],p=FluxReportUI.palette(),shock=rows[0]?.assessment.shock.expected;
     if(shock==null)$('profile-range').value='domain';
     const curve=(r,key)=>({type:'scatter',mode:'lines',name:label(r.method),x:r.fields.x,y:r.fields.values[key]||r.fields.values.M,
-      line:{color:method(r.method).color,width:2,dash:({single_stadtke:'solid',multigrid_stadtke:'dash',multigrid_stadtke_modified:'dashdot',multigrid_hll:'dot',multigrid_rusanov:'longdash'})[r.method]}});
+      line:{color:method(r.method).color,width:2,dash:({single_stadtke:'solid',multigrid_stadtke:'dash',single_stadtke_modified:'longdashdot',multigrid_stadtke_modified:'dashdot',multigrid_hll:'dot',multigrid_rusanov:'longdash'})[r.method]}});
     function profile(id,key,title,units) {
       const traces=rows.map(r=>curve(r,key));
       if(rows.length)traces.push({type:'scatter',mode:'lines',name:'Analytical point reference',x:ref.x,y:ref.fields[key]||ref.fields.M,line:{color:p.ink,width:1.5,dash:'dot'}});

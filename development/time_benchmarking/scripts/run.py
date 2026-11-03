@@ -28,7 +28,7 @@ class Worker(SharedWorker):
         self.backend="production";self.timeout=timeout
         folder.mkdir(parents=True,exist_ok=True)
         self.log=(folder/"worker.log").open("a",encoding="utf-8")
-        self.process=subprocess.Popen([sys.executable,"-B","-m","development.benchmark_production.scripts.worker"],
+        self.process=subprocess.Popen([sys.executable,"-B","-m","development.time_benchmarking.scripts.worker"],
             cwd=ROOT,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=self.log,text=True,bufsize=1,
             env=dict(os.environ,PYTHONUNBUFFERED="1",PYTHONDONTWRITEBYTECODE="1"))
         ready=self._read()
@@ -47,9 +47,10 @@ def freeze(output,summary):
 
 
 def compact_stage(stage):
-    keys=("cells","success","reason","metrics","work","elapsed_s","stage_total_s","initialization")
+    keys=("cells","success","reason","metrics","work","elapsed_s","stage_total_s","initialization",
+          "cfl_policy","initial_cfl","last_accepted_cfl","residual_normalization")
     value={key:stage[key] for key in keys}
-    value["failed_warm_attempts"]=[{key:attempt[key] for key in ("reason","elapsed_s","metrics","initialization")} for attempt in stage["attempts"]]
+    value["failed_warm_attempts"]=[{key:attempt[key] for key in ("reason","elapsed_s","metrics","initialization","initial_cfl")} for attempt in stage["attempts"]]
     return value
 
 

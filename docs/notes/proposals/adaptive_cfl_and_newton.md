@@ -177,7 +177,7 @@ Earlier local Newton-cap measurements compared the undamped solver at caps
 10 and 100 with matched settings. The historical summary below was recorded
 on 31 October 2026; it is not a performance measurement of the current source.
 The original local report was `development/historical/nozzle_native_performance/CAP_BENCHMARK.md`.
-Use the [maintained benchmark](../../../development/benchmark_production/README.md)
+Use the [maintained benchmark](../../../development/time_benchmarking/README.md)
 for a new controlled comparison, rather than rerunning historical commands.
 
 | New solver case | Mean runtime, cap 10 → 100 | Accepted steps | Largest actual inner count at cap 100 |

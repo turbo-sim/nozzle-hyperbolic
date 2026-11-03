@@ -78,7 +78,7 @@ unchanged. Update old imports to these model-owned paths.
 Use the [installed verification API](../../src/nozzle_hyperbolic/verification/README.md)
 for versioned physical YAML cases and independent analytical projections. Meshes,
 fluxes, integrators, tolerances and repeat counts belong to numerical profiles.
-The [steady benchmark](../../development/benchmark_production/README.md),
+The [steady benchmark](../../development/time_benchmarking/README.md),
 [flux studies](../../development/flux_methods/README.md) and
 [transient demos](../../demos/README.md) call the production source. Their
 documentation states the covered problems and limitations.

@@ -12,7 +12,9 @@ repeats:
   euler_annular: 3
 kernel_repeats: 20
 complete_solve_timeout_s: 1200
-output: outputs/initial_20261102
+output: outputs/cfl_carryover_20261103
+grid_sequence:
+  carry_cfl: true
 methods:
   - id: single_stadtke
     label: Vanilla Stadtke, single grid
@@ -26,6 +28,12 @@ methods:
     grids: [50, 100, 200, 400]
     custom_jump_correction: false
     custom_endpoint_envelope: false
+  - id: single_stadtke_modified
+    label: Modified Stadtke, single grid
+    flux: stadtke
+    grids: [400]
+    custom_jump_correction: true
+    custom_endpoint_envelope: true
   - id: multigrid_stadtke_modified
     label: Modified Stadtke, grid sequencing
     flux: stadtke

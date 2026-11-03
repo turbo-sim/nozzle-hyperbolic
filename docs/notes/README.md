@@ -38,7 +38,7 @@ Other material has an explicit role:
   and research notes. They have not been revised as part of this cleanup;
   consult the current model interface for production storage and numerical APIs.
 - [Flux studies](../../development/flux_methods/README.md),
-  [steady benchmarks](../../development/benchmark_production/README.md) and
+  [steady benchmarks](../../development/time_benchmarking/README.md) and
   [transient demos](../../demos/README.md) own their numerical profiles,
   saved results and output-generation scripts.
 

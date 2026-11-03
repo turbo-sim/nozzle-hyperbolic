@@ -9,7 +9,7 @@ a paused campaign or authorize unrequested production-source changes.
 For supported model responsibilities, use the [architecture](architecture/ARCHITECTURE.md)
 and [model interface](model_interface.md). Locate an existing study through the
 [development index](../../development/README.md). The
-[maintained benchmark](../../development/benchmark_production/README.md) owns its
+[maintained benchmark](../../development/time_benchmarking/README.md) owns its
 runner-specific timing and resume rules.
 
 ## Organize a numerical study

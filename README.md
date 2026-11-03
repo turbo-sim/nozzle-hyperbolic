@@ -59,7 +59,7 @@ integrator's established treatment. The
 [transient-nozzle demo](demos/nozzle_transient/README.md) provide standalone
 examples and animations. Steady verification and
 runtime regression monitoring live in
-[`development/benchmark_production/`](development/benchmark_production/README.md).
+[`development/time_benchmarking/`](development/time_benchmarking/README.md).
 
 The [two-fluid migration guide](docs/notes/two_fluid_migration.md) records Alberto's
 frozen physical reference, eight-state/six-balance/two-EOS formulation,

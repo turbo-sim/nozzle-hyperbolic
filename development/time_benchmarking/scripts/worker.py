@@ -78,7 +78,8 @@ def main():
             success=solution.success,reason=solution.reason,metrics=metrics,history=solution.history,
             work=work(solution.history),elapsed_s=solution.elapsed_s,
             stage_total_s=solution.elapsed_s+sum(a["elapsed_s"] for a in metadata["attempts"]),
-            initialization=metadata["initialization"],attempts=metadata["attempts"])
+            initialization=metadata["initialization"],attempts=metadata["attempts"],
+            **{key:metadata[key] for key in ("cfl_policy","initial_cfl","last_accepted_cfl","residual_normalization")})
 
     def solve(method_id):
         method=cache["methods"][method_id];scheme=cache["schemes"][method_id]
@@ -92,7 +93,8 @@ def main():
              patch.object(drivers,"sampler",lambda op,policy:cache["samplers"][id(op)]):
             final,metadata=drivers.solve_grid_sequence(
                 lambda n:cache["physical"][n].model,tuple(method["grids"]),scheme,cache["settings"],
-                on_stage=stage,quantity_evaluator_factory=lambda model:None)
+                on_stage=stage,quantity_evaluator_factory=lambda model:None,
+                **cache["config"]["grid_sequence"])
         jax.block_until_ready(final.state)
         elapsed=perf_counter()-started
         packed=[pack(model,solution,meta) for model,solution,meta in stages]
