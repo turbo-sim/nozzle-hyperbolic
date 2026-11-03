@@ -8,6 +8,8 @@ from nozzle_hyperbolic.models.euler_nozzle.analytical.perfect_gas import Perfect
 
 
 def render(report, output):
+    current = report.get('schema') == 'shared_fvm_sensitivity_v1'
+    outlet_key = 'outlet_direct_flux' if current else 'outlet_pressure_weight'
     plt.rcParams.update({'font.size': 10, 'axes.grid': True, 'grid.alpha': .2})
     runs = [r for r in report['runs'] if r['mode'] == 'descending']
     cold = [r for r in report['runs'] if r['mode'] == 'cold']
@@ -74,8 +76,8 @@ def render(report, output):
     axes[0, 0].plot(ratios, [r['exit_p_ratio'] for r in runs], color=cmap(.7), label='Last physical point')
     axes[0, 0].set_ylabel(r'Outlet pressures $p/p_0$')
     axes[0, 0].legend(fontsize=8)
-    series(axes[0, 1], 'outlet_pressure_weight')
-    axes[0, 1].set_ylabel('Subsonic pressure-imposition weight w')
+    series(axes[0, 1], outlet_key)
+    axes[0, 1].set_ylabel('Direct outlet flux (0/1)' if current else 'Subsonic pressure-imposition weight w')
     series(axes[1, 0], 'shock_estimate_m', [np.nan if r['shock_exact_m'] is None else r['shock_exact_m'] for r in runs])
     axes[1, 0].set_ylabel('Internal shock position [m]')
     series(axes[1, 1], 'pressure_L1_p0')
@@ -175,17 +177,18 @@ def render(report, output):
         ax.axvspan((x[-1] + x[-2]) / 2, x[-1], color='.9', alpha=.6)
         ax.set(xlim=(.190, .2003), xlabel='Axial position [m]', ylabel=label)
     axes[0, 0].legend(fontsize=8)
-    fig.suptitle('Outlet close-up: squares are algebraic ghosts; dashed curves are analytic interior', fontsize=12)
+    fig.suptitle('Outlet close-up: squares are algebraic traces; dashed curves are analytic interior', fontsize=12)
     finish(fig, 'outlet_closeup')
 
+    outlet_label = 'Direct flux' if current else '$w$'
     lines = ['# Backpressure operating-map results', '',
-             f'Mesh: {report["mesh_points"]} points. Source unchanged: {report.get("source_unchanged", "run incomplete")}.', '',
-             '| Mode | $p_b/p_0$ | Reference regime | Converged | Updates | RMS | $M_t$ | $M_e$ | $w$ | Mass flow [kg/s] | Entropy flux rise [W/K] |',
+             f'Mesh: {report["mesh_points"]} states including two boundary slots. Source unchanged: {report.get("source_unchanged", "run incomplete")}.', '',
+             f'| Mode | $p_b/p_0$ | Reference regime | Converged | Updates | Maximum equation norm | $M_t$ | $M_e$ | {outlet_label} | Mass flow [kg/s] | Entropy flux rise [W/K] |',
              '|---|---:|---|:---:|---:|---:|---:|---:|---:|---:|---:|']
     for r in report['runs']:
         lines.append(f'| {r["mode"]} | {r["p_back_ratio"]:.8f} | {r["regime_exact"]} | {r["converged"]} | '
                      f'{r["accepted_updates"]} | {r["history"][-1]["spatial_rms"]:.2e} | {r["throat_M"]:.4f} | '
-                     f'{r["exit_M"]:.4f} | {r["outlet_pressure_weight"]:.3g} | {r["mdot_kg_s"]:.7f} | {r["entropy_generation_W_K"]:.6g} |')
+                        f'{r["exit_M"]:.4f} | {r[outlet_key]:.3g} | {r["mdot_kg_s"]:.7f} | {r["entropy_generation_W_K"]:.6g} |')
     lines.extend(['', 'The last interior point is used for exit diagnostics. Ghosts are not physical samples.', '',
                   'Entropy flux rise is the stationary advective estimate between the first and last interior points;',
                   'it excludes the external jet and is meaningful as a production rate only for a converged solution.', '',

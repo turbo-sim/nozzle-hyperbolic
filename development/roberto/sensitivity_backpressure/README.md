@@ -1,93 +1,57 @@
 # Nozzle backpressure sensitivity
 
-Open **[REPORT.html](REPORT.html)**. One standalone HTML file contains the
-existing scientific report and an internal **Theory & background** tab, with
-light/dark themes and the same navigation style as the boundary-condition studies.
-It works offline when copied alone.
+New sweeps use `NozzleModel`, `SteadyWorkspace` and `solve_single_grid` from the
+current shared FVM engine. Physical geometry, reservoir data and the perfect-gas
+backend come from the [packaged nozzle cases](../../../src/nozzle_hyperbolic/verification/README.md).
+There is no dependency on the retired `euler_nozzle` or `euler_annular` studies.
 
-The organization and presentation have changed; the content and results have
-not. All 104 recorded states, 88 analytical profiles, blue color palette,
-original audit, numerical findings and provenance are preserved. No solver or
-analytical-reference calculation was rerun.
+## Current numerical driver
 
-## Report contents
-
-- **Results:** the existing setup, analytical regimes, operating map, critical
-  transitions, field distributions, branch comparison, residual histories,
-  conservation checks, operating-point table and reproducibility information.
-- **Theory & background:** the existing physical-regime and boundary-condition
-  notes, with typeset equations. Original setup/execution documentation and the
-  detailed Markdown results record are included as expandable background.
-
-All existing interactions remain: pressure/startup selectors, the animation
-slider and play/pause controls, ghost and alternative-state overlays, history
-region selection, table filters, zoom/reset and embedded CSV/JSON downloads.
-The original report wording and numerical values remain the basis of these views.
-
-## Directory organization
-
-```text
-backpressure_sensitivity/
-  README.md                  contents, organization and reproduction commands
-  REPORT.html                complete offline report with Results and Theory tabs
-  __init__.py                Python package marker
-  scripts/                   unchanged numerical study and presentation code
-    report_assets/           editable result template, themes and browser code
-      notes/                 original physical notes, setup and results documents
-      vendor/                local Plotly/MathJax runtimes and licenses
-  outputs/                   ignored numerical records, figures and browser audits
-```
-
-Human-facing files live at the study root. The earlier Markdown files are
-preserved under `scripts/report_assets/notes/`; their content is in the HTML.
-The superseded HTML is retained only as an ignored presentation archive.
-
-| Script | Purpose |
-|---|---|
-| `run_sweep.py` | Numerical backpressure sweep, continuation and diagnostics |
-| `src/nozzle_hyperbolic/models/euler_nozzle/analytical/` | Canonical analytical operating map; imported directly |
-| `audit_results.py` | Independent saved-field residual/reference audit |
-| `plot_results.py` | Optional static PNG/PDF export and detailed output record |
-| `build_html_report.py` | Repackage the unchanged dataset into the standalone HTML |
-| `markdown_notes.py` | Render existing prose/equations into the Theory tab |
-| `audit_html_report.py` | Offline desktop/laptop browser and interaction checks |
-
-## Rebuild the HTML without solving
-
-From the repository root in the existing Poetry environment:
+Run from the repository root in the existing Poetry environment:
 
 ```powershell
-poetry run python -B -m development.roberto.historical.backpressure_sensitivity.scripts.build_html_report
+poetry run python -B -m development.roberto.sensitivity_backpressure.scripts.run_sweep --smoke
+poetry run python -B -m development.roberto.sensitivity_backpressure.scripts.run_sweep --ratios 1.0 0.97 --n-points 10 --output development/roberto/sensitivity_backpressure/outputs/check
+poetry run python -B -m development.roberto.sensitivity_backpressure.scripts.audit_results
+poetry run python -B -m development.roberto.sensitivity_backpressure.scripts.run_sweep --plot-only
 ```
 
-The builder checks the existing dataset fingerprint and uses the exact original
-embedded analytical profiles and colors. It reads `outputs/baseline/report_payload.json`
-or recovers that payload from an existing `REPORT.html`; it does not recompute
-analytical curves. Saved `summary.json`, `audit.json` and `operating_map.csv`
-are checked and left unchanged. Plotly and MathJax are vendored locally.
+Default numerical output is `outputs/shared_fvm/`; select a fresh `--output`
+for another execution. `--n-points` counts physical cells plus two endpoint
+traces. The current mesh uses finite-volume centers and integrated smooth
+geometry, rather than the former uniform nodal arrangement.
 
-The original dataset guard remains: another numerical dataset requires an
-explicit review of the existing narrative before publication. `--input` and
-`--output` select study-local paths; `--plotly-js` can select a local runtime.
+The driver selects MUSCL Van Leer, corrected Stadtke flux, coupled backward
+Euler and the production automatic acoustic outlet. Each backpressure binds an
+immutable model and workspace; compilation occurs in a separately recorded
+warm-up before the measured solve. Successful descending solutions seed the
+next pressure. Failed states are retained and do not replace the last successful
+seed. Explicit `--ratios` runs only those pressures; the normal complete sweep
+also attempts independent cold and supersonic-restart branch probes.
 
-## Existing numerical and audit commands
+The current CFL controller starts at 0.2, grows by 1.2 after acceptance, shrinks
+after rejected trials and caps at 1e6. Every transported equation, boundary
+trace and global discrete balance must independently meet an absolute 1e-8
+target. Inner Newton convergence remains required. These choices intentionally
+replace the retired factory/controller; old timings and fields are not current
+solver results.
+
+Each new campaign writes full returned fields, accepted/rejected histories,
+metrics, source fingerprints, an operating-map CSV, PNG/PDF figures and
+`REPORT.md`. The saved-field audit accepts the current schema only and checks
+the actual current spatial residual and numerical face mass flux without
+advancing new timesteps. Analytical accuracy remains separate from convergence.
+
+## Existing standalone presentation
+
+[REPORT.html](REPORT.html) displays the earlier recorded sensitivity campaign.
+It is self-contained. Rebuild that presentation without a solve using:
 
 ```powershell
-poetry run python -B -m development.roberto.historical.backpressure_sensitivity.scripts.run_sweep
-poetry run python -B -m development.roberto.historical.backpressure_sensitivity.scripts.run_sweep --plot-only
-poetry run python -B -m development.roberto.historical.backpressure_sensitivity.scripts.audit_results
+poetry run python -B -m development.roberto.sensitivity_backpressure.scripts.build_html_report
 ```
 
-These numerical/reference scripts are unchanged. Full setup, diagnostics,
-controller settings and limits remain in the report. Separate variants should
-use a separate study-local `--output` directory.
-
-For optional HTML verification with an existing Playwright environment and Edge:
-
-```powershell
-python -B development/roberto/historical/backpressure_sensitivity/scripts/audit_html_report.py
-```
-
-This checks a solitary copy of the HTML offline, both tabs and themes, plot
-controls, animation, keyboard slider, filters, exact downloads and desktop
-widths of 1280, 1440 and 1920 pixels. Browser state and evidence stay in `outputs/`.
+That builder checks its original dataset fingerprint and does not relabel new
+shared-FVM data as the old campaign. Plotly/MathJax runtimes and licenses live
+locally in `scripts/report_assets/vendor/`. `audit_html_report` checks the
+standalone presentation using an isolated browser profile.

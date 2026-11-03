@@ -18,7 +18,7 @@ laptop screens, with a print stylesheet for paper/PDF reading.
 Rebuild the HTML from the existing saved results, without integrating again:
 
 ```powershell
-poetry run python -m development.roberto.historical.backpressure_sensitivity.scripts.build_html_report
+poetry run python -m development.roberto.sensitivity_backpressure.scripts.build_html_report
 ```
 
 The renderer uses the existing analytical-reference extension and embeds a
@@ -45,7 +45,7 @@ Playwright and a Chromium browser, rather than a production dependency.
 ## Physical setup
 
 Import the geometry, reservoir conditions and numerical settings from the
-existing [steady EulerNozzle example](../euler_nozzle/README.md):
+existing [packaged nozzle cases](../../../../../../src/nozzle_hyperbolic/verification/README.md):
 
 | Quantity | Value |
 |---|---:|
@@ -66,11 +66,11 @@ The backend supplies $R$ and $\gamma$; $\gamma$ is not hard-coded to 1.4.
 From the repository root, using the existing Poetry environment:
 
 ```powershell
-poetry run python -m development.roberto.historical.backpressure_sensitivity.scripts.run_sweep
+poetry run python -m development.roberto.sensitivity_backpressure.scripts.run_sweep
 # Recreate plots/reports from saved data without rerunning the numerical solves:
-poetry run python -m development.roberto.historical.backpressure_sensitivity.scripts.run_sweep --plot-only
+poetry run python -m development.roberto.sensitivity_backpressure.scripts.run_sweep --plot-only
 # Six-point execution check, separate from the full sweep:
-poetry run python -m development.roberto.historical.backpressure_sensitivity.scripts.run_sweep --smoke --output development/roberto/historical/backpressure_sensitivity/outputs/smoke
+poetry run python -m development.roberto.sensitivity_backpressure.scripts.run_sweep --smoke --output development/roberto/sensitivity_backpressure/outputs/smoke
 ```
 
 The full schedule samples $p_b/p_0=1$ down to 0.02, with exact regime landmarks
@@ -106,7 +106,7 @@ the original spatial residual from every saved $p,T,M$ field, without advancing
 any new timesteps:
 
 ```powershell
-poetry run python -m development.roberto.historical.backpressure_sensitivity.scripts.audit_results
+poetry run python -m development.roberto.sensitivity_backpressure.scripts.audit_results
 ```
 
 ## What is held fixed and what changes

@@ -13,7 +13,7 @@ nozzle-only model.
 
 ## Conditions and evidence
 
-Run on 2026-10-28 using the [shared baseline](../euler_nozzle/README.md):
+Run on 2026-10-28 using the [packaged nozzle cases](../../../../../../src/nozzle_hyperbolic/verification/README.md):
 perfect-gas Air, $p_0=200$ kPa, $T_0=300$ K, 0.2 m symmetric nozzle,
 $A_e/A_t=2$, 201 points, ordinary Van Leer MUSCL, regularized FVS, and the
 unchanged source implicit Newton kernel. [README.md](README.md) gives the

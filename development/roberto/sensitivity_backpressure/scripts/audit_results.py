@@ -1,6 +1,6 @@
 """Independent reference and saved-field residual audits, without new timesteps.
 
-Run: poetry run python -m development.roberto.historical.backpressure_sensitivity.scripts.audit_results
+Run: poetry run python -m development.roberto.sensitivity_backpressure.scripts.audit_results
 """
 
 import argparse
@@ -11,30 +11,37 @@ import jax.numpy as jnp
 import jaxprop as jxp
 import numpy as np
 
-from development.roberto.historical.euler_nozzle import verify_euler_nozzle_steady as baseline
-from development.roberto.historical.backpressure_sensitivity.scripts.run_sweep import ImplicitNozzle, STUDY, hashes
-from nozzle_hyperbolic.models.euler_nozzle.analytical.perfect_gas import PerfectGasReference, subsonic_reference
+from .run_sweep import ImplicitNozzle, STUDY, hashes
+from .problem import SCHEMA
+from nozzle_hyperbolic.models.euler_nozzle.analytical.perfect_gas import subsonic_reference
 from nozzle_hyperbolic.models.euler_nozzle.analytical.general_eos import nozzle_exact_real_gas
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--output', type=Path, default=STUDY / 'outputs' / 'baseline')
+    parser.add_argument('--output', type=Path, default=STUDY / 'outputs' / 'shared_fvm')
     args = parser.parse_args()
     report = json.loads((args.output / 'summary.json').read_text(encoding='utf-8'))
+    if report.get('schema') != SCHEMA:
+        raise ValueError('This audit evaluates current FVM states; use the saved report for pre-migration results')
     model = ImplicitNozzle(report['mesh_points'])
-    ref = PerfectGasReference(model.fluid)
+    ref = model.reference
     sub = subsonic_reference(model.area, model.fluid, .6,
                              throat_area=ref.At, p0=ref.p0, T0=ref.T0)
     ours = ref.profile(model.x, float(sub['p'][-1] / ref.p0))
     checks = dict(
         subsonic_pressure_max_relative_error=float(np.max(abs(ours['p'] - sub['p'])) / ref.p0),
         subsonic_mach_max_error=float(np.max(abs(ours['M'] - sub['M']))))
-    shock_x = .5 * baseline.NOZZLE['L'] + .35 * (.5 * baseline.NOZZLE['L'])
-    ours = ref.profile(model.x, ref.shock_data(shock_x)[0])
-    existing = nozzle_exact_real_gas(model.x, model.area, model.fluid, ref.p0, ref.T0,
+    shock_x = .5 * ref.length + .35 * (.5 * ref.length)
+    # The independent general-EOS reference locates the throat by argmin(A)
+    # and interpolates shock area. Include both exact geometry stations even
+    # when a finite-volume center grid does not contain either one.
+    reference_x = np.unique(np.r_[model.x, .5 * ref.length, shock_x])
+    reference_area = model.mesh.geometry.sample(reference_x)['area']
+    ours = ref.profile(reference_x, ref.shock_data(shock_x)[0])
+    existing = nozzle_exact_real_gas(reference_x, reference_area, model.fluid, ref.p0, ref.T0,
                                      x_shock=shock_x, A_throat=ref.At)['shock']
-    mask = np.abs(model.x - shock_x) > 1e-8  # exclude the jump's sampling convention
+    mask = np.abs(reference_x - shock_x) > 1e-8  # exclude the jump's sampling convention
     checks.update(
         shocked_pressure_max_relative_error=float(np.max(abs(ours['p'][mask] - existing['p'][mask])) / ref.p0),
         shocked_mach_max_error=float(np.max(abs(ours['M'][mask] - existing['M'][mask]))),
@@ -55,6 +62,8 @@ def main():
                            face_flux_max_difference_kg_s=flux_difference))
         if row['converged']:
             assert rms < 1.01e-8, audits[-1]
+            checks_now = model.workspace(row['p_back_Pa']).sample(full)
+            assert checks_now['boundary_passed'] and checks_now['global_passed'], audits[-1]
         assert flux_difference < 1e-12, audits[-1]
     unchanged = hashes() == report['source_before'] == report['source_after']
     assert unchanged, 'Current source differs from the source used for the saved study'

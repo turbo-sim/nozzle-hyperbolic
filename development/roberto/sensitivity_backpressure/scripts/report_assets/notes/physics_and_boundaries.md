@@ -79,7 +79,7 @@ from entropy-flux rise between interior sampling points.
 ## What the current source boundary conditions do
 
 The active implementation is nested in
-[`make_jax_stadtke_step`](../../../../src/nozzle_hyperbolic/models/euler_nozzle/fvm.py),
+`make_jax_stadtke_step` (retired factory),
 not solely in the standalone boundaries module. Its eliminated ghost states
 are recomputed within every residual evaluation and implicit Newton update.
 
