@@ -13,6 +13,7 @@ header{background:var(--paper);border-bottom:1px solid var(--line)}header>div{ma
 [hidden]{display:none!important}
 button:disabled{opacity:.5;cursor:not-allowed}
 @media(max-width:700px){.chart .modebar{display:none!important}}
+.chart.diagnostic{height:480px}
 </style></head>
 <body><header><div><span class="brand">NICFD 2026 <small>Published solutions × current shared FVM</small></span><div class="theme"><button id="theme-light" aria-pressed="true">Light</button><button id="theme-dark" aria-pressed="false">Dark</button></div></div></header>
 <main><div class="eyebrow">Two-component nitrogen–water · published-profile reproduction</div>
@@ -661,6 +662,29 @@ async function render(){
  const trials=history.filter(h=>h.phase!=='initial');let work=0;
  promises.push(plot('cfl',[{x:trials.map((_,i)=>i+1),y:trials.map(h=>h.cfl),mode:'lines+markers',name:'Actual trial CFL',line:{color:COLORS[1]},marker:{symbol:trials.map(h=>h.accepted?'circle':'x'),size:5}}],layout('CFL and rejected attempts','Actual CFL',{xaxis:{title:{text:'Trial index'},gridcolor:css('--grid')},yaxis:{title:{text:'Actual CFL'},type:'log',gridcolor:css('--grid')}})));
  promises.push(plot('work',[{x:trials.map((_,i)=>i+1),y:trials.map(h=>work+=h.inner_iterations||0),mode:'lines',name:'All Newton corrections',line:{color:COLORS[0]}}],layout('Actual Newton work','Cumulative corrections',{xaxis:{title:{text:'Trial index'},gridcolor:css('--grid')}})));
+ if(activePage==='convergence' && $('diagnostic-residual')) {
+  const diagnostics=(DATA.convergence_diagnostics||[]).filter(record=>record.cells===100&&record.solve);
+  const names=record=>`CFL ${record.settings.cfl}; growth ${record.settings.cfl_growth}; cap ${record.settings.cfl_max}; Newton ${record.effective.scheme.newton_iterations}`;
+  const line=i=>({color:COLORS[i%COLORS.length],dash:i<COLORS.length?'solid':'dash',width:1.5});
+  const residualTraces=diagnostics.map((record,i)=>({
+   x:record.residual_trajectory.map(point=>point.step),
+   y:record.residual_trajectory.map(point=>point.norm>0?point.norm:null),
+   name:names(record),mode:'lines',line:line(i)
+  }));
+  const cflTraces=diagnostics.map((record,i)=>({
+   x:record.cfl_trajectory.map((_,j)=>j+1),
+   y:record.cfl_trajectory.map(point=>point.cfl>0?point.cfl:null),
+   name:names(record),mode:'lines',line:line(i)
+  }));
+  const diagnosticLayout=(title,ylabel,xlabel)=>layout(title,ylabel,{
+   margin:{l:70,r:22,t:50,b:145},
+   xaxis:{title:{text:xlabel},gridcolor:css('--grid')},
+   yaxis:{title:{text:ylabel},type:'log',gridcolor:css('--grid')},
+   legend:{orientation:'h',y:-.28,font:{size:10}}
+  });
+  promises.push(plot('diagnostic-residual',residualTraces,diagnosticLayout('100-cell residuals by settings','Maximum dimensionless equation norm','Accepted steps')));
+  promises.push(plot('diagnostic-cfl',cflTraces,diagnosticLayout('100-cell CFL by settings','Actual trial CFL','Attempt index (including rejections)')));
+ }
  await Promise.all(promises);rendered=number;window.dispatchEvent(new CustomEvent('nicfd-rendered'));
 }
 function showPage(id){activePage=id;for(const page of document.querySelectorAll('.page'))page.hidden=page.id!==id;for(const tab of document.querySelectorAll('[data-page]'))tab.setAttribute('aria-selected',String(tab.dataset.page===id));if(DATA.kind==='case')render();}

@@ -10,3 +10,4 @@ header{background:var(--paper);border-bottom:1px solid var(--line)}header>div{ma
 [hidden]{display:none!important}
 button:disabled{opacity:.5;cursor:not-allowed}
 @media(max-width:700px){.chart .modebar{display:none!important}}
+.chart.diagnostic{height:480px}

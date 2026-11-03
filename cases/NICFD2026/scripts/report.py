@@ -134,7 +134,18 @@ def load_diagnostics(family, regime):
                 accepted_steps=sum(
                     item["phase"] == "accepted" for item in result["history"]
                 ),
+                initial_equation_norm=result["history"][0]["equation_norm"],
                 final_controller=result["history"][-1],
+                residual_trajectory=[
+                    dict(step=item["step"], norm=max(item["equation_norm"]))
+                    for item in result["history"]
+                    if item["accepted"] and "equation_norm" in item
+                ],
+                cfl_trajectory=[
+                    dict(cfl=item["cfl"], accepted=item["accepted"])
+                    for item in result["history"]
+                    if item["phase"] != "initial"
+                ],
             )
         records.append(row)
     return records
@@ -144,10 +155,15 @@ def diagnostic_content(records):
     if not records:
         return ""
     text = "<h2>Settings-only convergence investigation</h2><p>These additional probes start independently from the published profile. They retain the existing production solver, EOS and strict outer checks. Their compilation and diagnostic overhead are excluded from benchmark comparisons. Unfinished states are not continuation seeds.</p>"
-    scans = [item for record in records for item in record.get("scan", [])]
+    scans = [
+        dict(item, cells=record["cells"])
+        for record in records
+        for item in record.get("scan", [])
+    ]
     if scans:
         text += table(
             [
+                "Cells",
                 "First-step CFL",
                 "Inner Newton converged",
                 "Inner RMS",
@@ -155,6 +171,7 @@ def diagnostic_content(records):
             ],
             [
                 [
+                    item["cells"],
                     item["cfl"],
                     item["newton"]["converged"],
                     fmt(item["newton"]["residual_norm"]),
@@ -174,7 +191,8 @@ def diagnostic_content(records):
         )
         rows.append(
             [
-                record["name"],
+                record["name"].split(f'_N{record["cells"]}_', 1)[-1].replace("_", " "),
+                record["cells"],
                 scheme["reconstruction"],
                 " / ".join(
                     fmt(settings[key]) for key in ("cfl", "cfl_growth", "cfl_max")
@@ -183,6 +201,10 @@ def diagnostic_content(records):
                 record["accepted_steps"],
                 result["reason"],
                 fmt(max(result["audit"]["equation_norm"])),
+                fmt(
+                    max(result["audit"]["equation_norm"])
+                    / max(record["initial_equation_norm"])
+                ),
                 bool(
                     result["success"]
                     and result["audit"]["passed"]
@@ -193,16 +215,20 @@ def diagnostic_content(records):
     text += table(
         [
             "Probe",
+            "Cells",
             "Reconstruction",
             "CFL initial / growth / maximum",
             "Newton / backtrack caps",
             "Accepted steps",
             "Termination",
             "Final max equation norm",
+            "Final / initial max norm",
             "Case checks pass",
         ],
         rows,
     )
+    if any(record["cells"] == 100 and "solve" in record for record in records):
+        text += '<h3>100-cell settings trials</h3><p class="small muted">Each curve starts from the same published-profile seed. Residual curves show the maximum original per-equation L2 norm at every accepted step, without a best-so-far filter. CFL curves include every accepted and rejected attempt. These are convergence diagnostics; elapsed times are not used for a performance comparison.</p><div class="plots"><div class="chart diagnostic" id="diagnostic-residual"></div><div class="chart diagnostic" id="diagnostic-cfl"></div></div>'
     traces = [record for record in records if "newton_info" in record]
     for trace in traces:
         defect = max(event["relative_linear_defect"] for event in trace["directions"])

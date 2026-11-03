@@ -122,27 +122,53 @@ async def exercise(url):
                             ),
                         )
                     )
-                if (
-                    item["family"] == "single_component"
-                    and item["regime"] == "subsonic"
-                ):
+                if item["family"] == "single_component":
+                    await b.evaluate("nicfdReport.showPage('convergence')")
+                    await settled(b)
                     checks.append(
                         dict(
                             name=tag + ":settings_diagnostics",
                             passed=await b.evaluate(
                                 """(()=>{
                                   const records=nicfdReport.data.convergence_diagnostics;
-                                  return records.length>=6 && records.every(r=>r.source_unchanged)
-                                    && records.some(r=>r.solve && r.effective.scheme.reconstruction==='constant')
+                                  return records.length && records.every(r=>r.source_unchanged)
+                                    && records.some(r=>r.cells===100 && r.name.endsWith('mesh100_conservative'))
+                                    && (nicfdReport.data.regime!=='subsonic' || records.some(r=>r.solve && r.effective.scheme.reconstruction==='constant'))
                                     && document.getElementById('convergence').innerText.includes('Settings-only convergence investigation');
                                 })()"""
                             ),
                         )
                     )
+                    checks.append(
+                        dict(
+                            name=tag + ":requested_settings_and_plot_data",
+                            passed=await b.evaluate(
+                                """(()=>{
+                                  const records=nicfdReport.data.convergence_diagnostics.filter(r=>r.cells===100&&r.solve);
+                                  const requested=records.find(r=>r.settings.cfl===0.5&&r.settings.cfl_growth===1.2&&r.settings.cfl_max===10000&&r.effective.scheme.newton_iterations===25);
+                                  const residual=document.getElementById('diagnostic-residual'),cfl=document.getElementById('diagnostic-cfl');
+                                  return Boolean(requested) && residual.data.length===records.length && cfl.data.length===records.length
+                                    && residual._fullLayout.yaxis.type==='log' && cfl._fullLayout.yaxis.type==='log'
+                                    && [residual,cfl].every(el=>{
+                                      const bounds=el.getBoundingClientRect(),legend=el.querySelector('.legend').getBoundingClientRect();
+                                      return el._fullLayout.height<=bounds.height+2 && legend.bottom<=bounds.bottom+2;
+                                    })
+                                    && records.every((r,i)=>residual.data[i].y.length===r.residual_trajectory.length
+                                      && residual.data[i].y.every((y,j)=>y===(r.residual_trajectory[j].norm>0?r.residual_trajectory[j].norm:null))
+                                      && cfl.data[i].y.length===r.cfl_trajectory.length
+                                      && cfl.data[i].y.every((y,j)=>y===(r.cfl_trajectory[j].cfl>0?r.cfl_trajectory[j].cfl:null)));
+                                })()"""
+                            ),
+                        )
+                    )
                     await b.evaluate(
-                        "nicfdReport.showPage('convergence');Array.from(document.querySelectorAll('h2')).find(h=>h.innerText==='Settings-only convergence investigation').scrollIntoView()"
+                        "Array.from(document.querySelectorAll('h2')).find(h=>h.innerText==='Settings-only convergence investigation').scrollIntoView()"
                     )
                     await b.screenshot(OUT / (tag + "_settings_diagnostics.png"))
+                    await b.evaluate(
+                        "document.getElementById('diagnostic-residual').scrollIntoView()"
+                    )
+                    await b.screenshot(OUT / (tag + "_settings_curves.png"))
                 await b.evaluate(
                     "nicfdReport.showPage('profiles');document.getElementById('field-group').value='flow';document.getElementById('theme-light').click()"
                 )
