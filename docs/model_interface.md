@@ -4,9 +4,12 @@ The production entry point is `nozzle_hyperbolic.solvers.fvm`. A physical model
 is a Python object satisfying the structural protocols in
 [`contracts.py`](../src/nozzle_hyperbolic/solvers/fvm/contracts.py); inheritance
 is unnecessary. The solver has no Euler-variable, equation-count or EOS branch.
-The supported problem is a **square conservative balance system**, with
-cell-local storage, fixed one-dimensional geometry and two endpoint traces.
-Nonconservative products and rectangular systems need a future contract extension.
+The supported problem has $T$ transported balances and $C$ cell-local
+algebraic constraints in $V=T+C$ state variables, fixed one-dimensional
+geometry and two endpoint traces. Storage can be rectangular; the assembled
+Newton system is square. Conservative models declare `nonconservative_mode="none"`.
+An explicit flux-difference compatibility contract supports nonconservative
+models without inferring a new path-conservative method.
 The package supports two physical endpoints; periodic problems are outside its scope.
 Interior flux/source callbacks are autonomous functions of state and fixed model
 data; boundary equations additionally receive physical time. Explicitly
@@ -27,8 +30,11 @@ benchmark profiles select numerical settings and import those definitions. See
 With $N$ physical cells and $V$ variables, the full state has shape $(N+2,V)$.
 Rows zero and $N+1$ are independent algebraic endpoint traces, located at the
 physical end faces. Interior rows are cell values. Face arrays have shape
-$(N+1,V)$. The model's iteration variables are also its reconstruction variables;
-they need not be conservative variables.
+$(N+1,V)$ for states and $(N+1,T)$ for transported fluxes. By default, iteration
+variables are also reconstruction variables. A model can instead supply
+`reconstruction_state(full)`, `from_reconstruction_state(face_states)` and
+positive fixed `reconstruction_scales`. These local maps let the limiter act
+on physical primitives while retaining the full constrained iteration state.
 
 `Mesh` stores increasing faces, interior centers, positive cell volumes and
 positive face areas. Optional geometric data is opaque to the numerical engine.
@@ -38,7 +44,7 @@ For physical-cell storage density $Q(W)$, unweighted transported face flux $F$
 and already integrated cell source $S_i$, the common residual is
 
 $$
-R_i=A_{i+1/2}F_{i+1/2}-A_{i-1/2}F_{i-1/2}-S_i,
+R_i=A_{i+1/2}F_{i+1/2}-A_{i-1/2}F_{i-1/2}+N_i-S_i,
 \qquad V_i\frac{dQ(W_i)}{dt}+R_i=0.
 $$
 
@@ -54,26 +60,31 @@ configuration rather than changing attributes after binding compiled callbacks.
 
 | Member | Meaning and shape |
 |---|---|
-| `mesh`, `nvar`, `equation_names` | `Mesh`, positive integer $V$, $V$ descriptive equation names |
+| `mesh`, `nvar`, `ntransport`, `nconstraints`, `nboundary` | Geometry and counts $V,T,C,V$, with $T+C=V$ |
+| `equation_names`, `constraint_names` | $T$ transported and $C$ algebraic labels, separately monitored |
+| `nonconservative_mode` | `none` (zero NC contribution) or `flux_difference` (explicit compatibility callback) |
 | `variable_scales` | Positive fixed $(V,)$ scales for reconstruction and state corrections |
-| `conservative_scales` | Positive fixed $(V,)$ scales for storage densities and spatial norms |
-| `global_flux_scales` | Positive fixed $(V,)$ scales for integrated balance defects |
+| `conservative_scales` | Positive fixed $(T,)$ scales for storage densities and spatial norms |
+| `global_flux_scales` | Positive fixed $(T,)$ scales for integrated balance defects |
+| `constraint_scales` | Positive fixed $(C,)$ physical scales; required when $C>0$ |
 | `reference_time` | Positive fixed physical time scale |
 | `source_dependency_radius` | Maximum full-state block distance used by a source row |
 | `boundary_dependency_radius` | Maximum full-state block distance used by a boundary row |
 | `boundary_coupling` | `local`, or `global` for nonlocal endpoint coupling |
 | `initial_state()` | Full $(N+2,V)$ initial state |
-| `cell_conserved(physical)` | Cell-local $(N,V)\to(N,V)$ transported storage densities |
-| `face_conserved(states)` | $(N+1,V)$ conserved densities in the model's face frame |
-| `face_physical_flux(states)` | $(N+1,V)$ physical fluxes in the same face frame |
+| `cell_conserved(physical)` | Cell-local $(N,V)\to(N,T)$ transported storage densities |
+| `cell_constraints(physical)` | Cell-local $(N,V)\to(N,C)$ dimensional algebraic defects when $C>0$ |
+| `face_conserved(states)` | $(N+1,T)$ conserved densities in the model's face frame |
+| `face_physical_flux(states)` | $(N+1,T)$ physical fluxes in the same face frame |
 | `face_speed_bounds(states)` | Two $(N+1,)$ vectors of signed lower/upper characteristic speeds; needed for HLL/Rusanov |
-| `flux_to_conserved_frame(flux)` | Convert $(N+1,V)$ numerical face-frame flux into the transported frame |
-| `integrated_source(full)` | $(N,V)$ integrated physical sources |
+| `flux_to_conserved_frame(flux)` | Convert $(N+1,T)$ numerical face-frame flux into the transported frame |
+| `integrated_source(full)` | $(N,T)$ integrated physical sources |
 | `boundary_residual(full,time)` | $(2,V)$ dimensionless endpoint equations |
 | `admissible(full,left,right)` | Scalar boolean validating full states and reconstructed face states |
 | `wave_speed(physical)` | $(N,)$ nonnegative maximum absolute signal speeds for timestep selection |
 
-The nonlinear storage map must be locally invertible in the admissible domain.
+The augmented map `(cell_conserved, cell_constraints)` must be locally
+invertible in the admissible domain.
 Explicit integration advances $V_iQ_i$, then recovers the iteration variables by
 a generic nonlinear solve. This is why `cell_conserved` must be cell-local.
 Face property/flux callbacks and frame conversion act independently at each
@@ -98,7 +109,8 @@ pytree; the numerical engine never interprets its physical contents.
 
 ### Flux capabilities and current options
 
-`Scheme.flux` accepts `stadtke` (default), `rusanov`, `hll`, `roe` and `osher`.
+`Scheme.flux` accepts `stadtke` (default), `rusanov`, `hll`, `roe`, `osher` and
+the explicitly model-owned `model_compatibility` formulation.
 The previous `characteristic` selector has been removed; mathematical callback
 names such as `face_characteristics` retain their meaning.
 
@@ -223,6 +235,64 @@ dense AD and a directional finite difference before relying on its declarations.
 
 ## Optional capabilities
 
+### Constrained cells and nonconservative compatibility
+
+For $C>0$, backward Euler packs each cell's scaled transported rows followed by
+`cell_constraints(new)/constraint_scales`. These algebraic rows have **zero
+storage**, no volume multiplier and no $dt$ multiplier. Explicit Euler, SSPRK3
+and classical RK4 recover $V$ unknowns from $T$ target contents and $C$
+constraints at every stage, then complete the physical boundary equations at
+that stage time. Coupled and segregated backward Euler use the same cell and
+boundary rows. Coloring still operates on square $V$-row cell blocks; local
+storage differentiation supports rectangular outputs.
+
+For `nonconservative_mode="flux_difference"`, provide
+`integrated_nonconservative(full, unfiltered_flux)` and
+`nonconservative_dependency_radius`, and explicitly declare `supported_fluxes`.
+The input flux is unweighted and already in the transported frame, **before**
+additional stabilization and boundary-flux overrides. The callback returns
+integrated $(N,T)$ terms added to the spatial residual. Geometry pairing and
+singular limits belong to the model. This is an operational compatibility
+contract; it does not implement a general path-conservative jump condition.
+The declared radius covers the full-state reach with constant reconstruction;
+the engine adds one state block for MUSCL to cover raw-flux dependencies.
+
+`flux="model_compatibility"` requires the face-local callback
+`numerical_face_flux(left,right,scheme)`. This enables a documented historical
+flux whose physical decomposition does not fit the generic flux families.
+Unsupported combinations fail at operator binding. An optional
+`validate_scheme(scheme)` can enforce further model-specific restrictions.
+
+`stabilization_flux(full,raw_flux)` returns an **additional** unweighted
+transported face flux and requires `stabilization_dependency_radius`. Its
+parameters belong to the model, independently of the generic fourth-difference
+filter. Model filters must also supply appropriate explicit timestep bounds.
+`Operator.residual_contributions` exposes conservative divergence,
+stabilization, nonconservative terms and sources separately. Its `balance_rate`
+includes the actual discrete NC work in physical-time budgets.
+Optional fixed `invariant_projections` of shape `(invariants,T)`, descriptive
+`invariant_names` and `invariant_flux_scales` let the model identify true
+physical invariants. Monitoring evaluates them with the unmodified NC/source
+budget and requires their steady defects to pass independently.
+
+An explicitly equation-changing model policy can implement
+`transform_cell_equations(full, integrated_rows, dt=None)`. It acts on each
+cell's own transported rows: steady spatial rows when `dt=None`, or raw
+backward-Euler content change plus $dtR$ otherwise. Declare
+`equation_dependency_radius` for any extra state dependencies; cross-cell
+mixing of the input equation rows is not supported. The generic engine then
+applies its usual fixed scales and appends the cell constraints. Such policies
+must declare their integration restrictions in `validate_scheme`; `steady_only`
+rejects physical-time integration. With active `has_equation_pins`, monitoring
+also records `unmodified_equation_norm`, `unmodified_equation_linf` and
+`unmodified_global_defect`. Passing the selected equations is not evidence that
+the unmodified balances vanish.
+
+All packaged conservative models explicitly declare $C=0$ and zero NC terms;
+external square models without the new declarations retain backward-compatible
+defaults. The [two-fluid migration guide](two_fluid_migration.md) records the
+frozen Alberto formulation, selected defaults and intentional deviations.
+
 | Callback | Purpose |
 |---|---|
 | `face_roe_data(left,right,delta_factor)` or fused `face_roe_data_from_data(...)` | Optional model-owned finite-jump Roe eigenspaces, entropy widths and per-face validity; required only for `flux="roe"` |
@@ -259,11 +329,11 @@ belong to the model. Do not put primitive-variable smoothing in the integrator.
 
 ## Integration and stopping
 
-`Scheme.time_integrator` selects `euler-implicit`, `euler-explicit` or
-`runge-kutta-3`. `Scheme.boundary_treatment` selects how the same algebraic
+`Scheme.time_integrator` selects `euler-implicit`, `euler-explicit`,
+`runge-kutta-3` or `runge-kutta-4`. `Scheme.boundary_treatment` selects how the same algebraic
 boundary equations are solved:
 
-| Setting | Backward Euler | Explicit Euler / SSPRK3 |
+| Setting | Backward Euler | Explicit Euler / SSPRK3 / RK4 |
 |---|---|---|
 | `auto` (default) | Coupled | Segregated |
 | `coupled` | Cell storage and zero-storage boundary rows solved together | Rejected at configuration |
@@ -300,7 +370,8 @@ counts outer physical Newton updates; nested boundary work is additional.
 It is not a complete work counter for a performance comparison.
 
 Explicit stages advance conservative storage and recover cell variables
-generically. Boundary physics has one definition for all integrators. Negative
+generically, including the initial constrained state before the first rate is
+evaluated. Boundary physics has one definition for all integrators. Negative
 intermediate Euler velocities are permitted when the thermodynamic state is
 admissible. The Euler steady final audit checks the requested forward branch;
 the opt-in automatic outlet has a separate transient audit, allowing signed
@@ -317,9 +388,20 @@ each grid solve. Grid sequencing is numerical initialization; each grid receives
 a new initial residual normalization. Final success also requires finite,
 admissible states and any configured physical monitors/final audit.
 
+`solve_grid_sequence(..., carry_cfl=True)` also transfers the last accepted
+CFL from a successful preceding grid. It recomputes the timestep on the new
+mesh and caps the inherited CFL at `settings.cfl_max`. Cold starts and cold
+retries use `settings.cfl`; `carry_cfl=False` restores a reset on every grid.
+An already-steady zero-update stage forwards its initial CFL. Missing or
+invalid controller history falls back to `settings.cfl`. Stage records include
+`cfl_policy`, `initial_cfl` and `last_accepted_cfl`, with failed warm-attempt
+starting CFLs retained separately. The original convergence checks and fresh
+relative residual baselines still apply independently on every grid.
+
 `solve_transient` integrates to requested physical times rather than seeking a
 steady residual. Its conservation audit uses the actual boundary flux and source
-quadrature of the selected integrator, including SSPRK3 stage weights.
+quadrature of the selected integrator, including SSPRK3/RK4 stage weights and
+actual discrete NC work for nonconservative models.
 Accepted history rows retain `integrated_transfer` and `conserved_totals`, in
 each equation's physical units, for independent conservation bookkeeping.
 
@@ -372,5 +454,6 @@ new [transient study](../development/roberto/transient_problems/README.md)
 uses the permitted perfect-gas finite-wave outlet for that case. The physical
 outlet law is held fixed while comparing numerical boundary treatments.
 
-This interface leaves room for a future two-fluid model but does not establish
-that model's well-posedness, hyperbolicity or nonconservative discretization.
+The integrated [two-fluid model](two_fluid_migration.md) uses this constrained
+contract and its explicitly identified compatibility discretization. Interface
+compliance alone does not establish physical well-posedness or hyperbolicity.

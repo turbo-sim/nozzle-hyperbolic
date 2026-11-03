@@ -8,43 +8,74 @@
 - [development/](development/README.md): Alberto's legacy research scripts and
   Roberto's controlled verification and numerical studies.
 - [tests/](tests/): production tests.
+- [legacy/](legacy/README.md): frozen production baseline for old/new solver benchmarks.
 - [docs/](docs/README.md): current guides, proposals, physical derivations and historical audits.
 
 Explore the [interactive architecture map](docs/architecture/ARCHITECTURE.html),
 [vector diagram](docs/architecture/ARCHITECTURE.svg), and
 [detailed architecture guide](docs/architecture/ARCHITECTURE.md).
 
+## Shared finite-volume solver
 
-## Stadtke numerical flux
+The production Euler nozzle, annular Euler, scalar and constrained two-fluid models use the same
+model-independent FVM engine in
+[`solvers/fvm`](src/nozzle_hyperbolic/solvers/fvm/__init__.py). Models supply
+storage, physical fluxes/eigenstructure, source/closure laws, admissibility and
+boundary equations. The engine supplies reconstruction, numerical fluxes,
+Newton/linear solves, explicit Euler, backward Euler, SSPRK3 and classical RK4 integration.
+Numerical flux IDs are `stadtke` (the default), `rusanov`, `hll`, `roe`,
+and `osher`. Osher uses `quadrature_points=5` by default (3, 5 or 9 supported)
+and `integration="gauss"` or `"sonic_partitioned"`, with `"gauss"` the default.
+Stadtke exposes two independent
+custom corrections, `custom_jump_correction` and `custom_endpoint_envelope`,
+both enabled by default; disable both to recover the original implemented FVS.
+The correction names identify project modifications, not terms attributed to
+Stadtke. Roe uses model-owned finite-jump data; nozzle and annular
+Euler provide a general-EOS PH construction. See the
+[flux studies](development/flux_methods/README.md) for equations, controlled
+verification, reports and limitations.
+Implicit flow Newton uses full corrections by default; select
+`Scheme(newton_backtracking=True)` for Armijo damping. Invalid full trials
+still reject the timestep, and strict inner convergence remains required.
+`Scheme.boundary_treatment` selects coupled or segregated implicit boundaries;
+explicit methods use segregated stage solves. The default `auto` preserves the
+integrator's established treatment. The
+[transient comparison](development/roberto/transient_problems/README.md)
+includes Sod and nozzle pressure-release animations. Steady verification and
+runtime regression monitoring live in
+[`development/roberto/benchmarking/`](development/roberto/benchmarking/README.md).
 
-The shared FVM engine selects Stadtke with `Scheme(flux="stadtke")` by
-default. Two independent project-specific corrections are enabled by default:
-`custom_jump_correction=True` and `custom_endpoint_envelope=True`. The former
-uses the conservative finite jump; the latter adds an endpoint-speed viscosity
-envelope. These custom terms are not attributed to Stadtke. Disable both to
-recover the original implemented split, while retaining the same model-owned
-projectors and physical face frame. Reconstruction remains independent of flux
-choice. See the [Stadtke study](development/flux_methods/stadtke/README.md) for
-the original and modified equations, controlled cases and limitations.
+The [two-fluid migration guide](docs/two_fluid_migration.md) records Alberto's
+frozen physical reference, eight-state/six-balance/two-EOS formulation,
+explicit `model_compatibility` flux, closure policies and verification limits.
+The [limiter comparison](development/limiters/README.md) covers Minmod, Superbee
+and Van Albada. [Lettieri validation](cases/lettieri_validation/README.md) uses
+the separate shared Euler/HEM model with zero wall friction.
 
-## Roe numerical flux
+Both acoustic and finite-wave pressure outlets support general-EOS properties.
+The finite-wave option computes PH Hugoniot shocks and numerical expansion
+curves, retaining perfect-gas closed forms for that backend. The
+[backpressure study](development/BC_backpressure/README.md) compares both laws
+from stagnant and numerical adapted starts, including bicubic CO2 cases.
 
-The shared FVM engine supports `Scheme(flux="roe")` for nozzle and annular
-Euler, with model-owned general-EOS PH averaging. The generic numerical kernel
-contains no EOS assumptions. Stadtke FVS with both custom corrections is the default.
-See [the final Roe study](development/flux_methods/roe/README.md) for the implemented
-theory, verification results, limitations and reproducible benchmark/report commands.
+Versioned physical YAML cases are packaged beside the
+[nozzle](src/nozzle_hyperbolic/models/euler_nozzle/cases/README.md) and
+[annular](src/nozzle_hyperbolic/models/euler_annular/cases/README.md) models.
+[`nozzle_hyperbolic.verification`](src/nozzle_hyperbolic/verification/README.md)
+loads these definitions and builds cold physical cases with independent
+analytical projections. Numerical methods, meshes, timing repetitions and
+acceptance settings belong to the benchmark profile.
 
-## Osher numerical flux
+The production steady defaults are CFL 0.2, accepted-step growth 1.2, maximum
+CFL 1e6, and ten Newton corrections. The [architecture guide](docs/architecture/ARCHITECTURE.md)
+describes the supported choices. The [model interface](docs/model_interface.md)
+and [migration guide](docs/migration.md) explain extensions and breaking changes.
 
-The shared FVM engine supports `Scheme(flux="osher")` with
-`quadrature_points=5` by default (3, 5 or 9 supported) and
-`integration="gauss"` by default or `"sonic_partitioned"`.
-Sonic partitioning applies the selected Gauss rule per captured path panel;
-an unsplit nine-point rule is not equivalent. Quadrature count is independent
-of spatial reconstruction order. See the
-[Osher study](development/flux_methods/osher/README.md) for equations,
-verification and sampling assumptions.
+```powershell
+poetry run python -B -m development.roberto.benchmarking.scripts.run
+poetry run python -B -m development.roberto.benchmarking.scripts.report
+```
+
 
 ## Cloning git repository and installing dependencies
 
@@ -79,11 +110,10 @@ The commented local dependencies in `pyproject.toml` support development against
 the neighboring `jaxprop`, `pysolver_view`, and `nurbspy` repositories. Enable a
 local entry in place of its published-version entry, then regenerate the lockfile.
 
-The [EulerAnnular prototype](development/roberto/historical/euler_annular/README.md) solves
-quasi-1D curvilinear annular Euler flow with swirl, general JAXProp
-thermodynamics and simultaneous algebraic boundary equations. Its verification
-driver compares analytical, constant-reconstruction and MUSCL results. Read the
-study report for the measured accuracy limits and supported boundary regimes.
+`AnnularModel` solves quasi-1D curvilinear annular Euler flow with swirl,
+general JAXProp thermodynamics and algebraic boundary equations. The earlier
+[annular study](development/roberto/historical/euler_annular/README.md) preserves the physical
+derivations and historical verification; the maintained benchmark verifies the current production path.
 
 ## Version bumping and publishing
 

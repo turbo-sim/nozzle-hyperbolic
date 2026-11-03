@@ -1,6 +1,6 @@
 # Package architecture
 
-Status checked against `src/nozzle_hyperbolic/` on **1 November 2026**. This guide describes the supported shared finite-volume path, rather than every historical implementation in the repository.
+Status checked against `src/nozzle_hyperbolic/` on **2 November 2026**. This guide describes the supported shared finite-volume path, rather than every historical implementation in the repository.
 
 [Documentation index](../README.md) | [Model interface](../model_interface.md) | [Open the browser map](ARCHITECTURE.html) | [Open the vector diagram](ARCHITECTURE.svg)
 
@@ -21,10 +21,10 @@ The supported balance law has cell-local conserved storage on a fixed one-dimens
 
 $$
 Q_i(W_i)=V_i U(W_i),\qquad
-R_i(W)=A_{i+1/2}\widehat F_{i+1/2}-A_{i-1/2}\widehat F_{i-1/2}-S_i(W).
+R_i(W)=A_{i+1/2}\widehat F_{i+1/2}-A_{i-1/2}\widehat F_{i-1/2}+N_i(W)-S_i(W).
 $$
 
-Here $W$ is the model's iteration/reconstruction representation. It need not equal the conserved variables $U$. The model supplies the already integrated source $S_i$; the operator applies face area once. Physical boundary traces satisfy separate algebraic equations $B(W,t)=0$.
+Here $W$ is the model's iteration representation. It need not equal the conserved variables $U$. The model supplies the already integrated source $S_i$ and optional NC contribution $N_i$; conservative models declare $N_i=0$. The operator applies face area once. Cell constraints satisfy $g(W_i)=0$ and physical boundary traces satisfy separate algebraic equations $B(W,t)=0$.
 
 ## Models
 
@@ -35,7 +35,7 @@ Here $W$ is the model's iteration/reconstruction representation. It need not equ
 | Signed linear advection | One transported scalar, prescribed inflow and extrapolated outflow; either transport direction | Implemented in [`AdvectionModel`](../../src/nozzle_hyperbolic/models/scalar/advection.py), without an EOS |
 | Conservative Burgers | One nonlinear scalar; shock/rarefaction Riemann problems and flow-dependent endpoint treatment | Implemented in [`BurgersModel`](../../src/nozzle_hyperbolic/models/scalar/burgers.py), using HLL/Rusanov without an eigensystem |
 | User-programmed balance law | Arbitrary variable count, subject to the contract below | Supported extension point; no model base class is required |
-| Two-fluid model | Additional phase variables, interactions, closures, and potentially nonconservative terms | **Deferred**: [`models/two_fluid/`](../../src/nozzle_hyperbolic/models/two_fluid/) retains legacy code, not a model integrated with the shared FVM engine |
+| Two-fluid model | Eight state variables, six phase balances, two EOS constraints, virtual mass and interphase closures | [`TwoFluidModel`](../../src/nozzle_hyperbolic/models/two_fluid/model.py) uses the shared engine and an explicitly selected Alberto compatibility discretization; see [migration and verification limits](../two_fluid_migration.md) |
 
 Euler thermodynamic properties come from **JAXProp `Fluid.get_state()`**, including the density, sound speed, entropy, and derivative data needed by the model. Choosing a perfect-gas property backend does not select a separate numerical solver. The optional finite-wave outlet computes general-EOS PH wave curves and retains perfect-gas closed forms for that backend. Separately scoped analytical verification references may also assume a perfect gas.
 
@@ -54,7 +54,15 @@ Prescribed shear/heat profiles and custom callable wall laws are supported. Some
 
 ## Model contract
 
-The structural protocols in [`solvers/fvm/contracts.py`](../../src/nozzle_hyperbolic/solvers/fvm/contracts.py) define a **square conservative system**, with $N$ physical cells, $V$ variables per cell, and two endpoint trace states. Full state arrays have shape `(N+2, V)`; cell storage has shape `(N, V)`; reconstructed face arrays have shape `(N+1, V)`.
+The structural protocols in [`solvers/fvm/contracts.py`](../../src/nozzle_hyperbolic/solvers/fvm/contracts.py) distinguish $V$ state variables, $T$ transported balances and $C$ algebraic constraints, with $V=T+C$. Full state arrays have shape `(N+2, V)`; cell storage has shape `(N, T)`; reconstructed face states have shape `(N+1, V)` and transported fluxes `(N+1, T)`. Each endpoint has $V$ algebraic physical equations. The augmented Newton system is square even when storage is rectangular.
+
+Conservative models explicitly declare zero nonconservative contributions.
+The flux-difference compatibility hook accepts the unfiltered flux before
+additional stabilization and returns integrated NC work; physical geometry
+pairing, singular limits and allowed flux combinations stay in the model.
+Cell EOS rows have zero storage, fixed physical scales and separate absolute
+convergence checks. See the [model interface](../model_interface.md) for packing,
+stage recovery, optional reconstruction variables and the named residual parts.
 
 | Model declaration/callback | Purpose |
 |---|---|
@@ -85,6 +93,8 @@ Reconstruction and flux choice are independent `Scheme` settings. They apply to 
 | Piecewise constant | `reconstruction="constant"` | Implemented; default |
 | MUSCL with Van Leer limiter | `reconstruction="muscl_van_leer"` | Implemented; coordinate-aware reconstruction on the fixed mesh |
 | MUSCL with smooth Van Leer limiter | `reconstruction="muscl_van_leer_smooth"` | Implemented; optional $C^2$ limiter regularization, controlled by `smooth_limiter_coefficient` |
+| Other MUSCL limiters | `muscl_minmod`, `muscl_superbee`, `muscl_van_albada` | Signed, coordinate-aware, AD-safe inactive arithmetic; [shock comparison](../../development/limiters/README.md) |
+| Frozen model compatibility flux | `flux="model_compatibility"` | Explicit opt-in requiring model-owned physical decomposition; Alberto FVS plus its NC correction, not a new path-conservative method |
 | Stadtke FVS with optional custom corrections | `flux="stadtke"` | Default; uses model-supplied characteristic projectors/eigenvalues and `delta_factor`; `custom_jump_correction` and `custom_endpoint_envelope` default to `True`; disable both for original FVS |
 | Fixed-quadrature Osher path flux | `flux="osher", integration="gauss"` | Default Osher integration; `quadrature_points=5` by default, with 3, 5 or 9 Gauss nodes supported; requires supported storage differentiation and an admissible hyperbolic model-owned path |
 | Sonic-partitioned Osher path flux | `flux="osher", integration="sonic_partitioned"` | Same path viscosity with captured sonic/regularization cuts and `quadrature_points` Gauss nodes per panel; complete-capacity fallback preserves captured roots; finite sampling does not certify unseen roots or a universal monotonicity theorem |
@@ -130,6 +140,7 @@ The automatic acoustic law uses a physical pressure/sonic active set rather than
 | Backward Euler | Yes: cells and endpoint traces in one Newton residual | Yes: converged trace roots are eliminated from the cell system | `coupled` |
 | Explicit Euler | Rejected as an invalid setting | Required: nonlinear endpoint completion at the relevant stage | `segregated` |
 | SSPRK3 | Rejected as an invalid setting | Required: nonlinear endpoint completion at each required stage | `segregated` |
+| Classical RK4 | Rejected as an invalid setting | Required: constrained storage recovery and endpoint completion at each stage | `segregated` |
 
 **Zero storage** means that endpoint traces have no control-volume contents and no artificial time derivative. Their values can change over time, but must satisfy $B(W,t)=0$ at the stage/step time. Physical cells carry the transient storage.
 
@@ -147,6 +158,7 @@ It does not differentiate the history of boundary Newton iterations. This requir
 |---|---|---|
 | Forward / explicit Euler | `time_integrator="euler-explicit"` | One explicit conservative update; separate nonlinear storage recovery and boundary completion |
 | Third-order SSP Runge–Kutta | `time_integrator="runge-kutta-3"` | Three-stage SSPRK3; stage combinations act on conserved contents, with storage recovery and endpoint completion |
+| Classical fourth-order Runge–Kutta | `time_integrator="runge-kutta-4"` | Four rate stages at $t,t+dt/2,t+dt/2,t+dt$; contents and all constraints recovered for every stage and final combination |
 | Backward / implicit Euler | `time_integrator="euler-implicit"` | Default; nonlinear backward-Euler equations solved with Newton, using coupled or eliminated endpoint traces |
 
 “Explicit” describes the cell evolution formula. With nonlinear primitive-to-conservative storage and algebraic boundary laws, small auxiliary nonlinear solves can still be necessary. The explicit implementation advances $Q=VU(W)$ and recovers $W$; it does not apply conservative RK formulas directly to primitive variables.
@@ -189,21 +201,22 @@ The banded algorithm pivots within grouped blocks, rather than across the entire
 
 ## Initialization and convergence
 
-Three public drivers cover the main use cases:
+Four public drivers cover the main use cases:
 
 | Driver | Purpose |
 |---|---|
 | `solve_single_grid(model, scheme, settings, ...)` | Solve the original steady equations on one mesh |
 | `solve_grid_sequence(model_factory, cells, scheme, settings, ...)` | Solve successive coarse-to-fine meshes, prolonging successful numerical states |
 | `solve_transient(model, output_times, scheme, cfl=..., ...)` | Physical-time integration with output snapshots and conservation histories |
+| `solve_parameter_sequence(model_factory, parameter_stages, ...)` | Explicit physical-parameter continuation with one fixed numerical scheme and complete stage/preparation records |
 
-The initialization accelerator often called “multigrid” in development notes is **grid sequencing / nested iteration**. It solves each mesh's original equations and uses componentwise linear interpolation to initialize the next mesh. There is no fine-grid defect restriction, FAS cycle, or multigrid correction operator. Failed warm starts remain recorded and may be followed by an independent cold retry. Each mesh starts its own residual normalization.
+The initialization accelerator often called “multigrid” in development notes is **grid sequencing / nested iteration**. It solves each mesh's original equations and uses componentwise linear interpolation for square conservative models. Constrained models interpolate transported densities, then recover the full cell state and complete traces. There is no fine-grid defect restriction, FAS cycle, or multigrid correction operator. Failed warm starts remain recorded and may be followed by an independent cold retry. Each mesh starts its own residual normalization. [Continuation and restart](../continuation_and_restart.md) explains preparation costs, inventories and portable state files.
 
 For steady marching, the source defaults are `cfl=0.2`, `cfl_growth=1.2`, `cfl_shrink=0.5`, `cfl_max=1e6`, `max_steps=4000`, and `max_retries=14`. These are package defaults, not the settings of every development benchmark. Growth follows successful steps; failed trials reduce the requested timestep.
 
 `ResidualPolicy` checks each equation with fixed physical reference scales. The defaults are a volume-weighted L2 norm and **relative reduction of `1e-6` OR absolute norm of `1e-9`**. `criterion` can instead be `"relative"`, `"absolute"`, or `"both"`; `"either"` is the default. Equations initially below the `1e-14` floor use the absolute target. These dimensionless absolute norms are not raw residuals in SI units.
 
-Boundary and global conservation defects must independently meet their default `1e-9` targets, alongside admissibility and finiteness. Optional model audits and engineering monitor windows can impose additional requirements. Model callbacks evaluate engineering quantities; the generic [`MonitorTracker`](../../src/nozzle_hyperbolic/solvers/monitoring.py) checks their accepted-state stationarity windows.
+Boundary, cell algebraic and global discrete-balance defects must independently meet their default `1e-9` targets, alongside admissibility and finiteness. Optional model audits and engineering monitor windows can impose additional requirements. Model callbacks evaluate engineering quantities; the generic [`MonitorTracker`](../../src/nozzle_hyperbolic/solvers/monitoring.py) checks their accepted-state stationarity windows.
 
 Transient histories retain actual accepted/rejected attempts and integrator-consistent integrated boundary/source transfer. Their conservation budgets compare that transfer with changes in total conserved contents. They are distinct from steady spatial/global convergence criteria.
 
@@ -282,8 +295,8 @@ Production verification is exercised by [`tests/`](../../tests/) and the [transi
 
 The architecture's important boundaries are:
 
-- **Current contract:** square conservative systems, cell-local storage, fixed one-dimensional geometry, two nonperiodic endpoint traces. Nonconservative products, rectangular systems, moving geometry, and periodic problems are not supported by this contract.
-- **Two-fluid extension:** intended direction, not an already validated plug-in. Its equations and boundary/source structure may require an explicit contract extension.
+- **Current contract:** square augmented balance/constraint systems with possibly rectangular cell-local storage, fixed one-dimensional geometry and two nonperiodic endpoint traces. The implemented NC extension is an explicit compatibility callback, not a general path-conservative framework. Moving geometry and periodic problems remain outside this contract.
+- **Two-fluid extension:** implementation checks and physical-validation limitations are recorded in [the migration guide](../two_fluid_migration.md); Alberto's final physical verification remains necessary.
 - **Outflow physics:** both outlet formulations support a general EOS. Finite-wave curves assume classical wave structure; nonconvex compound waves and independent bicubic thermodynamic inconsistencies limit exactness. Sustained reverse inflow needs additional physical data.
 - **Numerical robustness:** matching final steady roots does not imply identical Newton trajectories across boundary treatments, reconstruction choices, or controller settings. Undamped Newton and local block pivoting have finite robustness limits.
 - **Roe/EOS scope:** the Euler construction assumes a smooth, thermodynamically consistent PH map on the selected branch. Stable endpoints do not prove a positive interface sound speed. The acoustic fix does not establish global positivity or entropy stability for arbitrary real-gas/nonconvex states; phase switches, independently interpolated inconsistent property tables and future two-fluid equations need separate assessment. See the [Roe study](../../development/flux_methods/roe/README.md).
@@ -313,7 +326,7 @@ Paths below are relative to `src/nozzle_hyperbolic/` unless linked elsewhere.
 | [`solvers/fvm/operator.py`](../../src/nozzle_hyperbolic/solvers/fvm/operator.py) | Model validation, conservative spatial/time residuals, compiled numerical kernels |
 | [`solvers/fvm/drivers.py`](../../src/nozzle_hyperbolic/solvers/fvm/drivers.py) | Single-grid, grid-sequence, and transient execution |
 | [`solvers/fvm/elimination.py`](../../src/nozzle_hyperbolic/solvers/fvm/elimination.py), [`solvers/boundaries.py`](../../src/nozzle_hyperbolic/solvers/boundaries.py) | Converged trace completion and differentiable nonlinear elimination |
-| [`solvers/time_marching/`](../../src/nozzle_hyperbolic/solvers/time_marching/) | Shared Newton, conservative forward Euler, SSPRK3 |
+| [`solvers/time_marching/`](../../src/nozzle_hyperbolic/solvers/time_marching/) | Shared Newton, conservative forward Euler, SSPRK3 and classical RK4 with constrained stage recovery |
 | [`solvers/residuals.py`](../../src/nozzle_hyperbolic/solvers/residuals.py), [`solvers/monitoring.py`](../../src/nozzle_hyperbolic/solvers/monitoring.py) | Fixed-scale convergence and optional engineering monitors |
 | [`numerics/reconstruction.py`](../../src/nozzle_hyperbolic/numerics/reconstruction.py), [`numerics/characteristic.py`](../../src/nozzle_hyperbolic/numerics/characteristic.py), [`numerics/fluxes.py`](../../src/nozzle_hyperbolic/numerics/fluxes.py), [`numerics/roe.py`](../../src/nozzle_hyperbolic/numerics/roe.py), [`numerics/osher.py`](../../src/nozzle_hyperbolic/numerics/osher.py), [`numerics/filters.py`](../../src/nozzle_hyperbolic/numerics/filters.py) | Reusable spatial arithmetic |
 | [`numerics/jacobians.py`](../../src/nozzle_hyperbolic/numerics/jacobians.py), [`numerics/linear.py`](../../src/nozzle_hyperbolic/numerics/linear.py) | Colored/dense AD and block-banded/dense correction solves |
