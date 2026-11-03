@@ -56,9 +56,36 @@ bump-my-version = "^1.5.1"
 sphinx-autobuild = "^2024.10.3"
 myst-parser = "^4.0.1"
 sympy = "^1.14.0"
+coverage = {version = ">=7.6,<8", extras = ["toml"]}
+pytest-cov = ">=6,<8"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = ["--strict-markers", "--strict-config", "--import-mode=importlib"]
+xfail_strict = true
+markers = [
+    "slow: compilation-heavy integration or physical accuracy checks",
+    "regression: analytical verification or pinned numerical compatibility",
+    "optional: requires the separately installed NozzleX package",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["nozzle_hyperbolic"]
+omit = [
+    "*/models/two_fluid/solver.py",
+    "*/models/two_fluid/state.py",
+    "*/models/two_fluid/matrices.py",
+    "*/models/two_fluid/flux.py",
+    "*/models/two_fluid/sources.py",
+    "*/models/two_fluid/boundaries.py",
+    "*/models/two_fluid/closures/*",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true
+precision = 1
 
 [build-system]
 requires = ["poetry-core"]

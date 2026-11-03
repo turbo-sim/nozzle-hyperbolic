@@ -427,7 +427,7 @@ assert all(snapshot.success for snapshot in snapshots)
 For a new physical model, implement the callbacks on a new object, choose its
 fixed scales and stencil declarations, and pass it to the same drivers. No
 registration or numerical-core edit is required. The scalar models demonstrate
-an EOS-free implementation. `tests/test_generic_fvm.py` also exercises an
+an EOS-free implementation. `tests/solvers/test_model_contract.py` also exercises an
 independently programmed two-equation nonlinear-storage model and a wider source
 stencil. The production Euler models show general-EOS storage/eigenstructure,
 closure injection, physical geometry and characteristic endpoint laws.

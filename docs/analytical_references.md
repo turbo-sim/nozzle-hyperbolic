@@ -183,7 +183,7 @@ primitive-variable average.
 Focused reference checks can be run from the repository root:
 
 ```powershell
-poetry run pytest -q -p no:cacheprovider tests/test_nozzle_analytical.py tests/test_annular_analytical.py tests/test_scalar_analytical.py
+poetry run python -B -m pytest tests/verification -q
 ```
 
 These tests check reference identities and limiting cases; they do not certify

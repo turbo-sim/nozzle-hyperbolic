@@ -10,6 +10,21 @@ __pycache__/
 *.pyo
 *.pyd
 
+# Test and analysis caches
+.pytest_cache/
+pytest-cache-files-*/
+.ruff_cache/
+.mypy_cache/
+.tox/
+.nox/
+
+# Coverage output (keep .coveragerc trackable)
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+/test-results/
+
 # Distribution / packaging
 *.egg-info/
 dist/
@@ -60,3 +75,7 @@ demo_nozzlex/
 
 # Preserve the existing tracked cluster launcher after thematic relocation.
 !/development/alberto/hpc/run_job.sh
+
+# Deliberate, reviewable numerical regression references.
+!/tests/regression/data/physical_*/*.npz
+!/tests/regression/data/physical_*/source.zip

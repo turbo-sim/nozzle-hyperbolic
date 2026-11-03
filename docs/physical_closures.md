@@ -94,7 +94,7 @@ inside their valid domains.
 Run the production closure checks with:
 
 ```powershell
-poetry run python -B -m pytest tests/test_physical_closures.py -q
+poetry run python -B -m pytest tests/models/euler_shared/test_wall_laws.py -q
 ```
 
 ## Directional annular loads and optional NozzleX import

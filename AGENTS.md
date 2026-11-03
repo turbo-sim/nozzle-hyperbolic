@@ -31,6 +31,7 @@ The user's current scope and corrections take precedence over these conventions.
 | Residuals, stopping or physical monitors | [Residual monitoring](docs/residual_monitoring.md) |
 | Physical closures | [Closure guide](docs/physical_closures.md) |
 | Physical cases and analytical comparisons | [Verification API](src/nozzle_hyperbolic/verification/README.md), [reference assumptions](docs/analytical_references.md) |
+| Test organization, regression data and CI | [Test suite](tests/README.md) |
 | Numerical experiment, timing or report | [Study conventions](docs/numerical_studies.md), then the relevant [study README](development/README.md) |
 | Native/current comparison | [Benchmark](development/roberto/benchmarking/README.md), [frozen baseline](legacy/README.md) |
 

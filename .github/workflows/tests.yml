@@ -1,0 +1,80 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      nozzlex:
+        description: Run the optional pinned NozzleX integrations
+        type: boolean
+        default: false
+
+env:
+  JAX_PLATFORMS: cpu
+  MPLBACKEND: Agg
+  POETRY_VIRTUALENVS_IN_PROJECT: "true"
+
+jobs:
+  fast:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+      - run: pip install poetry==2.1.2
+      - run: poetry install --with dev --no-interaction
+      - run: poetry run black --check tests
+      - run: poetry run python -B -m pytest -m "not slow and not optional"
+
+  full:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - run: pip install poetry==2.1.2
+      - run: poetry install --with dev --no-interaction
+      - run: poetry run python -B -m pytest -m "not optional" --cov --cov-report=term-missing --cov-report=xml --cov-report=html --junitxml=test-results/full.xml
+      - run: poetry build -f wheel
+      - run: poetry run python tests/check_installed_wheel.py dist/*.whl
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: test-and-coverage-reports
+          path: |
+            coverage.xml
+            htmlcov/
+            test-results/
+
+  nozzlex:
+    if: github.event_name == 'workflow_dispatch' && inputs.nozzlex
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - run: pip install poetry==2.1.2
+      - run: poetry install --with dev --no-interaction
+      - uses: actions/checkout@v7
+        with:
+          repository: turbo-sim/nozzlex
+          ref: e6feea3765d836ed8014e7544015072f1122f2bf
+          path: .optional/nozzlex
+      # This adapter is checked against our locked stack. Do not resolve a second
+      # numerical environment from the optional project's older dependency bounds.
+      - run: poetry run pip install --no-deps ./.optional/nozzlex
+      - run: poetry run python -B -m pytest -m optional --junitxml=test-results/nozzlex.xml
+        env:
+          NOZZLE_REQUIRE_NOZZLEX: "1"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: nozzlex-test-results
+          path: test-results/
