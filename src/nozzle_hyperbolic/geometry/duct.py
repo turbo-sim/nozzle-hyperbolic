@@ -89,9 +89,8 @@ def get_lettieri_nozzle(x, roughness=0.0, file_path="Lettieri_nozzle.xlsx",
         raise ValueError(f"Unknown nozzle_type '{nozzle_type}'. "
                          f"Choose 'axisymmetric' or 'planar'.")
 
-    # dAdx from central differences on the spline-derived A
-    dx   = x[1] - x[0]
-    dAdx = np.gradient(A, dx)
+    # Use the actual coordinates so nonuniform sampling retains its spacing.
+    dAdx = np.gradient(A, x)
 
     return Geometry(A=A, dAdx=dAdx, D_h=D_h, roughness=float(roughness))
 
