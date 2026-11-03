@@ -17,7 +17,7 @@ import jax.numpy as jnp
 import jaxprop as jxp
 import numpy as np
 
-from nozzle_hyperbolic.models.two_fluid.model import _table_stencil_mask
+from nozzle_hyperbolic.models.two_fluid.thermodynamics import table_stencil_mask
 from .case import (
     ROOT,
     FAMILIES,
@@ -54,7 +54,7 @@ def property_diagnostic(family, regime, fluids):
     phases = {}
     for phase, fluid in zip(("g", "l"), fluids):
         h, p = data["h_" + phase], data["p"]
-        mask = np.asarray(_table_stencil_mask(fluid, True))
+        mask = np.asarray(table_stencil_mask(fluid, True))
         i = np.clip(
             np.floor((h - fluid.h_min) / fluid.delta_h).astype(int), 0, fluid.N_h - 2
         )
@@ -63,7 +63,13 @@ def property_diagnostic(family, regime, fluids):
             0,
             fluid.N_p - 2,
         )
-        good = mask[i, j]
+        good = (
+            mask[i, j]
+            & (h >= fluid.h_min)
+            & (h <= fluid.h_max)
+            & (p >= fluid.p_min)
+            & (p <= fluid.p_max)
+        )
         state = fluid.get_state(jxp.HmassP_INPUTS, jnp.asarray(h), jnp.asarray(p))
         table_path = Path(fluid.table_dir) / (fluid.table_name + ".pkl")
         phases[phase] = dict(
@@ -83,6 +89,12 @@ def property_diagnostic(family, regime, fluids):
                         (np.asarray(state["T"])[1:-1] - data["T_" + phase][1:-1]) ** 2
                     )
                 )
+            ),
+            temperature_max_error_K=float(
+                np.max(abs(np.asarray(state["T"]) - data["T_" + phase]))
+            ),
+            density_relative_max_error=float(
+                np.max(abs(np.asarray(state["rho"]) / data["rho_" + phase] - 1))
             ),
             density_relative_rmse=float(
                 np.sqrt(
@@ -108,9 +120,13 @@ def property_diagnostic(family, regime, fluids):
             "The installed metastable liquid-table generator freezes rows after a bulk-modulus-ratio test. "
             "The generated table returns approximately room-temperature liquid at the published hot-liquid enthalpies. "
             "The current model rejects these copied stencils. No clipping, replacement EOS or weakened admissibility test was used. "
-            "A valid flashing-water reproduction requires repairing and independently validating property generation first."
+            "A valid flashing-water reproduction requires a validated table configuration covering the required phase states."
             if failed and family == "single_component"
-            else "The configured property stencils cover the published profile; this does not establish convergence of a current solve."
+            else (
+                "The liquid table uses the supported 250 kJ/kg lower enthalpy bound to avoid the cold-water spinodal-ratio false trigger. Every published state remains inside the configured domain and passes the unchanged stencil checks. JAXProp source, HEOS, metastable phase, pressure range and table resolution are unchanged."
+                if family == "single_component"
+                else "The configured property stencils cover the published profile; this does not establish convergence of a current solve."
+            )
         ),
         scope="EOS evaluated at published primitives; this is a property diagnostic, not a new CFD solution",
     )
@@ -118,6 +134,7 @@ def property_diagnostic(family, regime, fluids):
 
 def main():
     checks = []
+    outcomes = []
     provenance = json.loads((ROOT / "provenance.json").read_text(encoding="utf-8"))
     for name, item in provenance["files"].items():
         raw = (ROOT / name).read_bytes()
@@ -153,6 +170,29 @@ def main():
             diagnostic = property_diagnostic(family, regime, fluids)
             diagnostic["dependency"] = dependencies
             diagnostic["host"] = host
+            if family == "single_component":
+                generation = json.loads(
+                    (ROOT / family / "outputs/table_generation.json").read_text(
+                        encoding="utf-8"
+                    )
+                )
+                diagnostic["generation"] = generation
+                checks.append(
+                    dict(
+                        name=f"{family}/{regime}:unmodified_jaxprop_since_table_generation",
+                        passed=generation["dependency_source_unchanged"]
+                        and generation["dependency_source_sha256"]
+                        == dependencies["bicubic_source_sha256"],
+                    )
+                )
+                checks.append(
+                    dict(
+                        name=f"{family}/{regime}:validated_liquid_cache",
+                        passed=diagnostic["usable_on_published_profile"]
+                        and diagnostic["phases"]["l"]["table_sha256"]
+                        == generation["table_sha256"],
+                    )
+                )
             changed = [
                 name
                 for name, digest in data["source_before"].items()
@@ -204,8 +244,12 @@ def main():
             )
             checks.append(
                 dict(
-                    name=f"{family}/{regime}:two_execution_modes",
-                    passed=[run["mode"] for run in data["runs"]] == ["cold", "warm"],
+                    name=f"{family}/{regime}:execution_modes_accounted_for",
+                    passed=[run["mode"] for run in data["runs"]] == ["cold", "warm"]
+                    or (
+                        bool(data.get("execution_failure"))
+                        and [run["mode"] for run in data["runs"]] == ["cold"]
+                    ),
                 )
             )
             for run in data["runs"]:
@@ -261,6 +305,18 @@ def main():
             calculated = agreement(
                 data["runs"][-1]["stages"][-1], data["protocol"]["agreement"]
             )
+            final = data["runs"][-1]["stages"][-1]
+            outcomes.append(
+                dict(
+                    family=family,
+                    regime=regime,
+                    valid_property_coverage=diagnostic["usable_on_published_profile"],
+                    converged=bool(
+                        final.get("success") and final.get("audit", {}).get("passed")
+                    ),
+                    verdict=calculated["status"],
+                )
+            )
             checks.append(
                 dict(
                     name=f"{family}/{regime}:verdict_recomputed",
@@ -271,6 +327,8 @@ def main():
         passed=all(item["passed"] for item in checks),
         checks=checks,
         dependency=dependencies,
+        scope="Evidence consistency and property coverage; passing this audit does not mean every CFD case converges or matches.",
+        scientific_outcomes=outcomes,
     )
     write_json(ROOT / "outputs" / "audit.json", result)
     print(

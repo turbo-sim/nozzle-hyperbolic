@@ -15,6 +15,15 @@
   "stage_time_limit_s": 300,
   "reconstruction": "muscl_van_albada",
   "carry_cfl": false,
+  "property_tables": {
+    "single_component": {
+      "liquid": {
+        "h_min": 250000.0,
+        "table_name": "water_meta_liquid_90x90_hmin250k"
+      }
+    }
+  },
+  "property_table_note": "The liquid enthalpy lower bound is 250 kJ/kg instead of the published 100 kJ/kg. This supported JAXProp configuration starts above the cold-water bulk-modulus maximum and avoids the false spinodal-ratio trigger. All published liquid states are above 534.6 kJ/kg. HEOS, metastable phase, pressure bounds, upper enthalpy bound, table resolution and gradient method are retained. Original YAML files remain unchanged; JAXProp source and admissibility checks are unchanged.",
   "timing_note": "One compilation-inclusive execution and one replay of the same initial hierarchy using retained bindings. Individual timing observations, not a repeated-sample speed benchmark. Property preparation and final audits excluded and reported separately.",
   "old_timing": "Not provided by the supplementary repository; no old runtime is inferred from CSV files.",
   "agreement": {

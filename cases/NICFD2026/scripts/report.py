@@ -67,6 +67,10 @@ def fmt(value, digits=3):
     )
 
 
+def time_label(value, digits=4):
+    return "Not measured" if value is None else fmt(value, digits) + " s"
+
+
 def table(headers, rows):
     return (
         '<div class="table-wrap"><table><thead><tr>'
@@ -166,11 +170,11 @@ def content(data):
     start = f"""<div class="eyebrow">{esc(FAMILIES[family])} · published-profile reproduction</div>
 <h1>{esc(REGIMES[regime])}</h1><section class="verdict {esc(verdict['status'])}" id="overall-verdict">
 <h2>{esc(verdict['title'])}</h2><p>{esc(verdict['detail'])}</p></section>
-<p class="muted">The overall verdict uses the final requested {protocol['meshes'][-1]}-cell attempt in the replayed execution. Numerical convergence, the intended regime and agreement with the published profiles are separate checks. “Cold” means compilation-inclusive execution; every first-grid field is explicitly seeded from the published numerical solution.</p>
+<p class="muted">The overall verdict uses the final requested {protocol['meshes'][-1]}-cell attempt in the {esc(data['runs'][-1]['mode'] if data['runs'] else 'recorded')} execution. Numerical convergence, the intended regime and agreement with the published profiles are separate checks. “Cold” means compilation-inclusive execution; every first-grid field is explicitly seeded from the published numerical solution.</p>
 <div class="metrics"><div class="metric"><span>Pressure normalized RMSE</span><strong>{'Not available' if pressure is None else fmt(pressure*100)+'%'}</strong><small>Scale: reservoir pressure</small></div>
 <div class="metric"><span>Mean mass-flow difference</span><strong>{'Not available' if mass is None else fmt(mass*100)+'%'}</strong><small>Relative to the published interior profile</small></div>
-<div class="metric"><span>Compilation-inclusive total</span><strong>{fmt(cold.get('total_s'),4)} s</strong><small>Preparation + all attempted mesh solves</small></div>
-<div class="metric"><span>Replay total</span><strong>{fmt(warm.get('total_s'),4)} s</strong><small>{'Zero new compilation events; states agree' if warm.get('measured_state_replay_valid') else 'No verified replay comparison; see stage outcomes'}</small></div></div>
+<div class="metric"><span>Compilation-inclusive total</span><strong>{time_label(cold.get('total_s'))}</strong><small>Preparation + all attempted mesh solves</small></div>
+<div class="metric"><span>Replay total</span><strong>{time_label(warm.get('total_s'))}</strong><small>{'Zero new compilation events; states agree' if warm.get('measured_state_replay_valid') else 'No verified replay comparison; see stage outcomes'}</small></div></div>
 <nav class="tabs" role="tablist" aria-label="Report sections"><button data-page="profiles" role="tab" aria-selected="true">Profiles & differences</button><button data-page="convergence" role="tab" aria-selected="false">Convergence & work</button><button data-page="timings" role="tab" aria-selected="false">Timings & mesh outcomes</button><button data-page="method" role="tab" aria-selected="false">Method & evidence</button></nav>
 <section class="panel controls"><label>Execution<select id="mode"></select></label><label>Physical cells<select id="grid"></select></label><label>Profile visibility<select id="visibility"><option value="both">Published + current</option><option value="published">Published only</option><option value="current">Current only</option></select></label><label>Variables<select id="field-group"><option value="flow">Flow variables</option><option value="thermal">Thermodynamic variables</option><option value="mixture">Composition & acoustic variables</option></select></label><label>Points skipped between markers<input id="skip" type="number" min="0" max="999" value="3"></label></section>
 <p class="note" id="selected-note"></p><div class="actions"><button id="download-profile">Current profile CSV</button><button id="download-reference">Published profile CSV</button><button id="download-history">Selected history CSV</button><button id="download-json">Full case data JSON</button></div>
@@ -214,6 +218,8 @@ def content(data):
         + esc(protocol["timing_note"])
         + '</p><p class="note">Old-code runtime and convergence histories are not supplied with the published CSVs. They are unavailable here, rather than estimated or shown as zero. No old/new speedup is claimed.</p>'
     )
+    if data.get("execution_failure"):
+        start += '<p class="note">' + esc(data["execution_failure"]["message"]) + "</p>"
     stage_rows = []
     for run in data["runs"]:
         for stage in run["stages"]:
@@ -363,7 +369,13 @@ def content(data):
             )
             + ". The solver-used source hashes remained unchanged. Both endpoint snapshots and the import-graph audit are retained in the downloadable data.</p>"
         )
-    start += "<p>Published and current meshes use different interior locations and geometry integration. Profile errors use arclength-weighted point comparisons with bounded interpolation of published interior samples. They do not compare exact finite-volume averages. The frozen published fields use JAXProp 0.5.6; the actual installed versions and validated property definitions are recorded below.</p>"
+    start += "<p>Published and current meshes use different interior locations and geometry integration. Profile errors use arclength-weighted point comparisons with bounded interpolation of published interior samples. They do not compare exact finite-volume averages. The historical setup declared an editable JAXProp checkout labelled 0.5.6, without pinning its dependency commit. Installed versions, effective table definitions and property diagnostics are recorded below.</p>"
+    if data.get("property_resolution", {}).get("overrides"):
+        start += (
+            '<h2>Liquid-table configuration</h2><p class="note">'
+            + esc(protocol["property_table_note"])
+            + "</p><p>The resulting interpolation grid is an explicit numerical difference from the published YAML. The independent diagnostic below evaluates the new table at every published state. This checks property coverage and accuracy separately from CFD convergence.</p>"
+        )
     differences = final.get("effective", {}).get("differences", [])
     start += (
         "<ul>"
@@ -406,7 +418,7 @@ def content(data):
             ],
             [
                 "Properties",
-                "Published settings; JAXProp 0.5.6 stated by upstream",
+                "Published settings; historical editable checkout labelled 0.5.6, without a dependency commit or distributed property caches",
                 "Configured bicubic/metastable tables with installed dependency version and source/table hashes; invalid stencils rejected",
             ],
             [
@@ -553,9 +565,9 @@ def main():
         for report in (r for r in reports if r["family"] == family):
             verdict = report["verdict"]
             timing = (
-                f"Current hierarchy: {fmt(report['cold_s'],4)} s including compilation; {fmt(report['replay_s'],4)} s replay."
+                f"Current hierarchy: {time_label(report['cold_s'])} including compilation; replay {time_label(report['replay_s'])}."
                 if report["current_field_available"]
-                else "No current CFD field: property-table preparation was rejected."
+                else "No current CFD field was returned; consult the recorded preparation/solver error."
             )
             body += f'<article class="case-card"><span class="badge {esc(verdict["status"])}">{esc(verdict["status"].replace("_"," "))}</span><h3>{esc(REGIMES[report["regime"]])}</h3><p>{esc(verdict["title"])}</p><p>{esc(verdict["detail"])}</p><p>{esc(timing)}</p><a href="{esc(report["path"])}">Open complete case report →</a></article>'
         body += "</div>"

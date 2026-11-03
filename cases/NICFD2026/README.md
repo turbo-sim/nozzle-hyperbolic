@@ -11,15 +11,25 @@ be copied alone and opened offline. The index links to those six files.
 | Flashing water | [Report](single_component/subsonic/REPORT.html) | [Report](single_component/supersonic_shock/REPORT.html) | [Report](single_component/supersonic_adapted/REPORT.html) |
 | Nitrogen–water | [Report](two_component/subsonic/REPORT.html) | [Report](two_component/supersonic_shock/REPORT.html) | [Report](two_component/supersonic_adapted/REPORT.html) |
 
-In the saved campaign, all three nitrogen–water cases converge on the intended
-regime and match the published profiles within the declared criteria. All three
-flashing-water cases are rejected before a CFD solve: the installed JAXProp
-metastable liquid-table generator freezes liquid properties near room
-temperature across the required hot-liquid enthalpies. The model rejects those
-copied stencils. Their reports show the published profiles and the property
-diagnosis; no current solution or old timing is invented. Repairing and
-independently validating that dependency is needed before a valid flashing
-reproduction is possible.
+All three nitrogen–water cases converge on the intended regime and match the
+published profiles within the declared criteria. The flashing-water cases use
+a validated liquid-table configuration that removes their property initialization
+failure without changing JAXProp. Their reports distinguish property validity,
+CFD convergence, flow regime and agreement with the published solution.
+The fresh water runs still stop without passing the original spatial-residual
+checks. They are reported as unconverged; valid lookup tables alone do not
+establish reproduction of the published CFD solutions.
+
+The liquid table starts at **250 kJ/kg**, replacing the published 100 kJ/kg
+lower bound. This avoids the generator's false spinodal-ratio trigger in cold
+water, where the isothermal bulk modulus initially increases with enthalpy.
+Every published liquid state is above 534.6 kJ/kg. The unchanged JAXProp API
+generates a separate named cache with the same HEOS, metastable phase, pressure
+range, upper enthalpy bound, 90 × 90 resolution and forward gradients. All 1,800
+published liquid states pass the unchanged stencil checks; their maximum
+temperature difference is below 0.000005 K. This changes the interpolation grid
+and is declared in [protocol.json](protocol.json); the published YAML files remain
+unchanged. It does not establish CFD convergence by itself.
 
 The [supplementary repository](https://github.com/alber-berg/twophase-nozzle-nicfd2026/tree/2dc04ad9d474afb727857139df89537fcadb5769/data)
 provides the unchanged `settings.yaml` and `reference.csv` in each case folder.
@@ -31,7 +41,7 @@ Only published solutions are used as the old-code reference. Upstream has no
 executable solver, timing logs or convergence histories. Old runtimes and speedup
 are therefore unavailable. Fresh timings describe the current solver only.
 
-The physical mapping preserves the published geometries, EOS specifications,
+The physical mapping preserves the published geometries, HEOS phase models,
 source parameters, stabilizations and phase-pin selection. Two setup rules
 missing from the YAML are resolved against publication-era source revision
 `e185f571f8ea0512a7a16ce53a4b2458f72c33c2`: the original number-density area law
@@ -39,6 +49,11 @@ and the saturated ghost-vapor reservoir when equilibrium PT enthalpy is below
 the metastable vapor table. The shocked nitrogen YAML omits gas `N_h`; the
 explicit 145 × 200 within-family table from its subsonic settings is reused.
 Both effective settings and numerical differences are embedded in the reports.
+The historical project used an editable JAXProp checkout labelled 0.5.6, which
+does not identify an immutable dependency revision. Alberto confirms his source
+is current; reuse of an earlier generated cache remains a plausible explanation
+for the difference from fresh generation. The configuration fix here uses the
+installed package without modifying it or relaxing physical checks.
 
 [protocol.json](protocol.json) declares the meshes, work budget and agreement
 thresholds before the current campaign. Each case runs in a fresh process with
@@ -75,4 +90,6 @@ histories and logs live in each case's `outputs/`; property caches are shared
 within each family. The report generator needs saved results and property
 audit JSON but does not invoke CFD or EOS. Numerical, evidence and browser
 audits are separate so presentation changes never rerun the simulations.
+Passing evidence and browser audits verifies data/report consistency; successful
+CFD convergence and profile agreement are assessed separately for each case.
 There are no retained historical campaign folders or legacy clients.

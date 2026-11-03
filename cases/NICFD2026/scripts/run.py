@@ -48,7 +48,16 @@ def write_json(path, value):
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(strict_json(value), encoding="utf-8")
-    temporary.replace(path)
+    # Windows readers can briefly hold a handle without delete sharing.
+    # Retry the atomic replacement, retaining the completed temporary JSON.
+    for attempt in range(8):
+        try:
+            temporary.replace(path)
+            break
+        except PermissionError:
+            if attempt == 7:
+                raise
+            time.sleep(0.05 * min(2**attempt, 8))
 
 
 def identity(state):
@@ -120,7 +129,8 @@ def execute(family, regime):
         record["property_resolution"] = dict(
             source="subsonic/settings.yaml within this family",
             omitted_gas_N_h="N_h" not in config["eos"]["gas"],
-            note="No explicit table setting is changed; identical within-family tables are reused.",
+            overrides=protocol.get("property_tables", {}).get(family, {}),
+            note="The published within-family property definition is combined with explicit protocol overrides; all effective settings are recorded.",
         )
         fluids, properties = prepare_fluids(property_config, family)
         record["property_preparation_s"] = time.perf_counter() - started

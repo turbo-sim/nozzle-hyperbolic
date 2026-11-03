@@ -120,14 +120,22 @@ def mesh_for(cells, length=0.31, *, stretch=1.0, family="two_component"):
 def prepare_fluids(config, family):
     fluids = []
     metadata = []
+    overrides = (
+        json.loads((ROOT / "protocol.json").read_text(encoding="utf-8"))
+        .get("property_tables", {})
+        .get(family, {})
+    )
     for phase in ("gas", "liquid"):
         spec = dict(config["eos"][phase])
+        spec.update(overrides.get(phase, {}))
         spec["table_dir"] = str(ROOT / family / "outputs" / "fluid_tables")
         fluid = jxp.FluidBicubic(**spec)
         fluids.append(fluid)
         metadata.append(
             dict(
                 phase=phase,
+                published_configuration=dict(config["eos"][phase]),
+                overrides=overrides.get(phase, {}),
                 configuration=spec,
                 metadata=getattr(fluid, "metadata", None),
                 table_name=getattr(fluid, "table_name", None),
@@ -305,7 +313,7 @@ def build_case(
             "generic CFL/retry controller and strict original-residual gates",
             "coupled algebraic traces instead of fixed-point/isentrope lookup completion",
             "physical cells and endpoint traces use the shared FVM mesh convention",
-            "JAXProp installed version recorded; reference used 0.5.6",
+            "JAXProp installed version recorded; historical setup used an editable checkout labelled 0.5.6, with no exact dependency commit pinned",
             "upstream ic=restart supplies no restart identity; initialization is explicit",
         ],
     )
