@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "cases": [
+    "subsonic",
+    "shock_30",
+    "shock_70",
+    "adapted"
+  ],
+  "reconstructions": [
+    "constant",
+    "muscl_van_leer"
+  ],
+  "grids": [
+    50,
+    100,
+    200,
+    400
+  ],
+  "methods": [
+    "sequence",
+    "fas_fmg"
+  ],
+  "repeats": 10,
+  "scheme": {
+    "flux": "hll",
+    "time_integrator": "euler-implicit",
+    "boundary_treatment": "coupled",
+    "newton_iterations": 10,
+    "newton_backtracking": true,
+    "newton_update_tolerance": 1e-10,
+    "newton_residual_tolerance": 1e-12,
+    "jacobian_mode": "colored",
+    "linear_solver": "banded",
+    "filter_strength": 0.0
+  },
+  "residual": {
+    "norm": "l2",
+    "weighting": "volume",
+    "criterion": "absolute",
+    "absolute_tolerance": 1e-09,
+    "relative_tolerance": 1e-06,
+    "boundary_tolerance": 1e-09,
+    "global_tolerance": 1e-09,
+    "constraint_tolerance": 1e-09,
+    "initial_floor": 1e-14
+  },
+  "steady": {
+    "cfl": 0.2,
+    "cfl_growth": 1.2,
+    "cfl_max": 1000000.0,
+    "max_steps": 16000,
+    "max_retries": 14,
+    "stagnation_steps": 64
+  },
+  "fas": {
+    "initialization": "fmg",
+    "fmg_cycles": 2,
+    "fmg_carry_cfl": true,
+    "cfl": 1.0,
+    "cfl_growth": 2.0,
+    "cfl_max": 100000000.0,
+    "max_cycles": 300,
+    "max_wall_s": 120.0,
+    "pre_sweeps": 1,
+    "post_sweeps": 1,
+    "coarse_steps": 1,
+    "max_retries": 32,
+    "correction_backtracks": 12,
+    "correction_damping": 1.0,
+    "min_damping": 0.000244140625,
+    "coarse_reduction": 0.5,
+    "fmg_min_cfl": 100000000.0,
+    "fmg_prolongation": "linear",
+    "finest_early_stop": true,
+    "coarse_cfl_max": 10.0
+  },
+  "comparison_field_tolerance": 1e-06
+}
