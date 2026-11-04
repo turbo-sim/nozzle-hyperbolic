@@ -1,0 +1,116 @@
+{
+ "reference": "C:/Users/alber/projects/nozzle-hyperbolic/cases/NICFD2026/two_component/subsonic/reference.csv",
+ "geometry": "get_nozzle_elliot",
+ "eos": {
+  "gas": {
+   "fluid_name": "nitrogen",
+   "backend": "HEOS",
+   "h_min": 50000.0,
+   "h_max": 400000.0,
+   "p_min": 10000.0,
+   "p_max": 6000000.0,
+   "N_h": 145,
+   "N_p": 200,
+   "gradient_method": "forward"
+  },
+  "liquid": {
+   "fluid_name": "water",
+   "backend": "HEOS",
+   "h_min": 1000.0,
+   "h_max": 140000.0,
+   "p_min": 10000.0,
+   "p_max": 6000000.0,
+   "N_h": 145,
+   "N_p": 200,
+   "gradient_method": "forward"
+  }
+ },
+ "tests": [
+  {
+   "name": "area_only_const_cell",
+   "recon": "constant",
+   "nc_form": "cell",
+   "eps_void": 0.0,
+   "closure": null,
+   "area_source": true
+  },
+  {
+   "name": "full_const_cell",
+   "recon": "constant",
+   "nc_form": "cell",
+   "eps_void": 0.0,
+   "closure": {
+    "Nb": 100000000000.0,
+    "Nd": 100000000000.0,
+    "mass_transfer": false,
+    "area_law": "original"
+   },
+   "area_source": true
+  },
+  {
+   "name": "full_const_wb",
+   "recon": "constant",
+   "nc_form": "wb",
+   "eps_void": 0.0,
+   "closure": {
+    "Nb": 100000000000.0,
+    "Nd": 100000000000.0,
+    "mass_transfer": false,
+    "area_law": "original"
+   },
+   "area_source": true
+  },
+  {
+   "name": "full_const_staedtke",
+   "recon": "constant",
+   "nc_form": "staedtke",
+   "eps_void": 0.0,
+   "closure": {
+    "Nb": 100000000000.0,
+    "Nd": 100000000000.0,
+    "mass_transfer": false,
+    "area_law": "original"
+   },
+   "area_source": true
+  },
+  {
+   "name": "full_vanleer_wb",
+   "recon": "muscl_van_leer",
+   "nc_form": "wb",
+   "eps_void": 0.0,
+   "closure": {
+    "Nb": 100000000000.0,
+    "Nd": 100000000000.0,
+    "mass_transfer": false,
+    "area_law": "original"
+   },
+   "area_source": true
+  },
+  {
+   "name": "full_vanalbada_wb",
+   "recon": "muscl_van_albada",
+   "nc_form": "wb",
+   "eps_void": 0.0,
+   "closure": {
+    "Nb": 100000000000.0,
+    "Nd": 100000000000.0,
+    "mass_transfer": false,
+    "area_law": "original"
+   },
+   "area_source": true
+  },
+  {
+   "name": "full_const_wb_filter",
+   "recon": "constant",
+   "nc_form": "wb",
+   "eps_void": 0.05,
+   "closure": {
+    "Nb": 100000000000.0,
+    "Nd": 100000000000.0,
+    "mass_transfer": false,
+    "area_law": "original"
+   },
+   "area_source": true
+  }
+ ]
+}

@@ -60,6 +60,7 @@ numerics:
   proj_s_ref:      0.02      # only for eos_project: damped
   # Discretisation
   nc_form:         cell        # well-balanced non-conservative terms
+  nc_kfree:        false       # true: K-free non-conservative term X_i dU_hat (no K inverse)
   nc_scale:        1.0
   lowmach_diss:    1.0       # full acoustic dissipation
   lowmach_diss_bc: null      # null = same as lowmach_diss on the boundary faces

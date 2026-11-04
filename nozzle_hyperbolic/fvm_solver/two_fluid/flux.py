@@ -347,6 +347,83 @@ def fvs_interface_flux(U_h_L, U_h_R, fluid_g, fluid_l, k,
 
 
 # ---------------------------------------------------------------------------
+# Upwinded primitive face state (K-free non-conservative term)
+# ---------------------------------------------------------------------------
+
+def fvs_interface_state(U_h_L, U_h_R, fluid_g, fluid_l, k,
+                        delta_factor=0.1, lowmach_diss=0.0,
+                        du_blend_lo=1e-2, du_blend_hi=1e-1):
+    """
+    Upwinded primitive face state U_hat = ½(U_L+U_R) + ½ S (U_L-U_R).
+
+    S is the primitive sign matrix of fvs_interface_flux: the same wave signs
+    (incl. the sonic entropy fix), the same low-Mach weights z_ac and the same
+    zero-slip / full blend.  The face flux is F_hat ≈ ½(F_L+F_R) + ½ K S ΔU, so
+    U_hat is its primitive counterpart without K⁻¹.  The K-free cell term is
+    X_i (U_hat_{i+1/2} - U_hat_{i-1/2}), bounded where det K = 0.
+    """
+    U_h_bar = 0.5 * (U_h_L + U_h_R)
+    dU = U_h_L - U_h_R
+
+    eos_g_b = phase_props(fluid_g, U_h_bar[0], U_h_bar[4])
+    eos_l_b = phase_props(fluid_l, U_h_bar[0], U_h_bar[5])
+    cq_b = common_quantities(U_h_bar, eos_g_b, eos_l_b, k)
+    eigvals, R_h, L_h, D = eigenstructure(U_h_bar, eos_g_b, eos_l_b, cq_b)
+
+    eos_g_L = phase_props(fluid_g, U_h_L[0], U_h_L[4])
+    eos_l_L = phase_props(fluid_l, U_h_L[0], U_h_L[5])
+    eos_g_R = phase_props(fluid_g, U_h_R[0], U_h_R[4])
+    eos_l_R = phase_props(fluid_l, U_h_R[0], U_h_R[5])
+    eigvals_L = eigenstructure(
+        U_h_L, eos_g_L, eos_l_L, common_quantities(U_h_L, eos_g_L, eos_l_L, k))[0]
+    eigvals_R = eigenstructure(
+        U_h_R, eos_g_R, eos_l_R, common_quantities(U_h_R, eos_g_R, eos_l_R, k))[0]
+
+    a_mix = 0.5 * (eigvals[2] - eigvals[3])
+    delta_global = delta_factor * jnp.abs(a_mix)
+    sonic = (eigvals_L < 0.0) & (eigvals_R > 0.0)
+    delta_k = jnp.where(sonic, eigvals_R - eigvals_L, delta_global)
+    lam_safe = jnp.where(
+        sonic,
+        (eigvals**2 + delta_k**2) / (2.0 * jnp.maximum(delta_k, 1e-300)),
+        jnp.maximum(jnp.abs(eigvals), delta_global),
+    )
+    s = eigvals / lam_safe
+
+    # Low-Mach weight z_ac, as in fvs_interface_flux
+    ag_b = U_h_bar[3]
+    al_b = 1.0 - ag_b
+    rg = eos_g_b.rho
+    rl = eos_l_b.rho
+    cq = cq_b
+    du = cq.du
+    k_rho_mix = cq.rg_hat - rg
+    rho_hat_s = cq.rho_s + k_rho_mix
+    a_tilde_sq = (rho_hat_s / cq.rho_s) * (rg * rl / cq.rh2) * cq.a0sq
+    delta_a_sq = ag_b * al_b * rg * rl * cq.rg_hat * cq.rl_hat / cq.rh2**2 * du**2
+    a = jnp.sqrt(jnp.maximum(a_tilde_sq - delta_a_sq, 0.0))
+    hat_ag = ag_b * rg * cq.rl_hat / cq.rh2
+    hat_al = al_b * rl * cq.rg_hat / cq.rh2
+    u_mix = hat_ag * U_h_bar[1] + hat_al * U_h_bar[2]
+    z_ac = jnp.clip(jnp.abs(u_mix) / jnp.maximum(jnp.abs(a), 1e-8), lowmach_diss, 1.0)
+    z_vec = jnp.ones(6).at[2].set(z_ac).at[3].set(z_ac)
+
+    # Zero-slip: S = s12 I + sum_{k=3..6} z_k (s_k - s12) r_k l_k / D_k
+    s_12 = smoothed_sign(cq_b.u1, delta_global)
+    SdU_z = s_12 * dU
+    for ki in [2, 3, 4, 5]:
+        SdU_z = SdU_z + z_vec[ki] * (s[ki] - s_12) * R_h[:, ki] * jnp.dot(L_h[ki], dU) / D[ki]
+
+    # Full: S = sum_k z_k s_k r_k l_k / D_k
+    SdU_f = R_h @ (z_vec * s * (L_h @ dU) / D)
+
+    t = jnp.clip((jnp.abs(du) - du_blend_lo) / (du_blend_hi - du_blend_lo), 0.0, 1.0)
+    w = 0.5 * (1.0 + jnp.cos(jnp.pi * t))
+    SdU = jnp.where(jnp.abs(du) < du_blend_lo, SdU_z, w * SdU_z + (1.0 - w) * SdU_f)
+    return U_h_bar + 0.5 * SdU
+
+
+# ---------------------------------------------------------------------------
 # Non-conservative H^nc correction
 # ---------------------------------------------------------------------------
 

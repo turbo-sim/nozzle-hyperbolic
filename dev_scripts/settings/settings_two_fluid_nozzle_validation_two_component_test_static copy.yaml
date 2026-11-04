@@ -44,7 +44,7 @@ eos:
     # metastable_phase: (omitted ⇒ ordinary subcooled-liquid table, no sat props)
 
 grid:
-  Nx: 600
+  Nx: 400
   x1: 0.0
   x2: 0.31
 
@@ -65,7 +65,7 @@ bc:
   T_g0:          295.15        # K  — gas    stagnation temperature
   T_l0:          295.15        # K  — liquid stagnation temperature
   quality:       0.5           # gas mass fraction
-  p_out:         1200000.0     # Pa — back-pressure (subsonic); ignored once supersonic
+  p_out:         98600 # 1200000.0     # Pa — back-pressure (subsonic); ignored once supersonic
 
 run:
   print_every: 10

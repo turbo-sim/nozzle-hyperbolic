@@ -1,0 +1,8 @@
+C:\Users\alber\AppData\Local\Temp\claude\c--Users-alber-projects-barotropy\cd0168cb-5951-4719-a0ac-8ea27eefba52\scratchpad\e2e_new.py:26: UserWarning: A JAX array is being set as static! This can result in unexpected behavior and is usually a mistake to do.
+  fg = jxp.FluidBicubic(fluid_name="nitrogen", h_min=5e4, h_max=4e5, **eos)
+C:\Users\alber\AppData\Local\Temp\claude\c--Users-alber-projects-barotropy\cd0168cb-5951-4719-a0ac-8ea27eefba52\scratchpad\e2e_new.py:27: UserWarning: A JAX array is being set as static! This can result in unexpected behavior and is usually a mistake to do.
+  fl = jxp.FluidBicubic(fluid_name="water", h_min=1e3, h_max=1.4e5, **eos)
+Loaded property table from: C:/Users/alber/projects/nozzle-hyperbolic_alberto_branch/dev_scripts/fluid_tables\nitrogen_145x200.pkl
+Loaded property table from: C:/Users/alber/projects/nozzle-hyperbolic_alberto_branch/dev_scripts/fluid_tables\water_145x200.pkl
+success True reason converged steps 41 wall 152.9s
+metrics {'equation_max_ratio': 0.7731125243729707, 'criterion': 'either', 'overall_relative': 7.731125243729707e-07, 'boundary_max': 4.0983050248999995e-15, 'constraint_max': 4.439830443641666e-15, 'constraints_passed': True, 'finite': True, 'admissible': True, 'all_equations_passed': True, 'boundary_passed': True, 'global_passed': True, 'invariants_passed': True, 'monitors': {}}

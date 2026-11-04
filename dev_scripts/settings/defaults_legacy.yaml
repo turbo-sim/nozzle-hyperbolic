@@ -46,6 +46,7 @@ numerics:
   eos_rows_banded:    false
   jac_lag:            1
   nc_form:            cell
+  nc_kfree:           false
   lowmach_diss:       0.0
   lowmach_diss_bc:    null
   nc_scale:           1.0

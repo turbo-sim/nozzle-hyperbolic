@@ -57,7 +57,7 @@ SCHEMA = {
         "jacobian", "linear_solve", "w_char", "eos_project", "alpha_eps",
         "pin_ghost", "pin_ghost_momentum", "pin_mom_alpha", "pin_mom_tau",
         "proj_s_ref", "eos_rows",
-        "eos_rows_banded", "jac_lag", "nc_form", "lowmach_diss",
+        "eos_rows_banded", "jac_lag", "nc_form", "nc_kfree", "lowmach_diss",
         "lowmach_diss_bc", "nc_scale", "eps_void", "eps_void_ucut",
         "eps_void_uwidth", "eps_void_scale", "eps_void_mass_acut",
         "ghost_mass_upwind_acut", "eps_ghost", "eps_ghost_acut",
@@ -492,6 +492,7 @@ def load_config(yaml_path, overrides=None, override_label="override") -> types.S
     # one-sided differences — fixes the α-front-on-taper imbalance, reduces to
     # 'cell' on uniform area; certified 2026-07-15) | 'staedtke' (probe only).
     cfg.NC_FORM           = str(n["nc_form"])
+    cfg.NC_KFREE          = bool(n["nc_kfree"])
     # Low-Mach acoustic-dissipation floor for the FVS flux: z_ac = clip(Ma, x, 1).
     #   0.0 -> z_ac=Ma  (reduces acoustic/pressure dissipation at low Ma — the
     #                    setting that REMOVES the pressure diffusion and lets the

@@ -1,0 +1,249 @@
+C:\Users\alber\AppData\Local\pypoetry\Cache\virtualenvs\nozzle-hyperbolic-LbBBi-fu-py3.12\Lib\site-packages\nurbspy\numpy\__init__.py:7: RuntimeWarning: Numba could not be imported; using the NumPy implementation. Numba needs NumPy 2.3 or less. Got NumPy 2.4.
+  from .nurbs_basis_functions import *
+C:\Users\alber\projects\nozzle-hyperbolic_alberto_branch\dev_scripts\main_two_fluid.py:204: UserWarning: A JAX array is being set as static! This can result in unexpected behavior and is usually a mistake to do.
+  return jxp.FluidBicubic(**lut), False
+Output directory: C:\Users\alber\AppData\Local\Temp\claude\c--Users-alber-projects-barotropy\cd0168cb-5951-4719-a0ac-8ea27eefba52\scratchpad\flash\old_runs\flash_adapted_N600_muscl_van_albada_20261103_183142
+Terminal log:     run_log.txt
+── Settings ──────────────────────────────────────────────────────────────────
+  case file : C:\Users\alber\AppData\Local\Temp\claude\c--Users-alber-projects-barotropy\cd0168cb-5951-4719-a0ac-8ea27eefba52\scratchpad\flash\old_flash_adapted.yaml
+  chain     : old_flash_adapted.yaml → defaults.yaml
+  (# case = set in the case file; otherwise the defaults file that set it)
+  fluid:
+    name: water                                    # case
+  eos:
+    gas:
+      fluid_name: water                            # case
+      backend: HEOS                                # case
+      h_min: 2200000.0                             # case
+      h_max: 3400000.0                             # case
+      p_min: 10000.0                               # case
+      p_max: 13000000.0                            # case
+      N_h: 90                                      # case
+      N_p: 90                                      # case
+      N_p_sat: 150                                 # case
+      table_dir: C:/Users/alber/projects/nozzle-hyperbolic_alberto_branch/dev_scripts/fluid_tables # case
+      metastable_phase: vapor                      # case
+      gradient_method: forward                     # case
+    liquid:
+      fluid_name: water                            # case
+      backend: HEOS                                # case
+      h_min: 100000.0                              # case
+      h_max: 1800000.0                             # case
+      p_min: 10000.0                               # case
+      p_max: 13000000.0                            # case
+      N_h: 90                                      # case
+      N_p: 90                                      # case
+      N_p_sat: 150                                 # case
+      table_dir: C:/Users/alber/projects/nozzle-hyperbolic_alberto_branch/dev_scripts/fluid_tables # case
+      metastable_phase: liquid                     # case
+      gradient_method: forward                     # case
+  grid:
+    Nx: 600                                        # case
+    x1: 0.0                                        # case
+    x2: 1.2                                        # case
+    radius: 0.01                                   # defaults.yaml
+  geometry:
+    function: get_nozzle_smd_divergent_smooth      # case
+    roughness: 0.0                                 # case
+  sources:
+    bubble_number: 100000000000.0                  # case
+    droplet_number: 10000000000.0                  # case
+    mass_transfer: true                            # case
+    scale: 1.0                                     # defaults.yaml
+    area_source: true                              # defaults.yaml
+    p_phase_change_max: null                       # defaults.yaml
+    regime_htc: false                              # defaults.yaml
+    regime_blend: linear                           # defaults.yaml
+    interfacial_area: original                     # case
+    interfacial_area_params: null                  # defaults.yaml
+  numerics:
+    CFL: 5.0                                       # case
+    newton_iter: 7                                 # case
+    delta_factor: 1.0e-06                          # defaults.yaml
+    recon: muscl_van_albada                        # case
+    k_vm: 0.5                                      # defaults.yaml
+    va_eps_mode: magnitude                         # defaults.yaml
+    va_rel: null                                   # defaults.yaml
+    va_r0: 0.5                                     # defaults.yaml
+    va_rm: 4                                       # defaults.yaml
+    va_mean_stop_gradient: true                    # defaults.yaml
+    jacobian: colored                              # defaults.yaml
+    linear_solve: normal_eq_banded                 # defaults.yaml
+    w_char: auto                                   # defaults.yaml
+    eos_project: false                             # defaults.yaml
+    alpha_eps: 1.0e-06                             # case
+    pin_ghost: true                                # case
+    pin_ghost_momentum: false                      # case
+    pin_mom_alpha: null                            # defaults.yaml
+    pin_mom_tau: null                              # defaults.yaml
+    proj_s_ref: 0.02                               # defaults.yaml
+    eos_rows: true                                 # defaults.yaml
+    eos_rows_banded: true                          # defaults.yaml
+    jac_lag: 1                                     # defaults.yaml
+    nc_form: wb                                    # case
+    lowmach_diss: 1.0                              # case
+    lowmach_diss_bc: 0.0                           # case
+    nc_scale: 1.0                                  # defaults.yaml
+    eps_void: 0.05                                 # case
+    eps_void_ucut: null                            # defaults.yaml
+    eps_void_uwidth: 12.0                          # defaults.yaml
+    eps_void_scale: frozen                         # case
+    eps_void_mass_acut: null                       # defaults.yaml
+    ghost_mass_upwind_acut: null                   # defaults.yaml
+    eps_ghost: 0.05                                # case
+    eps_ghost_acut: 0.003                          # defaults.yaml
+    eps_ghost_awidth: 0.25                         # defaults.yaml
+    eps_ghost_k2: 0.0                              # defaults.yaml
+    eps_ghost_alo: 1.0e-05                         # defaults.yaml
+    ssr_mode: all                                  # defaults.yaml
+    du_blend_lo: 5.0                               # defaults.yaml
+    du_blend_hi: 20.0                              # defaults.yaml
+    fast_wb_flux: true                             # defaults.yaml
+    flux_single_branch: true                       # defaults.yaml
+    flux_local_jac: true                           # defaults.yaml
+    cell_local_jac: true                           # defaults.yaml
+    thomas: chol                                   # defaults.yaml
+    newton_tol: 1.0e-08                            # defaults.yaml
+  time_control:
+    adaptive_dt: true                              # defaults.yaml
+    max_halvings: 8                                # defaults.yaml
+    dp_max: 0.2                                    # defaults.yaml
+    dh_max: 0.05                                   # defaults.yaml
+    du_max: 0.2                                    # defaults.yaml
+    da_max: 0.1                                    # defaults.yaml
+    dt_grow: 1.2                                   # defaults.yaml
+    ser_beta: 0.0                                  # defaults.yaml
+    ser_cfl_max: 50.0                              # defaults.yaml
+    dt_check_dominant_only: true                   # defaults.yaml
+    dt_floor_frac: 0.001                           # defaults.yaml
+    floor_stall_steps: 500                         # defaults.yaml
+  run:
+    n_steps: 6000                                  # case
+    print_every: 100                               # case
+    ssr_tol: 1.0e-08                               # case
+    t_end: null                                    # defaults.yaml
+    plateau_window: 4000                           # defaults.yaml
+    plateau_ratio: 1.01                            # defaults.yaml
+    visualize_ic: false                            # defaults.yaml
+    debug_newton: false                            # defaults.yaml
+    fast_increments: true                          # defaults.yaml
+    cpu_affinity: null                             # defaults.yaml
+  ic:
+    type: restart                                  # case
+    run: C:/Users/alber/projects/nozzle-hyperbolic/cases/NICFD2026/single_component/supersonic_adapted/reference.csv # case
+  bc:
+    inlet: stagnation                              # case
+    outlet: characteristic                         # case
+    p_out: 80000.0                                 # case
+    p_out_relax: 1.0                               # case
+    p_out_ramp_steps: 0                            # defaults.yaml
+    p_out_ramp_from: null                          # defaults.yaml
+    p_out_ramp_shape: linear                       # defaults.yaml
+    p0: 12000000.0                                 # case
+    T_g0: 578.95                                   # case
+    T_l0: 578.95                                   # case
+    quality: null                                  # defaults.yaml
+    void_fraction: 0.001                           # case
+    slip: 1.0                                      # case
+    dom_phase: auto                                # case
+  save_options:
+    repo_main: C:/Users/alber/AppData/Local/Temp/claude/c--Users-alber-projects-barotropy/cd0168cb-5951-4719-a0ac-8ea27eefba52/scratchpad/flash/old_runs # case
+    repo_run: flash_adapted                        # case
+──────────────────────────────────────────────────────────────────────────────
+Resolved settings saved: old_flash_adapted.yaml  (case file + defaults in inputs/)
+Building / loading EOS tables...
+Loaded property table from: C:/Users/alber/projects/nozzle-hyperbolic_alberto_branch/dev_scripts/fluid_tables\water_meta_vapor_90x90.pkl
+Loaded property table from: C:/Users/alber/projects/nozzle-hyperbolic_alberto_branch/dev_scripts/fluid_tables\water_meta_liquid_90x90.pkl
+Run record: run_info.yaml
+  Done.
+Grid: Nx=600  dx=0.0020 m  geometry=get_nozzle_smd_divergent_smooth  A: 3.1826e-04..9.5834e-03 m^2
+  max|(1/A)dA/dx| = 5.579e+01 1/m   (nozzle — area source active)
+  [ghost-vapor fix] PT gas state h=1374.1 kJ/kg < vapor table floor 2200.0 kJ/kg (subcooled reservoir)
+                    → using SATURATED VAPOR at p0: H_g0=2685.4 kJ/kg s_g0=5493.93 J/kg/K  rho_g0=70.1 kg/m3
+
+Stagnation inlet:  p0=120.00 bar  T_g0=579.0  T_l0=579.0 K
+  H_g0=2685.4 kJ/kg  s_g0=5493.93  H_l0=1374.1 kJ/kg  s_l0=3297.35 J/kg/K
+  alpha_g=0.001000  quality=0.000099  slip=1.000
+  dominant phase = liquid  [auto: mass fraction x=9.933e-05]  -> p closed on liquid isentrope
+  SRC_SCALE=1.0 (physical sources)   AREA_SRC=True (area term under test)
+  isentrope (FluidJAX, liquid): h_iso 1037.0..1375.3 kJ/kg over p 0.10..128.7 bar  (monotone=True)
+  IC inlet static: p=118.80 bar  h_g=2683.7 kJ/kg  u_g=58.8 m/s  a=459.0  (M_in=0.128)
+IC (restart):  supersonic_adapted  (600 cells → Nx=600)
+  p 2.3511..119.7288 bar  u_l 9.34..416.10 m/s  alpha_g 9.70e-04..9.96e-01  (bc.p_out=0.8000 bar)
+W_0 shape: (600, 8)   dtype: float64
+Round-trip error  U_h -> W -> U_h:  max relative = 2.48e-16  (expected ~1e-15)
+
+Inlet BC: stagnation   Outlet BC: characteristic  (p_out=0.80 bar)  H_g0=2685.4 kJ/kg  s_g0=5493.9  quality=0.000099  slip=1.000
+[Diagnostic]  PROJECT=False  MONITOR=False  alpha_eps=1.0e-06  pin_ghost=True  pin_ghost_mom=False  w_char=auto
+[Speed-up]  fast_wb_flux=True  flux_single_branch=True  flux_local_jac=True  cell_local_jac=True  thomas=chol  newton_tol=1e-08  ser_beta=0  fast_increments=True  cpu_affinity=None
+Building solver (first JIT compilation may take a minute)... jacobian=colored
+  Warming up compute_dt / step (triggers full compilation)...
+  dt = 9.8370e-06 s   SSR after first step: 1.0656e-04   Compilation done.
+
+Running (max 6000 steps  SSR_tol=1.0e-08)
+  Step         t [s]        dt [s]           SSR
+--------------------------------------------------
+     1    9.8370e-06    9.8370e-06    1.0656e-04  (0.8s)
+     2    1.9673e-05    9.8357e-06    9.9963e-05  (1.4s)
+     3    2.9508e-05    9.8354e-06    9.5379e-05  (1.8s)
+     4    3.9343e-05    9.8353e-06    9.0123e-05  (2.2s)
+     5    4.9179e-05    9.8355e-06    8.4528e-05  (2.5s)
+     6    5.9015e-05    9.8358e-06    7.8957e-05  (2.9s)
+     7    6.8851e-05    9.8361e-06    7.3620e-05  (3.3s)
+     8    7.8687e-05    9.8364e-06    6.8629e-05  (3.6s)
+     9    8.8524e-05    9.8366e-06    6.4030e-05  (4.0s)
+    10    9.8361e-05    9.8368e-06    5.9828e-05  (4.3s)
+   100    9.8378e-04    9.8399e-06    1.5813e-05  (40.3s)
+   200    1.9680e-03    9.8435e-06    7.9405e-06  (73.3s)
+   300    2.9523e-03    9.8422e-06    4.2315e-06  (99.7s)
+   400    3.9365e-03    9.8419e-06    3.8616e-06  (123.8s)
+   500    4.9207e-03    9.8428e-06    3.2282e-06  (149.4s)
+   600    5.9051e-03    9.8452e-06    2.4665e-06  (175.9s)
+   700    6.8898e-03    9.8484e-06    1.4786e-06  (208.9s)
+   800    7.8747e-03    9.8506e-06    8.9784e-07  (239.3s)
+   900    8.8599e-03    9.8517e-06    6.2911e-07  (266.9s)
+  1000    9.8451e-03    9.8523e-06    4.8415e-07  (290.1s)
+  1100    1.0830e-02    9.8526e-06    3.7449e-07  (312.6s)
+  1200    1.1816e-02    9.8529e-06    2.8495e-07  (337.4s)
+  1300    1.2801e-02    9.8532e-06    2.1557e-07  (363.8s)
+  1400    1.3786e-02    9.8533e-06    1.6335e-07  (388.4s)
+  1500    1.4772e-02    9.8535e-06    1.2402e-07  (411.5s)
+  1600    1.5757e-02    9.8536e-06    9.4172e-08  (435.7s)
+  1700    1.6742e-02    9.8537e-06    7.1465e-08  (459.7s)
+  1800    1.7728e-02    9.8537e-06    5.4209e-08  (483.2s)
+  1900    1.8713e-02    9.8538e-06    4.1112e-08  (508.9s)
+  2000    1.9698e-02    9.8538e-06    3.1178e-08  (534.8s)
+  2100    2.0684e-02    9.8538e-06    2.3642e-08  (558.1s)
+  2200    2.1669e-02    9.8538e-06    1.7926e-08  (580.9s)
+  2300    2.2655e-02    9.8539e-06    1.3591e-08  (604.0s)
+  2400    2.3640e-02    9.8539e-06    1.0304e-08  (628.9s)
+C:\Users\alber\projects\nozzle-hyperbolic_alberto_branch\dev_scripts\main_two_fluid.py:1044: UserWarning: FigureCanvasAgg is non-interactive, and thus cannot be shown
+  plt.show()
+
+Stopped: SSR=9.995e-09 < tol=1.0e-08
+  steps=2411  t=2.375e-02 s  SSR=9.995e-09  wall=632.6 s
+
+── Single-phase-limit diagnostics ─────────────────────────────────
+  ghost alpha:  min=0.000971  max=0.995877  (dominant phase = liquid)
+  GAS   mass flux  mean=3.5203e+00 kg/s   RMS variation=94.445 %  <- dominant
+  ghost mass flux  mean=1.9890e+01 kg/s   RMS variation=16.869 %
+  total mass flux  mean=2.3410e+01 kg/s   RMS variation=0.153 %  (→0 = quasi-1D mass conserved)
+  liquid p: 2.37..119.73 bar   u: 9.4..414.9 m/s   T: 400.7..578.9 K
+  stagnation enthalpy H0=1374.12 kJ/kg  drift along x: max|ΔH0|/H0 = 5.47e-01  (→0 = adiabatic nozzle energy conserved ⇒ area energy source correct)
+
+── Checkerboard (odd-even 2Δx) amplitude ──────────────────────────
+  p    :  max 2Δx osc = 5.486e+04   (0.47% of range)
+  u_g  :  max 2Δx osc = 9.908e-01   (0.17% of range)
+  u_l  :  max 2Δx osc = 7.849e-01   (0.19% of range)
+  du   :  max 2Δx osc = 4.332e-01   (0.27% of range)
+  alpha:  max 2Δx osc = 2.251e-03   (0.23% of range)
+  h_g  :  max 2Δx osc = 1.628e+03   (1.12% of range)
+
+── Mass-transfer source (σ_Mg) diagnostic ─────────────────────────
+  flashing onset: x=0.0821 m (cell 41)  active in 559/600 cells
+  σ_Mg: max=5.841e+04 kg/(m³s) at x=0.4688 m  min=-0.000e+00
+  σ_Mg 2Δx osc = 2.292e+03  (3.92% of range)  <-- SOURCE CHECKERBOARD (source is the pump)
+  liquid superheat T_l - T_sat: min=-18.72 K  max=48.89 K  (crosses 0 at x≈0.0801 m)
+Source plot saved → C:\Users\alber\AppData\Local\Temp\claude\c--Users-alber-projects-barotropy\cd0168cb-5951-4719-a0ac-8ea27eefba52\scratchpad\flash\old_runs\flash_adapted_N600_muscl_van_albada_20261103_183142\mass_transfer_source.png
+Solution saved → C:\Users\alber\AppData\Local\Temp\claude\c--Users-alber-projects-barotropy\cd0168cb-5951-4719-a0ac-8ea27eefba52\scratchpad\flash\old_runs\flash_adapted_N600_muscl_van_albada_20261103_183142\solution.csv
+Plot saved: C:\Users\alber\AppData\Local\Temp\claude\c--Users-alber-projects-barotropy\cd0168cb-5951-4719-a0ac-8ea27eefba52\scratchpad\flash\old_runs\flash_adapted_N600_muscl_van_albada_20261103_183142\single_phase_limit.png

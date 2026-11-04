@@ -1,0 +1,287 @@
+<title>Two-Fluid Port Verification</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,500;6..72,600&family=Public+Sans:wght@400;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: single reading column of a technical note, wide figure plates and scrollable tables break out to the full content width. */
+:root {
+  --bg: #f6f7f8;
+  --surface: #ffffff;
+  --fg: #1b2228;
+  --muted: #5a6670;
+  --rule: #d9dee2;
+  --accent: #1f5f8b;
+  --accent-soft: #e3eef6;
+  --ok: #1d7a4c;
+  --ok-soft: #e1f2e8;
+  --warn: #9a6200;
+  --warn-soft: #f8eed8;
+  --gap: #8a3b2f;
+  --gap-soft: #f6e4e0;
+  --plate: #ffffff;
+  --font-display: "Newsreader", "Iowan Old Style", Georgia, serif;
+  --font-body: "Public Sans", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12171b; --surface: #192026; --fg: #e3e8ec; --muted: #9aa7b1; --rule: #2c363e;
+    --accent: #7fb6dc; --accent-soft: #1d3142; --ok: #6fcf9a; --ok-soft: #173326;
+    --warn: #e5b45c; --warn-soft: #362a14; --gap: #ec9a8b; --gap-soft: #3a211c; --plate: #f4f6f7;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #12171b; --surface: #192026; --fg: #e3e8ec; --muted: #9aa7b1; --rule: #2c363e;
+  --accent: #7fb6dc; --accent-soft: #1d3142; --ok: #6fcf9a; --ok-soft: #173326;
+  --warn: #e5b45c; --warn-soft: #362a14; --gap: #ec9a8b; --gap-soft: #3a211c; --plate: #f4f6f7;
+  color-scheme: dark;
+}
+body { background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 16px; line-height: 1.6; }
+.page { max-width: 980px; margin: 0 auto; padding-block: 48px 72px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: grid; gap: 44px; }
+.prose { max-width: 68ch; }
+h1, h2, h3 { font-family: var(--font-display); font-weight: 600; text-wrap: balance; line-height: 1.2; margin: 0; }
+h1 { font-size: clamp(2rem, 4.5vw, 2.8rem); letter-spacing: -0.01em; }
+h2 { font-size: 1.6rem; }
+h3 { font-size: 1.15rem; font-family: var(--font-body); font-weight: 700; }
+p { margin: 0; }
+section { display: grid; gap: 16px; }
+.eyebrow { font-family: var(--font-mono); font-size: 0.75rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); }
+.meta { color: var(--muted); font-size: 0.95rem; }
+code, .mono { font-family: var(--font-mono); font-size: 0.86em; }
+code { background: var(--accent-soft); padding: 0.05em 0.35em; border-radius: 3px; }
+a { color: var(--accent); }
+header { display: grid; gap: 14px; border-bottom: 1px solid var(--rule); padding-bottom: 28px; }
+.verdict { background: var(--surface); border: 1px solid var(--rule); border-left: 4px solid var(--ok); padding: 20px 22px; display: grid; gap: 10px; }
+.verdict p { max-width: 75ch; }
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+.fact { background: var(--surface); border: 1px solid var(--rule); padding: 14px 16px; display: grid; gap: 4px; align-content: start; }
+.fact .v { font-family: var(--font-mono); font-size: 1.25rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+.fact .k { color: var(--muted); font-size: 0.88rem; line-height: 1.4; }
+ul, ol { margin: 0; padding-left: 1.3em; display: grid; gap: 6px; }
+.table-wrap { overflow-x: auto; border: 1px solid var(--rule); background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font-size: 0.75rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); font-weight: 600; background: var(--bg); }
+tr:last-child td { border-bottom: none; }
+td.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.chip { display: inline-block; font-family: var(--font-mono); font-size: 0.72rem; font-weight: 600; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
+.chip.ok { background: var(--ok-soft); color: var(--ok); }
+.chip.warn { background: var(--warn-soft); color: var(--warn); }
+.chip.gap { background: var(--gap-soft); color: var(--gap); }
+.chip.info { background: var(--accent-soft); color: var(--accent); }
+figure { margin: 0; display: grid; gap: 8px; }
+.plate { background: var(--plate); border: 1px solid var(--rule); padding: 8px; overflow-x: auto; }
+.plate img { display: block; width: 100%; min-width: 640px; height: auto; }
+figcaption { color: var(--muted); font-size: 0.88rem; max-width: 80ch; }
+.note { background: var(--surface); border: 1px solid var(--rule); padding: 16px 18px; display: grid; gap: 8px; }
+.eq { font-family: var(--font-mono); font-size: 0.9rem; background: var(--surface); border: 1px solid var(--rule); padding: 12px 14px; overflow-x: auto; white-space: pre; line-height: 1.7; }
+footer { border-top: 1px solid var(--rule); padding-top: 20px; color: var(--muted); font-size: 0.88rem; display: grid; gap: 6px; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+
+<div class="page">
+<header>
+  <span class="eyebrow">nozzle-hyperbolic · two-fluid model · 3 November 2026</span>
+  <h1>Two-Fluid Port Verification</h1>
+  <p class="meta prose">Comparison of the refactored <code>TwoFluidModel</code> (repository <code>nozzle-hyperbolic</code>, main at <code>e318cc0</code>) against Alberto's original solver (<code>alberto-branch</code>, commit <code>faafff7</code>, the port's declared source). Prepared for Roberto. No code was modified in either repository for this comparison.</p>
+</header>
+
+<section>
+  <div class="verdict">
+    <span class="chip ok">Physics port verified</span>
+    <p>The new implementation reproduces the old residual to round-off (about 1e-10 relative) for every physics path and option used by the NICFD cases. Converged solutions agree to 0.1 % with Van Leer reconstruction. The remaining differences are numerical choices, changed defaults and a few unported features, listed in section 6. With the old property tables, the new solver converges the flashing-water adapted case in 55 implicit steps. This points to the regenerated tables, not the solver, as the main suspect for the failed NICFD flashing runs.</p>
+  </div>
+  <div class="facts">
+    <div class="fact"><span class="v">≤ 3.5e-10</span><span class="k">max relative residual difference, all physics paths, two-component and flashing</span></div>
+    <div class="fact"><span class="v">0.10 %</span><span class="k">mass-flow difference, flashing adapted case, old vs new</span></div>
+    <div class="fact"><span class="v">55 vs 2411</span><span class="k">steps to converge the flashing case, new vs old</span></div>
+    <div class="fact"><span class="v">Van Albada</span><span class="k">the only interior residual difference (limiter ε removed)</span></div>
+  </div>
+</section>
+
+<section>
+  <span class="eyebrow">1 · Method</span>
+  <h2>How the codes were compared</h2>
+  <div class="prose" style="display:grid;gap:12px">
+    <p>Both codes ran in the same Python interpreter with the same editable JAXProp checkout; only <code>PYTHONPATH</code> changed between them. Both used the same EOS tables, the old branch's <code>dev_scripts/fluid_tables</code> pickles.</p>
+    <p>To compare discretizations directly, the new model was built on a <code>Mesh</code> that reproduces the old layout. Cell centres are the old interior points <code>x[1:-1]</code>, faces are their midpoints, face areas are the old averages <code>0.5(A_i + A_i+1)</code>, and volumes are <code>A·dx</code>. On this mesh the old interior cells and the new physical cells coincide one to one.</p>
+    <p>Three levels of comparison were run:</p>
+    <ol>
+      <li><strong>Residual.</strong> The old <code>_residual</code> (from <code>make_two_fluid_step(..., return_debug=True)</code>, dt = 1, W<sup>n</sup> = W) against <code>Operator.physical_spatial_residual</code> on identical states. The states were taken from the NICFD reference profiles.</li>
+      <li><strong>Boundary equations.</strong> The old converged ghost rows stored in the six NICFD references were inserted into the new <code>boundary_residual</code>.</li>
+      <li><strong>Converged solutions.</strong> Both solvers ran to steady state with the same grid, settings and restart profile.</li>
+    </ol>
+  </div>
+</section>
+
+<section>
+  <span class="eyebrow">2 · Residual level</span>
+  <h2>The residuals are identical</h2>
+  <p class="prose">Maximum over cells and equations of |R<sub>old</sub> − R<sub>new</sub>|, scaled per equation by the largest conservative flux difference. Transmissive ends were used, with ghost rows equal to the BC ghosts.</p>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>Configuration</th><th>Two-component N₂–water (498 cells)</th><th>Flashing water (598 cells)</th><th>Result</th></tr></thead>
+    <tbody>
+      <tr><td>Area source only, constant reconstruction, <code>nc_form=cell</code></td><td class="num">3.5e-10</td><td class="num">7.9e-11</td><td><span class="chip ok">identical</span></td></tr>
+      <tr><td>Full interphase closure (drag, heat; mass transfer in flashing), <code>cell</code></td><td class="num">3.5e-10</td><td class="num">7.9e-11</td><td><span class="chip ok">identical</span></td></tr>
+      <tr><td>Full closure, <code>nc_form=wb</code></td><td class="num">3.3e-10</td><td class="num">—</td><td><span class="chip ok">identical</span></td></tr>
+      <tr><td>Full closure, <code>nc_form=staedtke</code></td><td class="num">3.4e-10</td><td class="num">8.0e-11</td><td><span class="chip ok">identical</span></td></tr>
+      <tr><td>MUSCL Van Leer, <code>wb</code></td><td class="num">2.4e-10</td><td class="num">2.9e-10</td><td><span class="chip ok">identical</span></td></tr>
+      <tr><td>Void filter <code>eps_void=0.05</code> (frozen speed)</td><td class="num">3.3e-10</td><td class="num">—</td><td><span class="chip ok">identical</span></td></tr>
+      <tr><td>NICFD flashing numerics: Van Leer, <code>wb</code>, <code>eps_void</code> + <code>eps_ghost</code> 0.05, saturation ghost pin</td><td class="num">—</td><td class="num">2.9e-10</td><td><span class="chip ok">identical</span></td></tr>
+      <tr><td>Constant reconstruction with saturation ghost pin (pin active in 40 cells)</td><td class="num">—</td><td class="num">7.9e-11</td><td><span class="chip ok">identical</span></td></tr>
+      <tr><td>MUSCL Van Albada, <code>wb</code></td><td class="num">0.48 (median 3.6e-3)</td><td class="num">6.8e-2</td><td><span class="chip warn">differs</span></td></tr>
+    </tbody>
+  </table>
+  </div>
+  <div class="note prose">
+    <h3>Two details from this step</h3>
+    <ul>
+      <li><strong>Van Albada.</strong> The old limiter had a magnitude-scaled regularization, <code>eps = va_rel·(|U_i| + 0.1·mean|U|)</code> with <code>va_rel = 1e-3</code>. The new <code>numerics.reconstruction.van_albada</code> has none. This is a numerical change, already listed in the NICFD case's <code>differences</code> field.</li>
+      <li><strong>Filter at the first and last interior faces.</strong> The old code builds the filter's third difference from <code>W<sup>n</sup></code> ghost rows (the stored ghost) while its fluxes use the freshly applied BC ghost. The new code uses the current trace for both. The two agree once the stored ghost equals the BC ghost, which is always true at steady state. With inconsistent ghosts in a test state they differ at the two boundary faces only.</li>
+    </ul>
+  </div>
+</section>
+
+<section>
+  <span class="eyebrow">3 · Boundary equations</span>
+  <h2>Old converged ghosts satisfy the new trace equations</h2>
+  <p class="prose">Each NICFD reference stores the old code's converged ghost rows at x = 0 and x = L. Inserting them as traces into the new <code>boundary_residual</code> gives the following residuals (dimensionless rows):</p>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>Case</th><th>Inlet rows (max)</th><th>Inlet entropy offset</th><th>Outlet rows, <code>characteristic</code></th><th>Outlet rows, <code>characteristic_old</code></th></tr></thead>
+    <tbody>
+      <tr><td>Two-component subsonic</td><td class="num">1.2e-7</td><td class="num">−9.2e-4 J/kg/K</td><td class="num">7.8e-5</td><td class="num">3.5e-14</td></tr>
+      <tr><td>Two-component shock</td><td class="num">1.2e-7</td><td class="num">−9.2e-4 J/kg/K</td><td class="num">1.1e-4</td><td class="num">4.1e-14</td></tr>
+      <tr><td>Two-component adapted</td><td class="num">1.2e-7</td><td class="num">−9.2e-4 J/kg/K</td><td class="num">3.8e-14</td><td class="num">4.8e-14</td></tr>
+      <tr><td>Flashing subsonic</td><td class="num">7.4e-6</td><td class="num">+1.0e-2 J/kg/K</td><td class="num">5.9e-5</td><td class="num">3.5e-16</td></tr>
+      <tr><td>Flashing shock</td><td class="num">7.4e-6</td><td class="num">+1.0e-2 J/kg/K</td><td class="num">8.0e-13</td><td class="num">2.8e-4</td></tr>
+      <tr><td>Flashing adapted</td><td class="num">7.4e-6</td><td class="num">+1.0e-2 J/kg/K</td><td class="num">8.1e-13</td><td class="num">8.7e-7</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <ul class="prose">
+    <li><strong>Outlet.</strong> Every reference satisfies one of the two outlet policies to round-off, but the references are mixed. Three subsonic-exit runs were produced with <code>characteristic_old</code> and the flashing shock run with <code>characteristic</code>. For supersonic exits both policies coincide. Use the matching policy when reproducing a specific reference.</li>
+    <li><strong>Inlet.</strong> The only mismatch is the reservoir entropy. The old stagnation inlet reaches it through 4 fixed-point iterations and a 400-point linear isentrope table; the new trace equation imposes it exactly. The offset is about 6 Pa in the gas-dominant cases and about 4 kPa (0.03 %) at 120 bar in the flashing cases. This is an accuracy improvement, not a change of model.</li>
+  </ul>
+</section>
+
+<section>
+  <span class="eyebrow">4 · Converged solutions</span>
+  <h2>Two-component N₂–water, subsonic</h2>
+  <p class="prose">NICFD <code>two_component/subsonic</code> settings: p₀ = 20 bar, p<sub>out</sub> = 16 bar, <code>wb</code>, <code>eps_void</code> 0.05, Nb = Nd = 1e11, original area law, 198 cells on the old layout. Both runs restarted from the NICFD profile.</p>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>Limiter</th><th>Old solver</th><th>New solver</th><th>Max |new − old| / range</th></tr></thead>
+    <tbody>
+      <tr><td>Van Leer</td><td class="num">8000 steps, 17 min, SSR 3.0e-9</td><td class="num">41 steps, 153 s, converged</td><td class="num">p 0.07 %, u<sub>g</sub> 0.06 %, α 0.02 %, h<sub>l</sub> 0.15 %</td></tr>
+      <tr><td>Van Albada</td><td class="num">8000 steps, 17 min, SSR 5.0e-10</td><td class="num">41 steps, 153 s, converged</td><td class="num">p 0.12 %, α 0.79 %, h<sub>l</sub> 1.8 %</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <figure>
+    <div class="plate"><img src="{{IMG_TC}}" alt="Pressure and void fraction along the nozzle for old and new solvers, with per-field differences, for Van Leer and Van Albada reconstruction"></div>
+    <figcaption>Old (black) and new (red dashed) profiles overlap. Right column: per-field difference as a percentage of each field's range. h<sub>l</sub> varies by only about 4 kJ/kg (1 K) along this nearly isothermal liquid, so its relative difference looks large.</figcaption>
+  </figure>
+  <div class="prose" style="display:grid;gap:10px">
+    <p><strong>Van Leer.</strong> The interior residual is identical here, so the remaining 0.1 % comes from where the boundary data sit. The old ghost lies one cell outside; the new trace sits on the end face, which also changes the slope of the first and last cells. In subsonic flow this moves the whole profile slightly. It is a numerical difference that vanishes with refinement.</p>
+    <p><strong>Van Albada.</strong> The larger difference is the limiter change. Inside each code, switching Van Leer to Van Albada moves α by 0.78 % in the old solver but only 0.06 % in the new one. The new Van Albada behaves almost like Van Leer.</p>
+  </div>
+</section>
+
+<section>
+  <h2>Flashing water, supersonic adapted</h2>
+  <p class="prose">NICFD <code>single_component/supersonic_adapted</code> settings: p₀ = 120 bar, T₀ = 578.95 K, α<sub>in</sub> = 1e-3, p<sub>out</sub> = 0.8 bar, Nb = 1e11, Nd = 1e10, original area law, Van Albada, <code>wb</code>, <code>eps_void</code> and <code>eps_ghost</code> 0.05, saturation ghost pin, α floor 1e-6, 598 cells. EOS tables: <code>water_meta_vapor_90x90</code> and <code>water_meta_liquid_90x90</code> from the old branch (liquid h<sub>min</sub> = 100 kJ/kg).</p>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>Quantity</th><th>Old solver</th><th>New solver</th></tr></thead>
+    <tbody>
+      <tr><td>Convergence</td><td class="num">2411 steps, 633 s, SSR 1.0e-8</td><td class="num">55 steps, 150 s, all checks passed</td></tr>
+      <tr><td>Mass flow</td><td class="num">23.410 kg/s</td><td class="num">23.433 kg/s (+0.10 %)</td></tr>
+      <tr><td>Flashing onset (α &gt; 2e-3)</td><td class="num">x = 0.0902 m</td><td class="num">x = 0.0902 m</td></tr>
+      <tr><td>Exit cell p / α / u<sub>l</sub></td><td class="num">2.373 bar / 0.99588 / 414.9 m/s</td><td class="num">2.372 bar / 0.99588 / 415.2 m/s</td></tr>
+      <tr><td>Max |new − old| / range</td><td class="num" colspan="2">p 0.06 %, α 0.06 %, u<sub>l</sub> 0.07 %, h<sub>l</sub> 0.02 %, u<sub>g</sub> 0.31 %, h<sub>g</sub> 0.53 % (both at x ≈ 0.865 m)</td></tr>
+      <tr><td>Max temperature difference</td><td class="num" colspan="2">T<sub>g</sub> 0.26 K, T<sub>l</sub> 0.04 K</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <figure>
+    <div class="plate"><img src="{{IMG_FL}}" alt="Pressure, void fraction, phase velocities, phase and saturation temperatures, liquid superheat and slip along the nozzle for old and new solvers"></div>
+    <figcaption>Old (solid) and new (dashed) overlap in all six panels. The largest u<sub>g</sub> and h<sub>g</sub> differences come from a one-cell kink near x ≈ 0.865 m (visible in the slip panel) that is present in the old solution only. Grey: the September NICFD reference, shown as background only (see section 5).</figcaption>
+  </figure>
+  <div class="note prose">
+    <h3>What this says about the failed NICFD flashing runs</h3>
+    <p>With the old tables the new solver converges this case without difficulty: CFL ramps to about 7900 with 2 Newton iterations per step. The NICFD campaign in the repository used regenerated tables (liquid h<sub>min</sub> raised to 250 kJ/kg) on the new mesh convention, starting at 100 cells. The tables are the main suspect, but this run does not prove it. The next check is the same run with only the tables swapped.</p>
+  </div>
+</section>
+
+<section>
+  <span class="eyebrow">5 · Reference provenance</span>
+  <h2>The NICFD reference profiles predate the current source terms</h2>
+  <div class="prose" style="display:grid;gap:12px">
+    <p>The <code>reference.csv</code> files in <code>cases/NICFD2026</code> were produced with revision <code>e185f57</code> (28 September). Commit <code>faafff7</code> (29 October), which the port is based on, added the closure-driven interfacial pressure work to both algebraic source assemblies, <code>D_VE_algebric</code> and <code>D_VE_algebric_two_component</code>:</p>
+  </div>
+  <div class="eq">T_k·Ṡ_k = σ_Mk[(h_ex,k − h_k) + ½(u_ex − u_k)²] + F_k(u_int − u_k) + σ_Qk
+M_k     = σ_Mk + (Γ_k / a_k²)·T_k·Ṡ_k          (volume production of phase k at fixed p)
+Dα      = (a₀² / ρ_s)·( α_l·M_g / a_l² − α_g·M_l / a_g² )
+E_g row: −p·Dα        E_l row: +p·Dα           (mixture energy unchanged)</div>
+  <div class="prose" style="display:grid;gap:12px">
+    <p>The area-driven part of p·∂α/∂t was already in <code>D_VE_area</code>; this adds the part driven by mass transfer, heat and drag work. With it, the algebraic source equals the independent conservative transform <code>D_VE_conservative</code> to 1e-16 in all six rows; without it the energy rows disagree.</p>
+    <p>Its size on the reference states is at most 0.2 % of the per-phase energy source in the two-component cases. In flashing it is 0.8 % (median) and 6 % (maximum, near α ≈ 0.3). Mostly it shifts the energy split between phases, which the evaporation gate reads.</p>
+    <p>The port contains the term, as it should. The consequence is for validation: agreement with the September references is not an independent check of the current physics in either code. The rerun old solver differs from the flashing-adapted reference by up to 0.8 % in p and α and 4.9 % in h<sub>g</sub>. Two intermediate corrections (<code>e642974</code>, <code>fda8ac3</code>) were commented out again in <code>faafff7</code>; the port correctly omits them.</p>
+  </div>
+</section>
+
+<section>
+  <span class="eyebrow">6 · Remaining differences</span>
+  <h2>What differs, and whether it matters</h2>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>Item</th><th>Type</th><th>Effect / suggestion</th></tr></thead>
+    <tbody>
+      <tr><td>Van Albada limiter without the old magnitude-scaled ε (and no <code>va_eps_mode</code> range/smoothness options, no MC limiter in the JAX path)</td><td><span class="chip warn">numerical</span></td><td>Up to 0.8 % in α in the two-component case. Decide whether the old regularized variant should exist as a named option, so old results can be reproduced.</td></tr>
+      <tr><td>Endpoint traces on the end faces instead of ghost cells one cell outside; boundary-cell slope uses the half-cell distance</td><td><span class="chip warn">numerical</span></td><td>About 0.1 % in subsonic cases; vanishes with refinement.</td></tr>
+      <tr><td>NICFD case mesh: exact face areas and Gauss-integrated volumes on [0, L]; old used averaged face areas and A·dx on [dx/2, L − dx/2]</td><td><span class="chip warn">numerical</span></td><td>Different discrete problem at equal cell count. Keep in mind when comparing against old grids.</td></tr>
+      <tr><td>All clipping to table bounds removed (<code>phase_props</code>, closure EOS calls, MUSCL fallback to first order, BC ghosts)</td><td><span class="chip warn">behaviour</span></td><td>Out-of-table states are now rejected instead of clamped. Old cases that converged with a ghost phase sitting on a table edge will fail rather than converge.</td></tr>
+      <tr><td>Inlet isentrope solved exactly</td><td><span class="chip info">improvement</span></td><td>Inlet pressure about 4 kPa different at 120 bar.</td></tr>
+      <tr><td>FVS full-slip branch rewritten via <code>L_h y / D</code>, <code>compatible_flux_solve</code> for resting phases, Schiller–Naumann drag rewritten without the Re floor</td><td><span class="chip ok">equivalent</span></td><td>Same residual to round-off; differs only at exactly zero velocity or slip, where the new form is cleaner.</td></tr>
+      <tr><td><code>area_params</code> precedence: old call-site kwargs overrode <code>area_params</code>; new <code>area_params</code> override defaults</td><td><span class="chip warn">behaviour</span></td><td>Matters only if a configuration sets <code>alpha_b</code>, <code>alpha_d</code>, <code>Nb</code>, <code>Nd</code>, <code>d_min_b</code> or <code>ai_scale</code> inside <code>area_params</code>.</td></tr>
+      <tr><td>Defaults: <code>void_strength</code> 0 (old YAML default <code>eps_void</code> 0.05), <code>alpha_min</code> 0 (old <code>alpha_eps</code> 1e-6), <code>Scheme.reconstruction</code> constant (old Van Albada)</td><td><span class="chip warn">defaults</span></td><td>Results differ from old runs unless these are set explicitly. Consider documenting a "NICFD defaults" preset.</td></tr>
+      <tr><td>Per-cell <code>ai_scale</code> field (old <code>step(W, dt, ai_scale=array)</code>)</td><td><span class="chip gap">not ported</span></td><td><code>ClosureConfig.ai_scale</code> is a scalar. The data-assimilation work (β(x) injection in twophase-da) needs the per-cell field.</td></tr>
+      <tr><td><code>stagnation_ramped</code> inlet, <code>dom_phase: auto</code>, algebraic momentum pin (<code>pin_mom_tau=None</code>), <code>nc_scale</code></td><td><span class="chip gap">not ported</span></td><td>Momentum pin now requires a relaxation time (documented choice). The others are minor or diagnostic.</td></tr>
+      <tr><td>Alberto's uncommitted options after <code>faafff7</code>: <code>htc_liquid_*="sum"</code> and <code>nu_l_int</code></td><td><span class="chip gap">not ported</span></td><td>New optional closures; defaults unchanged. Port when Alberto commits them.</td></tr>
+      <tr><td><code>cases/NICFD2026/two_component/supersonic_shock/settings.yaml</code> has no gas <code>N_h</code></td><td><span class="chip gap">bug</span></td><td>Building the gas table from this file fails. Add <code>N_h: 145</code>.</td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<section>
+  <span class="eyebrow">7 · Property tables</span>
+  <h2>Newly generated tables differ at invalid edge rows</h2>
+  <div class="prose" style="display:grid;gap:12px">
+    <p><code>demos/two_fluid/run.py</code> fails in <code>liquid.get_state(PT_INPUTS, 20 bar, 295.15 K)</code> (optimistix root find, non-finite input). JAX reports the error asynchronously, so the traceback points at the gas line.</p>
+    <p>The water table the demo generated (<code>water_145x200.pkl</code>, editable JAXProp at <code>74794ec</code>) differs from the old table of the same name almost only in the first enthalpy row (h<sub>min</sub> = 1 kJ/kg) at pressures above about 10 bar. That row lies below the freezing line, where CoolProp returns invalid states. The two generator versions fill it differently: for example, the tabulated T at (h<sub>min</sub>, p<sub>max</sub>) is 6e-5 K in the old table and 1.56 K in the new one. Neither table contains NaNs. The PT inverse fails on the new table and succeeds on the old one (h = 94.1 kJ/kg); the nitrogen table is unaffected.</p>
+    <p>The NICFD flashing setup's switch to a 250 kJ/kg liquid h<sub>min</sub>, made because of copied metastable stencils, is likely the same class of problem. Suggested fixes: raise the liquid h<sub>min</sub> above about 10–20 kJ/kg for the N₂–water demo, and review how recent JAXProp changes fill invalid edge states (<code>225f8ef</code>, <code>d68d5e3</code>, <code>74794ec</code>).</p>
+  </div>
+</section>
+
+<section>
+  <span class="eyebrow">8 · Next steps</span>
+  <h2>Suggested follow-up</h2>
+  <ol class="prose">
+    <li>Rerun the flashing adapted case with the new solver and the repository's regenerated tables, everything else as in section 4. This separates the table effect from the mesh and setup effects.</li>
+    <li>Repeat on the NICFD case mesh (exact areas, traces on [0, L]) and from 100 cells upward, as in the campaign.</li>
+    <li>Regenerate the NICFD references with the current source terms before using them as acceptance data.</li>
+    <li>Decide on the Van Albada variant and on a documented preset reproducing the old YAML defaults.</li>
+    <li>Port the per-cell <code>ai_scale</code> field for the data-assimilation work.</li>
+  </ol>
+</section>
+
+<footer>
+  <p>Environment: Python 3.12.3, JAX 0.6.2, editable JAXProp at <code>74794ec</code> (labelled 0.5.6), Windows 11. Tables: old-branch <code>dev_scripts/fluid_tables</code> unless stated.</p>
+  <p>Comparison scripts (residual evaluation, boundary check, end-to-end drivers and plots) are kept outside both repositories and are available on request.</p>
+</footer>
+</div>

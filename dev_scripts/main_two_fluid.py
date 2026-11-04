@@ -54,6 +54,7 @@ from nozzle_hyperbolic.fvm_solver.two_fluid.sources import (
 # SETTINGS_FILE = "settings/settings_two_fluid_nozzle_validation_two_component_test_static.yaml"
 SETTINGS_FILE = "settings/settings_flashing_smd_supersonic_test.yaml"
 SETTINGS_FILE = "settings/settings_flashing_nitrogen_simoneau.yaml"
+SETTINGS_FILE = "settings/check_two_fluid_nozzle_validation_two_component_test_static.yaml"
 SETTINGS_YAML = os.environ.get("SETTINGS_YAML",SETTINGS_FILE)
 # SETTINGS_YAML = os.environ.get("SETTINGS_YAML","settings/settings_two_fluid_liquid_bernoulli_symmetric.yaml")
 _here = pathlib.Path(__file__).parent
@@ -647,6 +648,7 @@ _ret = make_two_fluid_step(
     eos_rows_banded = cfg.EOS_ROWS_BANDED,
     jac_lag       = cfg.JAC_LAG,
     nc_form       = cfg.NC_FORM,
+    nc_kfree      = cfg.NC_KFREE,
     use_saturation = cfg.MASS_TRANSFER,    # only the mass-transfer closure reads
                                            # saturation; two-component/area-only skip it
     w_char        = cfg.W_CHAR,

@@ -67,6 +67,7 @@ def calculate_drag_force_one_component(
     alpha1, alpha2, rho1, rho2, mu1, mu2, u1, u2, d,
     alpha_b=0.3, alpha_d=0.7, blend="linear",
     drag_bubbly="schiller_naumann", drag_droplet="schiller_naumann",
+    drag_scale_bubbly=1.0, drag_scale_droplet=1.0,
 ):
     """
     Regime-dependent drag force per unit volume for the one-component case.
@@ -95,36 +96,38 @@ def calculate_drag_force_one_component(
                      'smoothstep': (1 - s) * bubbly + s * droplet, both laws at the
                      actual alpha, s = smoothstep -> C1 across the transition.
     drag_bubbly, drag_droplet : drag coefficient law of each regime (DRAG_LAWS)
+    drag_scale_bubbly, drag_scale_droplet : constant factor on C_d of each regime (default 1;
+                     ad hoc, e.g. a weaker drag for a synthetic truth)
     """
     if drag_bubbly not in DRAG_LAWS or drag_droplet not in DRAG_LAWS:
         raise ValueError(f"drag laws {DRAG_LAWS}; got {drag_bubbly!r}, {drag_droplet!r}")
     u_rel = u1 - u2
     u_rel_abs = jnp.abs(u_rel)
 
-    def _Cd(law, rho_c, mu_c, mu_d, alpha_disp):
+    def _Cd(law, rho_c, mu_c, mu_d, alpha_disp, scale):
         if law == "ishii_zuber":
             Re = rho_c * u_rel_abs * d / ishii_zuber_mixture_viscosity(mu_c, mu_d, alpha_disp)
             Re_safe = jnp.maximum(Re, 1e-12)
-            return (24.0 / Re_safe) * (1.0 + 0.1 * Re_safe**0.75)
+            return scale * (24.0 / Re_safe) * (1.0 + 0.1 * Re_safe**0.75)
         Re = rho_c * u_rel_abs * d / jnp.maximum(mu_c, 1e-30)
         Re_safe = jnp.maximum(Re, 1e-12)   # avoid 0**0.687 → ∞ gradient under jacfwd
-        return (24.0 / Re_safe) * (1.0 + 0.15 * Re_safe**0.687)
+        return scale * (24.0 / Re_safe) * (1.0 + 0.15 * Re_safe**0.687)
 
     prefactor = (3.0 / 4.0) / d * u_rel_abs * u_rel
 
     def bubbly(_):
         # Vapor dispersed in liquid: alpha_disp = alpha1 (vapor), rho_cont = rho2 (liquid)
-        C_d = _Cd(drag_bubbly, rho2, mu2, mu1, alpha1)
+        C_d = _Cd(drag_bubbly, rho2, mu2, mu1, alpha1, drag_scale_bubbly)
         return prefactor * C_d * alpha1 * rho2
 
     def droplet(_):
         # Liquid dispersed in vapor: alpha_disp = alpha2 (liquid), rho_cont = rho1 (vapor)
-        C_d = _Cd(drag_droplet, rho1, mu1, mu2, alpha2)
+        C_d = _Cd(drag_droplet, rho1, mu1, mu2, alpha2, drag_scale_droplet)
         return prefactor * C_d * alpha2 * rho1
 
     def transition(_):
-        F_b = prefactor * _Cd(drag_bubbly, rho2, mu2, mu1, alpha_b) * alpha_b * rho2            # bubbly at alpha1 = alpha_b
-        F_d = prefactor * _Cd(drag_droplet, rho1, mu1, mu2, 1.0 - alpha_d) * (1.0 - alpha_d) * rho1  # droplet at alpha1 = alpha_d
+        F_b = prefactor * _Cd(drag_bubbly, rho2, mu2, mu1, alpha_b, drag_scale_bubbly) * alpha_b * rho2            # bubbly at alpha1 = alpha_b
+        F_d = prefactor * _Cd(drag_droplet, rho1, mu1, mu2, 1.0 - alpha_d, drag_scale_droplet) * (1.0 - alpha_d) * rho1  # droplet at alpha1 = alpha_d
         w = (alpha1 - alpha_b) / (alpha_d - alpha_b)
         return F_b + (F_d - F_b) * w
 
@@ -140,8 +143,8 @@ def calculate_drag_force_one_component(
     )
 
 
-LIQUID_HTC_BUBBLY = ("ranz_marshall", "jakob", "max", "liao")
-LIQUID_HTC_DROPLET = ("internal", "jakob", "max")
+LIQUID_HTC_BUBBLY = ("ranz_marshall", "jakob", "max", "liao", "sum")
+LIQUID_HTC_DROPLET = ("internal", "jakob", "max", "sum")
 
 
 def jakob_nusselt(ja):
@@ -152,6 +155,15 @@ def jakob_nusselt(ja):
     floored at the conduction limit of a sphere, Nu = 2.  Independent of the slip.
     """
     return jnp.maximum(2.0, 12.0 / jnp.pi * ja)
+
+
+def jakob_growth_nusselt(ja):
+    """
+    Bubble-growth part of jakob_nusselt without its conduction floor: (12/pi) max(Ja, 0).
+    Added to a closure that already holds the conduction limit (Ranz-Marshall's 2, the
+    internal Nu of a droplet) by the 'sum' option, so conduction is not counted twice.
+    """
+    return 12.0 / jnp.pi * jnp.maximum(ja, 0.0)
 
 
 def liao_nusselt(ja, pe):
@@ -166,14 +178,19 @@ def liao_nusselt(ja, pe):
     return jnp.sqrt(jnp.maximum(12.0 / jnp.pi**2 * ja**2 + pe / (3.0 * jnp.pi), 1e-12))
 
 
-def select_liquid_htc(option, htc_default, htc_jakob, htc_liao=None):
-    """option: the regime's own closure ('ranz_marshall' / 'internal') | 'jakob' | 'max' | 'liao'."""
+def select_liquid_htc(option, htc_default, htc_jakob, htc_liao=None, htc_growth=None):
+    """
+    option: the regime's own closure ('ranz_marshall' / 'internal') | 'jakob' | 'max' | 'liao' |
+    'sum' (the regime's own closure + the Jakob growth term htc_growth, jakob_growth_nusselt).
+    """
     if option == "jakob":
         return htc_jakob
     if option == "max":
         return jnp.maximum(htc_default, htc_jakob)
     if option == "liao":
         return htc_liao
+    if option == "sum":
+        return htc_default + htc_growth
     return htc_default
 
 
@@ -220,9 +237,11 @@ def calculate_heat_transfer_one_component(
     ja             : liquid Jakob number, only used by the 'jakob' / 'max' options
     liquid_bubbly  : liquid-side HTC of the bubbly regime: 'ranz_marshall' (default) |
                      'jakob' (jakob_nusselt) | 'max' (larger of the two) |
-                     'liao' (liao_nusselt, Jakob + Peclet; Pe slip as in Ranz-Marshall)
+                     'liao' (liao_nusselt, Jakob + Peclet; Pe slip as in Ranz-Marshall) |
+                     'sum' (Ranz-Marshall + (12/pi) max(Ja, 0), jakob_growth_nusselt)
     liquid_droplet : liquid-side HTC of the droplet regime: 'internal' (Nu2_int, default) |
-                     'jakob' | 'max'.  The vapor side keeps Ranz-Marshall in the droplet
+                     'jakob' | 'max' | 'sum' (Nu2_int + (12/pi) max(Ja, 0)).
+                     The vapor side keeps Ranz-Marshall in the droplet
                      regime and Nu1_int in the bubbly regime
 
     Returns
@@ -234,6 +253,7 @@ def calculate_heat_transfer_one_component(
                          f"got {liquid_bubbly!r}, {liquid_droplet!r}")
     u_rel_abs = jnp.abs(u1 - u2)
     htc2_jakob = state2["k"] * jakob_nusselt(ja) / d
+    htc2_growth = state2["k"] * jakob_growth_nusselt(ja) / d
     u_pe = jnp.sqrt(u_rel_abs**2 + slip_u0**2) if slip_u0 > 0.0 else u_rel_abs
     pe = u_pe * d * state2["rho"] * state2["cp"] / state2["k"]
     htc2_liao = state2["k"] * liao_nusselt(ja, pe) / d
@@ -242,13 +262,13 @@ def calculate_heat_transfer_one_component(
         # Vapor dispersed in liquid: internal Nu on the vapor side, liquid continuous
         htc1 = state1["k"] * Nu1_int / d
         htc2 = select_liquid_htc(liquid_bubbly, ranz_marshall_htc_two_fluid(state2, u_rel_abs, d, slip_u0),
-                                 htc2_jakob, htc2_liao)
+                                 htc2_jakob, htc2_liao, htc2_growth)
         return htc1, htc2
 
     def droplet(_):
         # Liquid dispersed in vapor: vapor continuous, internal Nu on the liquid side
         htc1 = ranz_marshall_htc_two_fluid(state1, u_rel_abs, d, slip_u0)
-        htc2 = select_liquid_htc(liquid_droplet, state2["k"] * Nu2_int / d, htc2_jakob)
+        htc2 = select_liquid_htc(liquid_droplet, state2["k"] * Nu2_int / d, htc2_jakob, htc_growth=htc2_growth)
         return htc1, htc2
 
     def transition(_):

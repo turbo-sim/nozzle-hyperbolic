@@ -11,5 +11,5 @@ sources:
 
 numerics:
   newton_iter:     5
-  eos_rows_banded: false     # dense E3 solve (as in the NICFD runs)
+  eos_rows_banded: true     # (false in the NICFD runs)
   lowmach_diss_bc: 0.0

@@ -46,7 +46,7 @@ from .matrices import (
     phase_props, common_quantities,
     K_matrix, X_matrix, eigenstructure, flux_vector,
 )
-from .flux import fvs_interface_flux, nonconservative_correction
+from .flux import fvs_interface_flux, fvs_interface_state, nonconservative_correction
 from .sources import (TwoFluidClosure, D_VE_conservative,
                       D_VE_algebric_two_component, evaporation_weight)
 
@@ -176,6 +176,7 @@ def make_two_fluid_step(
     eos_rows_banded=False,
     jac_lag=1,
     nc_form='cell',
+    nc_kfree=False,
     use_saturation=True,
     w_char=None,
     ssr_mode='all',
@@ -322,6 +323,20 @@ def make_two_fluid_step(
                  content, discriminated only by dev_scripts/debug_nc_contact.py
                  — see dev_scripts/OPEN_QUESTIONS.md item 1. Production stays
                  on 'cell' regardless of this docstring's existence.
+    nc_kfree   : bool, default False. True replaces X_i K_i⁻¹ dF by the K-free
+                 X_i dÛ, with Û the upwinded primitive face state of
+                 fvs_interface_state ('cell': Û₊−Û₋; 'wb': face-area-weighted
+                 one-sided differences around U_i). K is singular where det K=0
+                 (𝒟=0), which the converged nozzle runs cross; the K-free form
+                 stays bounded there. Not defined for nc_form='staedtke'.
+                 Tested 2026-11-04 (NICFD supersonic_shock, wb): two-component
+                 removes the 3-cell jump/liquid-mass defect at the subsonic 𝒟
+                 crossing and is grid-converged at N500 (m_dot gap to 'cell'
+                 -0.57% at N500, -0.06% at N1000); flashing (ghost 1e-5) adds
+                 a ~√Δx error to m_dot through the thin-vapour growth in the
+                 throat (-0.55% at N1600, 'cell' converged at N600). Option
+                 only; a 𝒟-gated blend of the two forms is a possible future
+                 step.
     use_saturation : bool, default True. Whether sources_fn's sat_g/sat_l
                  saturation-property lookups are computed; set False only for
                  fluids/sources that never reference them (e.g. non-saturating
@@ -454,6 +469,8 @@ def make_two_fluid_step(
                          "(the pin reads h_sat_g(p) from the saturation table)")
     if thomas not in ('orig', 'chol'):
         raise ValueError(f"thomas must be 'orig' or 'chol', got {thomas!r}")
+    if nc_kfree and nc_form == 'staedtke':
+        raise ValueError("nc_kfree=True is defined for nc_form 'cell' and 'wb' only")
     newton_tol = float(newton_tol)
     if newton_tol > 0.0 and eos_rows and eos_rows_banded and jac_lag > 1:
         raise ValueError("newton_tol > 0 is not implemented together with "
@@ -1216,7 +1233,37 @@ def make_two_fluid_step(
 
     # ── Non-conservative correction at interior cells ─────────────────────────
 
+    def _state_one(ul, ur, lm):
+        return fvs_interface_state(
+            ul, ur, fluid_g, fluid_l, k, delta_factor, lowmach_diss=lm,
+            du_blend_lo=du_blend_lo, du_blend_hi=du_blend_hi)
+
+    def _nc_kfree_interior(U_h):
+        if recon != 'constant':
+            U_L, U_R = _muscl(U_h)
+        else:
+            U_L, U_R = U_h[:-1], U_h[1:]
+        U_hat = jax.vmap(_state_one)(U_L, U_R, _lm_face)
+        if nc_form == 'wb':
+            dU = (Af_j[1:, None] * (U_hat[1:] - U_h[1:-1])
+                  + Af_j[:-1, None] * (U_h[1:-1] - U_hat[:-1])) / A_j[1:-1, None]
+        else:
+            dU = U_hat[1:] - U_hat[:-1]
+
+        def _nc_one(u_h, du):
+            eos_g_c = phase_props(fluid_g, u_h[0], u_h[4])
+            eos_l_c = phase_props(fluid_l, u_h[0], u_h[5])
+            cq_c    = common_quantities(u_h, eos_g_c, eos_l_c, k)
+            return X_matrix(u_h, eos_g_c, eos_l_c, cq_c) @ du
+
+        if cell_local_jac:
+            return _local_jac_map(lambda x: _nc_one(x[:6], x[6:]))(
+                jnp.concatenate([U_h[1:-1], dU], axis=1))
+        return jax.vmap(_nc_one)(U_h[1:-1], dU)
+
     def _nc_all_interior(U_h, F_hat):
+        if nc_kfree:
+            return _nc_kfree_interior(U_h)
         # nc_form — WHERE the NC-geometric term H·F̄·ΔA lives (2026-07-15):
         #   'cell'     (ours): H^nc·(F̂₊−F̂₋), all geometry in D_VE_area.
         #   'staedtke' (book eq. 8.38): H^nc·(A₊F̂₊−A₋F̂₋)/A_i — geometry

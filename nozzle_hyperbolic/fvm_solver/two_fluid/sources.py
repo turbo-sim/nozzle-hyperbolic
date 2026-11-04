@@ -32,6 +32,7 @@ from source_two_fluid import (
     calculate_heat_transfer_one_component,
     calculate_mass_transfer_lv,
     get_interfacial_area,
+    jakob_growth_nusselt,
     jakob_nusselt,
     liao_nusselt,
     ranz_marshall_htc_two_fluid,
@@ -173,10 +174,14 @@ def two_fluid_closure(
                            # tested that removes the case-4 throat bump, THROAT_BUMP_HISTORY.md)
     nu_g_int=None,         # internal Nusselt number of the vapour (bubbles, htc_g = k_g Nu / d);
                            # None → 120 with mass transfer, 12 without (the earlier constants)
-    htc_liquid_bubbly="ranz_marshall",  # liquid-side HTC, bubbly regime: ranz_marshall | jakob | max | liao
-    htc_liquid_droplet="internal",      # liquid-side HTC, droplet regime: internal | jakob | max
+    nu_l_int=None,         # internal Nusselt number of the liquid (droplets, htc_l = k_l Nu / d, regime_htc
+                           # only); None → 12 with mass transfer, 2 pi^2/3 without (the earlier constants)
+    htc_liquid_bubbly="ranz_marshall",  # liquid-side HTC, bubbly regime: ranz_marshall | jakob | max | liao | sum
+    htc_liquid_droplet="internal",      # liquid-side HTC, droplet regime: internal | jakob | max | sum
     drag_bubbly="schiller_naumann",     # drag coefficient, bubbly regime: schiller_naumann | ishii_zuber
     drag_droplet="schiller_naumann",    # drag coefficient, droplet regime: schiller_naumann | ishii_zuber
+    drag_scale_bubbly=1.0,              # constant factor on C_d, bubbly regime (ad hoc)
+    drag_scale_droplet=1.0,             # constant factor on C_d, droplet regime (ad hoc)
 ) -> TwoFluidClosure:
     """
     Assemble a TwoFluidClosure from state + saturation properties.
@@ -222,6 +227,9 @@ def two_fluid_closure(
     nu_g_int   : internal Nusselt number of the vapour inside bubbles (vapour-side HTC of
                  the bubbly regime).  None keeps the constants used so far (120 in the
                  mass-transfer branch, 12 in the no-mass-transfer branch); a value sets both.
+    nu_l_int   : internal Nusselt number of the liquid inside droplets (liquid-side HTC of the
+                 droplet regime, regime_htc only; with htc_liquid_droplet 'max' the larger of it and
+                 Jakob).  None keeps the constants used so far (12 with mass transfer, 2π²/3 without).
     htc_liquid_bubbly, htc_liquid_droplet : liquid-side HTC of each regime.  'jakob' is the
                  thermal-diffusion bubble growth Nu = max(2, (12/π) Ja) (Plesset & Zwick 1954,
                  source_two_fluid.jakob_nusselt), Ja = ρ_l cp_l (T_l - T_sat) / (ρ_g h_fg) with
@@ -229,13 +237,17 @@ def two_fluid_closure(
                  regime's own closure (Ranz-Marshall bubbly, internal Nu droplet).  'liao'
                  (bubbly only) = sqrt(12/π² Ja² + Pe/(3π)), thermal diffusion + convection
                  (source_two_fluid.liao_nusselt); its Pe uses the slip as Ranz-Marshall does
-                 (smooth_slip).  Defaults = the closure used so far.  Jakob needs mass_transfer=True; without regime_htc
+                 (smooth_slip).  'sum' = the regime's own closure + (12/π) max(Ja, 0), Jakob's
+                 growth term without its conduction floor (source_two_fluid.jakob_growth_nusselt;
+                 the regime's closure already holds conduction).  Defaults = the closure used so far.  Jakob needs mass_transfer=True; without regime_htc
                  only the bubbly option applies.
     drag_bubbly, drag_droplet : drag coefficient of each regime.  'ishii_zuber' = viscous
                  regime of Ishii & Zuber (1979), C_d = 24/Re_m (1 + 0.1 Re_m^0.75) with the
                  mixture viscosity μ_c (1 - α_d)^(-2.5 μ*) (crowding; μ_c/(1-α) for bubbles,
                  μ_c (1-α)^-2.5 for drops); distorted / Newton regimes not included.
                  Defaults = Schiller-Naumann in both regimes (the closure used so far).
+    drag_scale_bubbly, drag_scale_droplet : constant factor on C_d of each regime (default 1).
+                 Ad hoc, e.g. a weaker drag for a synthetic truth whose closure differs from the prior.
     """
     p, u_g, u_l, ag, h_g, h_l = U_h
     al = 1.0 - ag
@@ -330,11 +342,13 @@ def two_fluid_closure(
             ag, al, rg, rl, mu_g, mu_l, u_g, u_l, d,
             alpha_b=alpha_b, alpha_d=alpha_d, blend=regime_blend,
             drag_bubbly=drag_bubbly, drag_droplet=drag_droplet,
+            drag_scale_bubbly=drag_scale_bubbly, drag_scale_droplet=drag_scale_droplet,
         )
 
         # ── Heat transfer coefficients (Ranz-Marshall, continuous phase) ─────────
         du_abs = jnp.abs(u_g - u_l)
-        Nu_g, Nu_l = (120.0 if nu_g_int is None else float(nu_g_int)), 12.0
+        Nu_g = 120.0 if nu_g_int is None else float(nu_g_int)
+        Nu_l = 12.0 if nu_l_int is None else float(nu_l_int)
         ja_l = rl * stl_ex["cp"][0] * (T_l - T_sat) / (rg * (h_sat_g - h_sat_l))   # liquid Jakob number
 
         if regime_htc:
@@ -375,7 +389,8 @@ def two_fluid_closure(
             u_pe = jnp.sqrt(du_abs**2 + slip_u0**2) if slip_u0 > 0.0 else du_abs
             pe_l = u_pe * d * stl_ex["rho"][0] * stl_ex["cp"][0] / stl_ex["k"][0]
             htc_l = select_liquid_htc(htc_liquid_bubbly, htc_l, stl_ex["k"][0] * jakob_nusselt(ja_l) / d,
-                                      stl_ex["k"][0] * liao_nusselt(ja_l, pe_l) / d)
+                                      stl_ex["k"][0] * liao_nusselt(ja_l, pe_l) / d,
+                                      stl_ex["k"][0] * jakob_growth_nusselt(ja_l) / d)
 
         # # ── Interfacial heat transfer rates ──────────────────────────────────────
         # Qvi = htc_g * ai * (T_sat - T_g)    # heat from interface to gas [W/m^3]
@@ -450,6 +465,7 @@ def two_fluid_closure(
             ag, al, rg, rl, mu_g, mu_l, u_g, u_l, d,
             alpha_b=alpha_b, alpha_d=alpha_d, blend=regime_blend,
             drag_bubbly=drag_bubbly, drag_droplet=drag_droplet,
+            drag_scale_bubbly=drag_scale_bubbly, drag_scale_droplet=drag_scale_droplet,
         )
 
         # ── Heat transfer coefficients (Ranz-Marshall, continuous phase) ─────────
@@ -468,7 +484,7 @@ def two_fluid_closure(
                  "k": stl_ex["k"][0], "cp": stl_ex["cp"][0]},
                 u_g, u_l, d,
                 Nu1_int=Nu_g, alpha_b=alpha_b, alpha_d=alpha_d, blend=regime_blend,
-                slip_u0=slip_u0,
+                slip_u0=slip_u0, **({} if nu_l_int is None else {"Nu2_int": float(nu_l_int)}),
             )
         else:
             # NICFD closure: bubbly-regime HTC at every α.
