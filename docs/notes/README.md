@@ -20,6 +20,7 @@ Numerical source remains the authority for defaults and callback signatures.
 | [Residual monitoring](residual_monitoring.md) | Fixed-scale spatial, boundary and global checks, stopping criteria and physical monitors |
 | [Migration](migration.md) | Breaking changes from the model-specific factories to the shared FVM API |
 | [Two-fluid migration](two_fluid_migration.md) | Frozen Alberto reference, constrained cells, compatibility flux, boundaries, closures and verification limits |
+| [Nonconservative terms](nonconservative_terms.md) | Euler background, the old inverse-based treatment and its failure mechanism, then the alternative's state-space paths, Gauss quadrature and cell assembly |
 | [Pseudo-time and dual time](pseudo_time_stepping.md) | Benefits, costs and distinction from physical-time integration; documentation only |
 | [Continuation and restart](continuation_and_restart.md) | Explicit physical-parameter stages, constrained preparation, retained failures and portable arrays |
 | [Analytical references](analytical_references.md) | Reference assumptions, invariants, source attribution and conservative cell projections |
