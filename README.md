@@ -1,6 +1,6 @@
 # Nozzle-hyperbolic
 
-JAX-based Python package for finite-volume simulation of hyperbolic fluid flow problems. It uses finite-volume methods built with JAX to
+JAX-based Python package for finite-volume simulation of hyperbolic fluid flow problems, including real-gas Euler equations and two-phase fluid modelling. It uses finite-volume methods built with JAX to
 solve steady and transient problems, with support for real-fluid thermodynamics
 through JAXProp.
 

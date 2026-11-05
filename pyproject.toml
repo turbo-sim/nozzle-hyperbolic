@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "nozzle_hyperbolic"
 version = "0.0.1"
-description = "JAX-based Python package for finite-volume simulation of hyperbolic fluid flow problems."
+description = "JAX-based Python package for finite-volume simulation of hyperbolic fluid flow problems, including real-gas Euler equations and two-phase fluid modelling."
 authors = ["Andrea Cioffi", "Alberto Bergamin", "Roberto Agromayor"]
 license = "MIT"
 readme = "README.md"
