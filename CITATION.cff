@@ -1,0 +1,16 @@
+cff-version: 1.2.0
+type: software
+message: If you use this software, please cite it using this metadata and record the version or commit used.
+title: 'Nozzle-hyperbolic: JAX-based Python package for finite-volume simulation of hyperbolic fluid flow problems'
+abstract: JAX-based Python package for finite-volume simulation of hyperbolic fluid flow problems.
+authors:
+- family-names: Cioffi
+  given-names: Andrea
+- family-names: Bergamin
+  given-names: Alberto
+- family-names: Agromayor
+  given-names: Roberto
+  orcid: https://orcid.org/0009-0009-9289-1130
+version: 0.0.1
+repository-code: https://github.com/turbo-sim/nozzle-hyperbolic
+url: https://github.com/turbo-sim/nozzle-hyperbolic

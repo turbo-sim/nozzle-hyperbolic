@@ -1,7 +1,6 @@
 # Nozzle-hyperbolic
 
-Nozzle-hyperbolic is a Python package for simulating compressible single-phase
-and two-phase flow in nozzles. It uses finite-volume methods built with JAX to
+JAX-based Python package for finite-volume simulation of hyperbolic fluid flow problems. It uses finite-volume methods built with JAX to
 solve steady and transient problems, with support for real-fluid thermodynamics
 through JAXProp.
 
@@ -31,3 +30,11 @@ poetry run python -c "import nozzle_hyperbolic; print(nozzle_hyperbolic.__versio
 
 Read the [online documentation](https://turbo-sim.github.io/nozzle-hyperbolic/)
 for usage and examples.
+
+<!-- research-software-metadata:start -->
+## Development and citation
+
+Nozzle-hyperbolic is co-developed by Roberto Agromayor, Andrea Cioffi and Alberto Bergamin.
+
+Citation metadata is provided in [CITATION.cff](CITATION.cff). For version-specific reproducibility, also record the release or commit used.
+<!-- research-software-metadata:end -->
