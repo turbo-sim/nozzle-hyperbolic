@@ -39,7 +39,7 @@ import jax
 import jax.numpy as jnp
 from .matrices import (
     PhaseProps, phase_props, CommonQty, common_quantities,
-    K_matrix, X_matrix, eigenstructure, flux_vector,
+    K_matrix, X_matrix, eigenstructure, flux_vector, J_matrix,
 )
 
 
@@ -421,6 +421,111 @@ def fvs_interface_state(U_h_L, U_h_R, fluid_g, fluid_l, k,
     w = 0.5 * (1.0 + jnp.cos(jnp.pi * t))
     SdU = jnp.where(jnp.abs(du) < du_blend_lo, SdU_z, w * SdU_z + (1.0 - w) * SdU_f)
     return U_h_bar + 0.5 * SdU
+
+
+# ---------------------------------------------------------------------------
+# Inverse-free face flux and path-integrated non-conservative term
+# (port of the 'inverse_old_sonic' package of the main branch,
+#  development/two_fluid_test_v2/scripts/numerics.py, 2026-11-05)
+# ---------------------------------------------------------------------------
+
+def inverse_free_interface_flux(U_h_L, U_h_R, fluid_g, fluid_l, k,
+                                delta_factor=0.1, lowmach_diss=0.0,
+                                du_blend_lo=1e-2, du_blend_hi=1e-1):
+    """
+    Face flux without K⁻¹: primitive-jump viscosity
+
+        F_hat = ½(F_L + F_R) − ½ J(Ū) Σ_k z_k m_k r_k l_k (U_R − U_L) / D_k
+
+    with the magnitudes m_k = λ_k s_k of the native signed weights s_k (same strict
+    sonic-crossing entropy fix and delta_factor floor as fvs_interface_flux), the same
+    low-Mach weight z_ac on the acoustic pair and the same zero-slip / full blend
+    (du_blend_lo, du_blend_hi).  Zero-slip ('grouped'): both void waves move with the
+    volume-weighted mixture speed u1, material = u1 s_12.  The grouped viscosity is a
+    bounded approximation (not the exact |A| at the material Jordan block).
+    """
+    U_h_bar = 0.5 * (U_h_L + U_h_R)
+    jump = U_h_R - U_h_L
+
+    eos_g_b = phase_props(fluid_g, U_h_bar[0], U_h_bar[4])
+    eos_l_b = phase_props(fluid_l, U_h_bar[0], U_h_bar[5])
+    cq_b = common_quantities(U_h_bar, eos_g_b, eos_l_b, k)
+    eigvals, R_h, L_h, D = eigenstructure(U_h_bar, eos_g_b, eos_l_b, cq_b)
+
+    eos_g_L = phase_props(fluid_g, U_h_L[0], U_h_L[4])
+    eos_l_L = phase_props(fluid_l, U_h_L[0], U_h_L[5])
+    eos_g_R = phase_props(fluid_g, U_h_R[0], U_h_R[4])
+    eos_l_R = phase_props(fluid_l, U_h_R[0], U_h_R[5])
+    F_L = flux_vector(U_h_L, eos_g_L, eos_l_L)
+    F_R = flux_vector(U_h_R, eos_g_R, eos_l_R)
+    eigvals_L = eigenstructure(
+        U_h_L, eos_g_L, eos_l_L, common_quantities(U_h_L, eos_g_L, eos_l_L, k))[0]
+    eigvals_R = eigenstructure(
+        U_h_R, eos_g_R, eos_l_R, common_quantities(U_h_R, eos_g_R, eos_l_R, k))[0]
+
+    # native signed weights (strict sonic-crossing Harten fix, tiny global floor)
+    a_mix = 0.5 * (eigvals[2] - eigvals[3])
+    delta_global = delta_factor * jnp.abs(a_mix)
+    sonic = (eigvals_L < 0.0) & (eigvals_R > 0.0)
+    delta_k = jnp.where(sonic, eigvals_R - eigvals_L, delta_global)
+    lam_safe = jnp.where(
+        sonic,
+        (eigvals**2 + delta_k**2) / (2.0 * jnp.maximum(delta_k, 1e-300)),
+        jnp.maximum(jnp.abs(eigvals), delta_global),
+    )
+    s = eigvals / lam_safe
+
+    # native low-Mach weight on the acoustic pair
+    ag_b = U_h_bar[3]
+    al_b = 1.0 - ag_b
+    rg = eos_g_b.rho
+    rl = eos_l_b.rho
+    cq = cq_b
+    du = cq.du
+    rho_hat_s = cq.rho_s + (cq.rg_hat - rg)
+    a_tilde_sq = (rho_hat_s / cq.rho_s) * (rg * rl / cq.rh2) * cq.a0sq
+    delta_a_sq = ag_b * al_b * rg * rl * cq.rg_hat * cq.rl_hat / cq.rh2**2 * du**2
+    a = jnp.sqrt(jnp.maximum(a_tilde_sq - delta_a_sq, 0.0))
+    u_mix = (ag_b * rg * cq.rl_hat / cq.rh2) * U_h_bar[1] + (al_b * rl * cq.rg_hat / cq.rh2) * U_h_bar[2]
+    z_ac = jnp.clip(jnp.abs(u_mix) / jnp.maximum(jnp.abs(a), 1e-8), lowmach_diss, 1.0)
+    z_vec = jnp.ones(6).at[2].set(z_ac).at[3].set(z_ac)
+
+    magnitude = eigvals * s * z_vec
+    material = cq.u1 * smoothed_sign(cq.u1, delta_global)
+
+    def _grouped(_):
+        out = material * jump
+        for ki in (2, 3, 4, 5):
+            out = out + (magnitude[ki] - material) * R_h[:, ki] * jnp.dot(L_h[ki], jump) / D[ki]
+        return out
+
+    def _full(_):
+        return R_h @ (magnitude * (L_h @ jump) / D)
+
+    def _transition(_):
+        t = jnp.clip((jnp.abs(du) - du_blend_lo) / (du_blend_hi - du_blend_lo), 0.0, 1.0)
+        w = 0.5 * (1.0 + jnp.cos(jnp.pi * t))
+        return w * _grouped(None) + (1.0 - w) * _full(None)
+
+    action = jax.lax.cond(
+        jnp.abs(du) < du_blend_lo, _grouped,
+        lambda _: jax.lax.cond(jnp.abs(du) >= du_blend_hi, _full, _transition, None), None)
+    return 0.5 * (F_L + F_R) - 0.5 * (J_matrix(U_h_bar, eos_g_b, eos_l_b) @ action)
+
+
+def path_nonconservative(U_h_a, U_h_b, fluid_g, fluid_l, k):
+    """∫ X(U) dU along the straight path U_a → U_b in enthalpy primitives (two-point
+    Gauss).  No K⁻¹: bounded where det K = 0."""
+    jump = U_h_b - U_h_a
+
+    def one(t):
+        u = U_h_a + t * jump
+        eos_g = phase_props(fluid_g, u[0], u[4])
+        eos_l = phase_props(fluid_l, u[0], u[5])
+        return X_matrix(u, eos_g, eos_l, common_quantities(u, eos_g, eos_l, k)) @ jump
+
+    off = 0.5 / jnp.sqrt(3.0)
+    return 0.5 * (one(0.5 - off) + one(0.5 + off))
 
 
 # ---------------------------------------------------------------------------

@@ -46,7 +46,8 @@ from .matrices import (
     phase_props, common_quantities,
     K_matrix, X_matrix, eigenstructure, flux_vector,
 )
-from .flux import fvs_interface_flux, fvs_interface_state, nonconservative_correction
+from .flux import (fvs_interface_flux, fvs_interface_state, nonconservative_correction,
+                   inverse_free_interface_flux, path_nonconservative)
 from .sources import (TwoFluidClosure, D_VE_conservative,
                       D_VE_algebric_two_component, evaporation_weight)
 
@@ -177,6 +178,7 @@ def make_two_fluid_step(
     jac_lag=1,
     nc_form='cell',
     nc_kfree=False,
+    inverse_free=False,
     use_saturation=True,
     w_char=None,
     ssr_mode='all',
@@ -337,6 +339,17 @@ def make_two_fluid_step(
                  throat (-0.55% at N1600, 'cell' converged at N600). Option
                  only; a 𝒟-gated blend of the two forms is a possible future
                  step.
+    inverse_free : bool, default False. True removes K⁻¹ from BOTH the face flux
+                 and the non-conservative term (port of the main-branch
+                 'inverse_old_sonic' package, development/two_fluid_test_v2):
+                 face flux ½(F_L+F_R) − ½ J(Ū) Σ z_k λ_k s_k r_k l_k ΔU / D_k
+                 (flux.inverse_free_interface_flux: native sonic fix, low-Mach
+                 weights and zero-slip/full blend) and the non-conservative term
+                 ∫X dU along straight primitive paths (flux.path_nonconservative):
+                 half of each face jump U_L→U_R, face-area weighted, plus the
+                 within-cell path (zero for recon 'constant'), divided by A_i.
+                 Excludes nc_kfree and nc_form='staedtke'; nc_form is ignored.
+                 False: the original code path, unchanged.
     use_saturation : bool, default True. Whether sources_fn's sat_g/sat_l
                  saturation-property lookups are computed; set False only for
                  fluids/sources that never reference them (e.g. non-saturating
@@ -471,6 +484,9 @@ def make_two_fluid_step(
         raise ValueError(f"thomas must be 'orig' or 'chol', got {thomas!r}")
     if nc_kfree and nc_form == 'staedtke':
         raise ValueError("nc_kfree=True is defined for nc_form 'cell' and 'wb' only")
+    if inverse_free and (nc_kfree or nc_form == 'staedtke'):
+        raise ValueError("inverse_free=True replaces the flux and the NC term: "
+                         "use it without nc_kfree and with nc_form 'cell' or 'wb'")
     newton_tol = float(newton_tol)
     if newton_tol > 0.0 and eos_rows and eos_rows_banded and jac_lag > 1:
         raise ValueError("newton_tol > 0 is not implemented together with "
@@ -1162,11 +1178,16 @@ def make_two_fluid_step(
         return F
 
     def _flux_one(ul, ur, lm):
-        F = fvs_interface_flux(
-            ul, ur, fluid_g, fluid_l, k, delta_factor, lowmach_diss=lm,
-            du_blend_lo=du_blend_lo, du_blend_hi=du_blend_hi,
-            single_branch=flux_single_branch,
-        )
+        if inverse_free:
+            F = inverse_free_interface_flux(
+                ul, ur, fluid_g, fluid_l, k, delta_factor, lowmach_diss=lm,
+                du_blend_lo=du_blend_lo, du_blend_hi=du_blend_hi)
+        else:
+            F = fvs_interface_flux(
+                ul, ur, fluid_g, fluid_l, k, delta_factor, lowmach_diss=lm,
+                du_blend_lo=du_blend_lo, du_blend_hi=du_blend_hi,
+                single_branch=flux_single_branch,
+            )
         if ghost_mass_upwind_acut is not None:
             F = _ghost_mass_upwind(F, ul, ur)
         return F
@@ -1261,7 +1282,23 @@ def make_two_fluid_step(
                 jnp.concatenate([U_h[1:-1], dU], axis=1))
         return jax.vmap(_nc_one)(U_h[1:-1], dU)
 
+    def _nc_path_interior(U_h):
+        # inverse_free: ∫X dU on straight primitive paths, half of each face jump
+        # (face-area weighted) plus the within-cell path, per unit cell area
+        if recon != 'constant':
+            U_L, U_R = _muscl(U_h)
+        else:
+            U_L, U_R = U_h[:-1], U_h[1:]
+        _path = lambda a, b: path_nonconservative(a, b, fluid_g, fluid_l, k)
+        J_f = jax.vmap(_path)(U_L, U_R)                       # (N-1, 6), face j+1/2
+        nc = 0.5 * Af_j[1:, None] * J_f[1:] + 0.5 * Af_j[:-1, None] * J_f[:-1]
+        if recon != 'constant':
+            nc = nc + A_j[1:-1, None] * jax.vmap(_path)(U_R[:-1], U_L[1:])
+        return nc / A_j[1:-1, None]
+
     def _nc_all_interior(U_h, F_hat):
+        if inverse_free:
+            return _nc_path_interior(U_h)
         if nc_kfree:
             return _nc_kfree_interior(U_h)
         # nc_form — WHERE the NC-geometric term H·F̄·ΔA lives (2026-07-15):
