@@ -182,6 +182,9 @@ def two_fluid_closure(
     drag_droplet="schiller_naumann",    # drag coefficient, droplet regime: schiller_naumann | ishii_zuber
     drag_scale_bubbly=1.0,              # constant factor on C_d, bubbly regime (ad hoc)
     drag_scale_droplet=1.0,             # constant factor on C_d, droplet regime (ad hoc)
+    beta_cd=1.0,           # correction fields in this cell (field inversion, as ai_scale): factor on the
+    beta_htc_g=1.0,        # final drag force (= on C_d Re, finite at zero slip), on the final vapour-side
+    beta_htc_l=1.0,        # and liquid-side HTCs (after regime blend and liquid-HTC choice). 1 = none
 ) -> TwoFluidClosure:
     """
     Assemble a TwoFluidClosure from state + saturation properties.
@@ -248,6 +251,12 @@ def two_fluid_closure(
                  Defaults = Schiller-Naumann in both regimes (the closure used so far).
     drag_scale_bubbly, drag_scale_droplet : constant factor on C_d of each regime (default 1).
                  Ad hoc, e.g. a weaker drag for a synthetic truth whose closure differs from the prior.
+    beta_cd, beta_htc_g, beta_htc_l : correction factors of the closure in this cell (field inversion,
+                 like ai_scale; scalars, traced values allowed). beta_cd multiplies the final drag force
+                 Fv_g, i.e. C_d of both regimes at once (the force is linear in C_d; C_d Re stays finite at
+                 zero slip, so the correction is well defined there). beta_htc_g / beta_htc_l multiply the
+                 final htc_g / htc_l, after the regime blend and the liquid-HTC choice, so they act on the
+                 heat and mass transfer. Default 1: the closure unchanged.
     """
     p, u_g, u_l, ag, h_g, h_l = U_h
     al = 1.0 - ag
@@ -330,6 +339,7 @@ def two_fluid_closure(
 
         # ── Interfacial area and dispersed-structure diameter ────────────────────
         # d_min_b=5e-5 matches nozzlex (nozzle_two_fluid_one_component_autonomous).
+        # TODO: Remane the scaling factor consistently when migrating to the main. Proposal -- beta_ai
         ai, d = get_interfacial_area(area_law, area_params)(ag, alpha_b=alpha_b, alpha_d=alpha_d,
                                 Nb=Nb, Nd=Nd, d_min_b=5e-6, ai_scale=ai_scale)
         # ai, d = 100, 5e-5
@@ -391,6 +401,9 @@ def two_fluid_closure(
             htc_l = select_liquid_htc(htc_liquid_bubbly, htc_l, stl_ex["k"][0] * jakob_nusselt(ja_l) / d,
                                       stl_ex["k"][0] * liao_nusselt(ja_l, pe_l) / d,
                                       stl_ex["k"][0] * jakob_growth_nusselt(ja_l) / d)
+
+        # ── Correction fields (field inversion; 1 = none) ──────────────────────
+        Fv_g, htc_g, htc_l = beta_cd * Fv_g, beta_htc_g * htc_g, beta_htc_l * htc_l
 
         # # ── Interfacial heat transfer rates ──────────────────────────────────────
         # Qvi = htc_g * ai * (T_sat - T_g)    # heat from interface to gas [W/m^3]
@@ -507,6 +520,9 @@ def two_fluid_closure(
                 },
                 du_abs, d, slip_u0,
             )
+
+        # ── Correction fields (field inversion; 1 = none) ──────────────────────
+        Fv_g, htc_g, htc_l = beta_cd * Fv_g, beta_htc_g * htc_g, beta_htc_l * htc_l
 
         htc = 1 / (1/htc_g + 1/htc_l)
 

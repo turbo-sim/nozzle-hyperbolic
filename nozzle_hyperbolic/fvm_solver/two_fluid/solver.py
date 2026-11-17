@@ -216,7 +216,8 @@ def make_two_fluid_step(
     sources_fn : optional callable with signature
                    (u_h, eos_g, eos_l, cq, dlnA, sat_g, sat_l) → D_VE (6,)
                  or, when step() is given ai_scale, with the cell's ai_scale as an
-                 8th argument (u_h, ..., sat_l, ai_scale)
+                 8th argument (u_h, ..., sat_l, ai_scale): a scalar if ai_scale is (N,),
+                 a vector (m,) if it is (N, m) (several correction fields per cell)
                  where sat_g = fluid_g.get_state_saturation(p) — sat. vapor props dict,
                        sat_l = fluid_l.get_state_saturation(p) — sat. liquid props dict.
                  Use sat_g["enthalpy"], sat_g["temperature"], etc. (canonical names).
@@ -1393,10 +1394,14 @@ def make_two_fluid_step(
             )
             return D_VE_conservative(u_h, eos_g_c, eos_l_c, cq_c, cl, k)
 
-        if ai_scale is not None:   # per-cell area-law correction, an 8th argument of sources_fn
+        if ai_scale is not None:   # per-cell corrections, an 8th argument of sources_fn: (N,) the
+            #                          area-law beta (a scalar per cell), or (N, m) m correction fields
+            #                          (a vector per cell; their meaning is the sources_fn's business)
+            fields = ai_scale.ndim == 2                     # static under jit
+            s_int = ai_scale[1:-1] if fields else ai_scale[1:-1, None]   # (N-2, m)
             if cell_local_jac:
-                return _local_jac_map(lambda x: _src_one(x[:6], x[6], x[7]))(
-                    jnp.concatenate([U_h[1:-1], dlnA_dx[1:-1, None], ai_scale[1:-1, None]], axis=1))
+                return _local_jac_map(lambda x: _src_one(x[:6], x[6], x[7:] if fields else x[7]))(
+                    jnp.concatenate([U_h[1:-1], dlnA_dx[1:-1, None], s_int], axis=1))
             return jax.vmap(_src_one)(U_h[1:-1], dlnA_dx[1:-1], ai_scale[1:-1])
         if cell_local_jac:
             return _local_jac_map(lambda x: _src_one(x[:6], x[6]))(
@@ -2485,6 +2490,10 @@ def make_two_fluid_step(
                 sources_fn must accept it (and give it to two_fluid_closure).  A
                 traced argument: a new beta does NOT recompile the step.  None
                 (default): sources_fn is called with 7 arguments, the original path.
+                Or (N, m): m correction fields per cell (e.g. beta_ai, beta_cd,
+                beta_htc_g, beta_htc_l); sources_fn gets the cell's row (m,) and
+                decides what each column means.  The cell-local Jacobian takes one
+                tangent per column, so pass only the active fields.
 
         Returns
         -------
