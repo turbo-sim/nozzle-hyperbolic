@@ -69,6 +69,10 @@ class TwoFluidModel:
         Nonnegative interphase-source multiplier; does not scale area geometry.
     area_source : bool, optional
         Include the separate area source; default True.
+    runtime_inputs : bool, optional
+        Declare the run-time correction fields and back pressure (see
+        :meth:`parameter_defaults`); default False keeps the configured
+        constants in the compiled kernels unchanged.
 
     Notes
     -----
@@ -118,7 +122,8 @@ class TwoFluidModel:
         pins=None,
         virtual_mass=0.5,
         source_scale=1.0,
-        area_source=True
+        area_source=True,
+        runtime_inputs=False
     ):
         self.mesh = mesh
         self.fluid_g, self.fluid_l = as_jax_fluid(fluid_g), as_jax_fluid(fluid_l)
@@ -139,6 +144,7 @@ class TwoFluidModel:
         self.virtual_mass = float(virtual_mass)
         self.source_scale = float(source_scale)
         self.area_source = bool(area_source)
+        self.runtime_inputs = bool(runtime_inputs)
         if not np.isfinite(self.virtual_mass) or self.virtual_mass < 0:
             raise ValueError("virtual_mass must be finite and nonnegative")
         if not np.isfinite(self.source_scale) or self.source_scale < 0:
@@ -553,13 +559,63 @@ class TwoFluidModel:
 
         return jax.lax.map(one, (U, delta))
 
-    def integrated_source(self, full):
+    def parameter_defaults(self):
+        """Declare the run-time correction fields and outlet pressure.
+
+        Returns
+        -------
+        dict of str to jax.Array
+            Empty unless ``runtime_inputs`` is set. Then, with closures:
+            per-cell ``beta_ai``, ``beta_cd``, ``beta_htc_g`` and ``beta_htc_l``
+            fields of shape (N,), all ones; with a pressure outlet and numeric
+            ``back_pressure``: the scalar ``back_pressure`` in Pa.
+
+        Notes
+        -----
+        Each field multiplies the corresponding ``ClosureConfig`` factor in its
+        cell; the run-time ``back_pressure`` replaces the configured value. The
+        defaults reproduce the configuration to roundoff (the factors become
+        kernel inputs instead of constants). New values reuse the compiled
+        kernels; see the operator's run-time parameter contract.
+        """
+        values = {}
+        if not self.runtime_inputs:
+            return values
+        if self.closures is not None:
+            ones = jnp.ones(self.mesh.n_cells)
+            values.update(beta_ai=ones, beta_cd=ones, beta_htc_g=ones, beta_htc_l=ones)
+        bc = self.boundaries
+        if bc.outlet != "transmissive" and not callable(bc.back_pressure):
+            values["back_pressure"] = jnp.asarray(float(bc.back_pressure))
+        return values
+
+    def validate_parameters(self, values):
+        """Require positive correction fields and a positive back pressure.
+
+        Parameters
+        ----------
+        values : dict of str to numpy.ndarray
+            Complete run-time parameter mapping with defaults filled in.
+
+        Raises
+        ------
+        ValueError
+            If any correction factor or the back pressure is not positive.
+        """
+        for name, value in values.items():
+            if np.any(np.asarray(value) <= 0):
+                raise ValueError(f"Run-time parameter {name} must be positive")
+
+    def integrated_source(self, full, params=None):
         """Integrate interphase exchange and exact face-area source measures.
 
         Parameters
         ----------
         full : jax.Array, shape (N+2, 8)
             Physical cells and endpoint traces.
+        params : dict or None, optional
+            Run-time parameters; the ``beta_*`` fields scale the closure factors
+            in each cell. None uses the configured closure unchanged.
 
         Returns
         -------
@@ -571,9 +627,17 @@ class TwoFluidModel:
         Exchange density receives source_scale and cell volume. The separate
         area kernel receives A_right-A_left directly and needs no extra volume factor.
         """
+        closure_options = {} if self.closures is None else asdict(self.closures)
+        fields = ("beta_ai", "beta_cd", "beta_htc_g", "beta_htc_l")
+        corrected = params is not None and self.closures is not None
+        factors = (
+            jnp.stack([params[name] for name in fields], axis=1)
+            if corrected
+            else jnp.ones((self.mesh.n_cells, len(fields)))
+        )
 
         def one(args):
-            u, volume, delta_area = args
+            u, volume, delta_area, factor = args
             eg, el = self._properties(u)
             cq = common_quantities(u, eg, el, self.virtual_mass)
             value = jnp.zeros(6, dtype=u.dtype)
@@ -584,6 +648,13 @@ class TwoFluidModel:
                     Ts, hgs, hls = sg["temperature"], sg["enthalpy"], sl["enthalpy"]
                 else:
                     Ts, hgs, hls = 0.0, 0.0, 0.0
+                options = closure_options
+                if corrected:
+                    # Per-cell fields multiply the configured correction factors.
+                    options = closure_options | {
+                        name: closure_options[name] * factor[i]
+                        for i, name in enumerate(fields)
+                    }
                 closure = two_fluid_closure(
                     u,
                     eg,
@@ -593,7 +664,7 @@ class TwoFluidModel:
                     Ts,
                     hgs,
                     hls,
-                    **asdict(self.closures)
+                    **options
                 )
                 assembly = (
                     D_VE_algebric
@@ -612,12 +683,12 @@ class TwoFluidModel:
             return value
 
         return jax.lax.map(
-            one, (primitives(full[1:-1]), self._volumes, self._delta_area)
+            one, (primitives(full[1:-1]), self._volumes, self._delta_area, factors)
         )
 
-    def boundary_residual(self, full, time):
+    def boundary_residual(self, full, time, params=None):
         """Delegate to :func:`boundaries.boundary_residual`."""
-        return boundaries.boundary_residual(self, full, time)
+        return boundaries.boundary_residual(self, full, time, params)
 
     def cell_admissible(self, W):
         """Delegate to :func:`thermodynamics.cell_admissible`."""
@@ -711,6 +782,6 @@ class TwoFluidModel:
         """Delegate to :func:`stabilization.filter_signal_speed`."""
         return stabilization.filter_signal_speed(self, full)
 
-    def explicit_timestep(self, full):
+    def explicit_timestep(self, full, params=None):
         """Delegate to :func:`stabilization.explicit_timestep`."""
-        return stabilization.explicit_timestep(self, full)
+        return stabilization.explicit_timestep(self, full, params)

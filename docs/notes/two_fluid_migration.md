@@ -224,6 +224,32 @@ it does not refer to a retained legacy solver. Coupled/segregated treatment is a
 `Scheme` choice. `solution_audit` separately checks the prescribed forward-flow
 reservoir/outlet branch; signed interior velocities remain admissible.
 
+`TwoFluidModel(..., runtime_inputs=True)` declares run-time inputs (default
+False keeps the configured constants in the compiled kernels). With closures,
+per-cell fields `beta_ai`, `beta_cd`, `beta_htc_g` and `beta_htc_l` of shape
+(N,) multiply the corresponding `ClosureConfig` factors; with a pressure outlet
+and numeric back pressure, a scalar `back_pressure` in Pa replaces the configured
+value. All default to the configuration, are validated positive, and are passed
+to the solve rather than to the model, so a back-pressure sweep or new fields
+reuse the compiled kernels:
+
+```python
+from nozzle_hyperbolic.solvers.fvm import SteadyWorkspace
+
+workspace = SteadyWorkspace(model, scheme, settings.residual)  # model with runtime_inputs=True
+for pressure in (16e5, 15e5):
+    inputs = dict(back_pressure=pressure, beta_cd=np.full(mesh.n_cells, 1.2))
+    solution = hyp.solve_single_grid(model, scheme, settings, workspace=workspace, parameters=inputs)
+```
+
+With default values the results equal the configured model to roundoff. These
+inputs and the closure factors reproduce the upstream run-time `p_out` and
+per-cell correction columns of its `step` function (`ai_scale` is now `beta_ai`):
+residuals agree to $3.5\times10^{-10}$ of the flux term with fields, and the
+upstream converged solutions satisfy this model's interior equations; the
+remaining solution differences come from the boundary closure (ghost cells versus
+trace equations). See the [port study](../../development/two-fluid/README.md).
+
 Filters and phase pins are independent and disabled by default. Filters add
 conservative face fluxes without phase clipping. Pins change the equations and
 are restricted to implicit steady solutions. The saturation-energy pin uses the
@@ -278,7 +304,9 @@ The maintained [two-fluid tests](../../tests/models/two_fluid) cover matrix and
 source identities, intrinsic-density constraints, area balance, phase-rest and
 reverse-flow AD, closure selectors, table rejection, phase pins, characteristic
 boundaries, Jacobian assembly and coupled/segregated implicit consistency.
-`test_k_free.py` covers the default-off `k_free` and `smooth` options.
+`test_k_free.py` covers the default-off `k_free` and `smooth` options, and
+`test_closure_corrections.py` the closure scales, correction factors and
+run-time inputs.
 The pinned [upstream fixture](../../tests/regression/test_upstream_compatibility.py)
 and [saved-solution regression](../../tests/regression/test_saved_solutions.py)
 provide independent compatibility checks. Snapshot arrays, source archives and

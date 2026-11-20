@@ -6,7 +6,7 @@ import jaxprop as jxp
 from .constrained_state import primitives
 
 
-def boundary_residual(model, full, time):
+def boundary_residual(model, full, time, params=None):
     """Assemble six primitive and two EOS equations at each endpoint trace.
 
     Parameters
@@ -17,6 +17,9 @@ def boundary_residual(model, full, time):
         N physical cells and two algebraic endpoint traces.
     time : scalar
         Time passed to a callable back pressure, in s.
+    params : dict or None, optional
+        Run-time parameters; a ``back_pressure`` entry in Pa replaces the
+        configured numeric back pressure.
 
     Returns
     -------
@@ -89,6 +92,8 @@ def boundary_residual(model, full, time):
         pressure = (
             bc.back_pressure(time) if callable(bc.back_pressure) else bc.back_pressure
         )
+        if params is not None and "back_pressure" in params:
+            pressure = params["back_pressure"]
         weight = 1.0
         if bc.outlet in ("characteristic", "characteristic_old"):
             mach = jnp.abs(ev[2] + ev[3]) / (ev[2] - ev[3])

@@ -197,7 +197,7 @@ def filter_signal_speed(model, full):
     return 0.5 * (speed[:-1] + speed[1:])
 
 
-def explicit_timestep(model, full):
+def explicit_timestep(model, full, params=None):
     """Estimate a conservative filter and local constrained-source time bound.
 
     Parameters
@@ -206,6 +206,8 @@ def explicit_timestep(model, full):
         Model-owned filter and phase-pin policies.
     full : jax.Array, shape (N+2, 8)
         Physical cells and algebraic endpoint traces.
+    params : dict or None, optional
+        Run-time parameters passed to the source; None uses the configuration.
 
     Returns
     -------
@@ -244,7 +246,7 @@ def explicit_timestep(model, full):
 
         def density_source(C):
             state = full.at[1:-1].set(C)
-            return model.integrated_source(state) / model._volumes[:, None]
+            return model.integrated_source(state, params) / model._volumes[:, None]
 
         basis = jnp.eye(model.nvar, dtype=full.dtype)
         source_blocks = jax.vmap(

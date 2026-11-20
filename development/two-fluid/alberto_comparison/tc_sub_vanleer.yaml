@@ -1,0 +1,66 @@
+base: C:/Users/alber/projects/nozzle-hyperbolic_alberto_branch/dev_scripts/settings/defaults_two_component.yaml
+fluid:
+  name: Air
+eos:
+  gas:
+    fluid_name: nitrogen
+    backend: HEOS
+    h_min: 50000.0
+    h_max: 400000.0
+    p_min: 10000.0
+    p_max: 6000000.0
+    N_h: 145
+    N_p: 200
+    table_dir: C:/Users/alber/projects/nozzle-hyperbolic_alberto_branch/dev_scripts/fluid_tables
+    gradient_method: forward
+  liquid:
+    fluid_name: water
+    backend: HEOS
+    h_min: 1000.0
+    h_max: 140000.0
+    p_min: 10000.0
+    p_max: 6000000.0
+    N_h: 145
+    N_p: 200
+    table_dir: C:/Users/alber/projects/nozzle-hyperbolic_alberto_branch/dev_scripts/fluid_tables
+    gradient_method: forward
+grid:
+  Nx: 200
+  x1: 0.0
+  x2: 0.31
+geometry:
+  function: get_nozzle_elliot
+  roughness: 0.0
+sources:
+  bubble_number:  1.0e11
+  droplet_number: 1.0e11
+  interfacial_area: original
+ic:
+  type: restart
+  run: C:/Users/alber/projects/nozzle-hyperbolic/cases/NICFD2026/two_component/subsonic/reference.csv
+bc:
+  inlet: stagnation
+  outlet: characteristic
+  p0: 2000000.0
+  T_g0: 295.15
+  T_l0: 295.15
+  quality: 0.5
+  slip: 1.0
+  p_out: 1600000.0
+  p_out_relax: 1.0
+run:
+  n_steps: 8000
+  print_every: 250
+  ssr_tol: 1.0e-10
+save_options:
+  repo_main: C:/Users/alber/projects/nozzle-hyperbolic/development/two-fluid/alberto_comparison/outputs/old_runs
+  repo_run: tc_sub_vanleer
+numerics:
+  CFL: 2.0
+  newton_iter: 5
+  recon: muscl_van_leer
+  nc_form: wb
+  lowmach_diss: 1.0
+  lowmach_diss_bc: 0.0
+  eps_void: 0.05
+  eps_void_scale: frozen

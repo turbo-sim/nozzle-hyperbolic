@@ -167,6 +167,23 @@ two-fluid wall-friction law was available.
 including `d_min_b`; upstream's call-site keyword could shadow this override.
 No normalization by evolving phase mass or volume is used in convergence tests.
 
+Constant scales and correction factors are positive and default to one, which
+leaves the closure unchanged:
+
+| Parameter | Acts on |
+|---|---|
+| `nu_g_int`, `nu_l_int` | Internal gas-bubble and liquid-droplet Nusselt numbers; None keeps 120/12 with phase change and 12/$2\pi^2/3$ without. `nu_l_int` is used with `regime_htc=True`. |
+| `drag_scale_bubbly`, `drag_scale_droplet` | Drag coefficient of each regime, before the regime blend. |
+| `beta_ai` | Interfacial area, before the dispersed diameter is derived, so drag and heat transfer see the corrected diameter. |
+| `beta_cd` | Final drag force of both regimes; finite at zero slip. |
+| `beta_htc_g`, `beta_htc_l` | Final gas/liquid HTCs, after the regime blend and the liquid-HTC selection; they act on heat and mass transfer. |
+
+With `TwoFluidModel(..., runtime_inputs=True)`, per-cell fields named `beta_ai`,
+`beta_cd`, `beta_htc_g` and `beta_htc_l` multiply these configured factors cell by
+cell. They are run-time parameters: new fields reuse the compiled kernels, and
+derivatives with respect to them are available. See the
+[migration guide](two_fluid_migration.md) for their use.
+
 The following numerical/empirical regularizations are explicitly retained;
 they are not replacements for EOS domain checks:
 
