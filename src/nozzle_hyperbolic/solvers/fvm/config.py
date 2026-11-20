@@ -264,6 +264,9 @@ class Solution:
         timed solve; operator construction may occur before the timer starts.
     operator : Operator or None
         Bound spatial operator, retained for diagnostics and continuation.
+    parameters : dict or None
+        Run-time parameter values used by the solve, by declared name; None
+        for models without run-time parameters.
     """
 
     state: np.ndarray
@@ -274,6 +277,7 @@ class Solution:
     time: float = 0.0
     elapsed_s: float = 0.0
     operator: object = None
+    parameters: dict = None
 
 
 class TimestepInfo(NamedTuple):

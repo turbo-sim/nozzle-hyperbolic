@@ -28,9 +28,10 @@ def sampler(operator, policy):
     Returns
     -------
     sample : callable
-        ``sample(state, initial=None, time=0.0)`` returns a metrics dictionary.
-        State has shape ``(N + 2, V)``; initial is a fixed vector of transported
-        equation norms, defaulting to the current norms. Time is physical time.
+        ``sample(state, initial=None, time=0.0, params=None)`` returns a metrics
+        dictionary. State has shape ``(N + 2, V)``; initial is a fixed vector
+        of transported equation norms, defaulting to the current norms. Time is
+        physical time; params are the model's run-time parameters, if any.
 
     Notes
     -----
@@ -57,11 +58,12 @@ def sampler(operator, policy):
             jnp.abs(jnp.sum(raw, axis=0) / jnp.asarray(model.global_flux_scales)),
         )
 
-    def sample(state, initial=None, time=0.0):
+    def sample(state, initial=None, time=0.0, params=None):
+        extra = {"params": params} if params else {}
         # Keep the original spatial graph separate from reductions: recompiling
         # it inside a large fused monitor changes roundoff near strict targets.
-        raw = operator.spatial_residual(state)
-        bc = operator.boundary_residual(state, time)
+        raw = operator.spatial_residual(state, **extra)
+        bc = operator.boundary_residual(state, time, **extra)
         constraints = np.asarray(operator.cell_constraints(state[1:-1]))
         constraint_norm = np.max(np.abs(constraints), axis=0)
         constraint_max = float(np.max(constraint_norm, initial=0.0))
@@ -103,7 +105,7 @@ def sampler(operator, policy):
             relative_active=np.asarray(assessment["relative_active"]),
         )
         if operator.equation_policy_active:
-            original = operator.physical_spatial_residual(state)
+            original = operator.physical_spatial_residual(state, **extra)
             unmodified, _, unmodified_global = jax.device_get(reduce(original, bc))
             metrics.update(
                 equation_policy_active=True,
@@ -113,7 +115,7 @@ def sampler(operator, policy):
             )
             metrics["finite"] = metrics["finite"] and bool(unmodified["finite"])
         if hasattr(model, "invariant_projections"):
-            physical = operator.physical_spatial_residual(state) if operator.equation_policy_active else raw
+            physical = operator.physical_spatial_residual(state, **extra) if operator.equation_policy_active else raw
             signed = np.asarray(model.invariant_projections) @ np.asarray(physical).sum(axis=0)
             signed = signed / np.asarray(model.invariant_flux_scales)
             metrics.update(invariant_names=tuple(model.invariant_names),
@@ -197,6 +199,7 @@ def solve_single_grid(
     quantity_evaluator=None,
     callback=None,
     workspace=None,
+    parameters=None,
 ):
     """Solve the original coupled steady equations on exactly one physical grid.
 
@@ -224,12 +227,17 @@ def solve_single_grid(
     workspace : SteadyWorkspace, optional
         Reuse bound kernels for this exact model, scheme and residual policy.
         Without it, each invocation constructs a new operator and sampler.
+    parameters : mapping or None, optional
+        Run-time parameter values by declared name, for models that declare
+        ``parameter_defaults``; missing names keep the defaults. New values
+        with the declared shapes reuse the workspace's compiled kernels.
 
     Returns
     -------
     Solution
         Final host state, success/reason, complete attempt history, final
-        metrics and bound operator. Failure states remain available for audit.
+        metrics, bound operator and the run-time parameters used. Failure
+        states remain available for audit.
 
     Notes
     -----
@@ -250,6 +258,10 @@ def solve_single_grid(
             raise ValueError("workspace must be a SteadyWorkspace")
         workspace.validate(model, scheme, settings.residual)
     operator = Operator(model, scheme) if workspace is None else workspace.operator
+    params = operator.parameters(parameters)
+    # Only models with run-time parameters receive the keyword.
+    extra = {"params": params} if params else {}
+    used = {name: np.asarray(value) for name, value in params.items()} or None
     state = jnp.asarray(
         model.initial_state() if initial_state is None else initial_state,
         dtype=jnp.float64,
@@ -271,9 +283,10 @@ def solve_single_grid(
             {},
             elapsed_s=perf_counter() - start,
             operator=operator,
+            parameters=used,
         )
     sample = sampler(operator, settings.residual) if workspace is None else workspace.sample
-    current = sample(state)
+    current = sample(state, **extra)
     initial = np.asarray(current["equation_norm"])
 
     def update_monitors(point):
@@ -317,17 +330,19 @@ def solve_single_grid(
     while accepted < settings.max_steps and not done(current):
         okay = False
         for retry in range(settings.max_retries + 1):
-            limits = jax.device_get(operator.timestep(state, cfl))
+            limits = jax.device_get(operator.timestep(state, cfl, **extra))
             dt = float(limits.dt)
             if not np.isfinite(dt) or dt <= 0:
                 reason = "invalid_timestep"
                 break
-            candidate, info = operator.step(state, jnp.float64(dt), jnp.float64(0.0))
+            candidate, info = operator.step(
+                state, jnp.float64(dt), jnp.float64(0.0), **extra
+            )
             info = jax.device_get(info)
             okay = bool(info.converged and info.admissible)
             trial = None
             if okay:
-                trial = sample(candidate, initial)
+                trial = sample(candidate, initial, **extra)
                 okay = bool(trial["finite"] and trial["admissible"])
             row = dict(
                 step=accepted + 1,
@@ -368,7 +383,7 @@ def solve_single_grid(
         ):
             reason = "stagnation"
             break
-    final = sample(state, initial)
+    final = sample(state, initial, **extra)
     final["monitors"] = current["monitors"]
     success = done(final)
     if success and audit is not None and not audit(state):
@@ -384,6 +399,7 @@ def solve_single_grid(
         final,
         elapsed_s=perf_counter() - start,
         operator=operator,
+        parameters=used,
     )
 
 
@@ -642,6 +658,7 @@ def solve_transient(
     max_steps=100000,
     callback=None,
     operator=None,
+    parameters=None,
 ):
     """Conservative physical-time integration, starting at time zero.
 
@@ -677,6 +694,9 @@ def solve_transient(
     operator : Operator, optional
         Reuse an operator bound to this exact model and scheme, for example
         after completing initial algebraic traces. Otherwise bind a new one.
+    parameters : mapping or None, optional
+        Run-time parameter values by declared name, held fixed in time; missing
+        names keep the model defaults.
 
     Returns
     -------
@@ -728,6 +748,10 @@ def solve_transient(
         or operator.scheme != scheme
     ):
         raise ValueError("operator must match model identity and scheme")
+    params = operator.parameters(parameters)
+    # Only models with run-time parameters receive the keyword.
+    extra = {"params": params} if params else {}
+    used = {name: np.asarray(value) for name, value in params.items()} or None
     state = jnp.asarray(
         model.initial_state() if initial_state is None else initial_state,
         dtype=jnp.float64,
@@ -755,7 +779,7 @@ def solve_transient(
         target = float(target)
         reason = "time_reached"
         while time < target and accepted < max_steps:
-            limits = jax.device_get(operator.timestep(state, cfl, time))
+            limits = jax.device_get(operator.timestep(state, cfl, time, **extra))
             base_dt = float(limits.wave_dt)
             if not bool(limits.valid) or not np.isfinite(limits.dt) or limits.dt <= 0:
                 reason = "invalid_timestep"
@@ -768,11 +792,11 @@ def solve_transient(
                     break
                 if scheme.time_integrator == "euler-implicit":
                     candidate, info = operator.step(
-                        state, jnp.float64(dt), jnp.float64(time + dt)
+                        state, jnp.float64(dt), jnp.float64(time + dt), **extra
                     )
                 else:
                     candidate, info, step_balance = operator.step_with_balance(
-                        state, jnp.float64(dt), jnp.float64(time + dt)
+                        state, jnp.float64(dt), jnp.float64(time + dt), **extra
                     )
                 info = jax.device_get(info)
                 if bool(info.converged and info.admissible):
@@ -802,7 +826,7 @@ def solve_transient(
                     reason = "retry_limit"
                 break
             transfer = (
-                dt * np.asarray(operator.balance_rate(candidate))
+                dt * np.asarray(operator.balance_rate(candidate, **extra))
                 if scheme.time_integrator == "euler-implicit"
                 else np.asarray(step_balance)
             )
@@ -836,7 +860,7 @@ def solve_transient(
             )
         if accepted >= max_steps and time < target:
             reason = "max_steps"
-        metrics = sample(state, time=time)
+        metrics = sample(state, time=time, **extra)
         metrics["conservation_budget"] = budget
         metrics["accepted_steps"] = accepted
         metrics["rejected_steps"] = sum(not row["accepted"] for row in history)
@@ -866,6 +890,7 @@ def solve_transient(
                 time=time,
                 elapsed_s=perf_counter() - start,
                 operator=operator,
+                parameters=used,
             )
         )
         if not success:

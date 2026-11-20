@@ -336,6 +336,28 @@ The optional filter adds an internal conservative face correction in transported
 densities. Its strength is numerical; velocity gates or other physical sensors
 belong to the model. Do not put primitive-variable smoothing in the integrator.
 
+### Run-time parameters
+
+A model may declare `parameter_defaults()`, a dict of named finite arrays whose
+shapes are fixed at operator binding. It then receives one parameter mapping as
+the last argument of `integrated_source(full, params)`,
+`boundary_residual(full, time, params)` and, when supplied,
+`explicit_timestep(full, params)`. An optional `validate_parameters(values)`
+rejects physically invalid concrete values. Models without the declaration keep
+their original signatures and compiled kernels.
+
+The values are inputs of the compiled kernels, not constants: operator methods
+that evaluate sources or boundary rows accept `params=`, and
+`solve_single_grid(..., parameters=...)` / `solve_transient(..., parameters=...)`
+hold them fixed for a solve. Missing names keep the defaults; unknown names or
+changed shapes are rejected. New values with the declared shapes reuse every
+compiled kernel, including a `SteadyWorkspace`. The Newton Jacobian remains with
+respect to the state; derivatives with respect to parameters are available
+through JAX, for example of `steady_residual(state, params=...)`. The boundary
+eliminator differentiates its converged traces with respect to the parameters
+as well. `Solution.parameters` records the values used. Grid sequencing and
+continuation use the defaults.
+
 ## Integration and stopping
 
 `Scheme.time_integrator` selects `euler-implicit`, `euler-explicit`,

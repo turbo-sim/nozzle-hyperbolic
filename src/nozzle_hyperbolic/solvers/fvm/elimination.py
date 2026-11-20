@@ -26,7 +26,8 @@ def make_eliminated_implicit_step(
 ):
     """Build an N*V Newton system and its full-state backward-Euler step.
 
-    Reduced callbacks take ``(cells_flat, old_full_flat, dt, time)``. Every
+    Reduced callbacks take ``(cells_flat, old_full_flat, dt, time, *args)``,
+    where optional trailing arguments are model run-time parameters. Every
     residual/trial solves the nonlinear boundary subproblem at the current
     cells. Its JVP uses the implicit-function derivative of that root. Local
     source/BC stencil declarations bound the reduced band; models with global
@@ -42,14 +43,16 @@ def make_eliminated_implicit_step(
     eliminate = make_boundary_eliminator(boundary_residual, complete_boundaries)
     scale = jnp.broadcast_to(jnp.asarray(variable_scales), (ncells, nvar)).ravel()
 
-    def full_state(flat, old_flat, time):
-        return eliminate(flat.reshape(ncells, nvar), old_flat.reshape(shape), time)
+    def full_state(flat, old_flat, time, *args):
+        return eliminate(
+            flat.reshape(ncells, nvar), old_flat.reshape(shape), time, *args
+        )
 
-    def residual(flat, old_flat, dt, time):
-        full = full_state(flat, old_flat, time)
+    def residual(flat, old_flat, dt, time, *args):
+        full = full_state(flat, old_flat, time, *args)
         return jax.lax.cond(
             jnp.all(jnp.isfinite(full)),
-            lambda: physical_residual(full, old_flat.reshape(shape), dt).ravel(),
+            lambda: physical_residual(full, old_flat.reshape(shape), dt, *args).ravel(),
             lambda: jnp.full_like(flat, jnp.nan),
         )
 
@@ -62,7 +65,7 @@ def make_eliminated_implicit_step(
         linear_solver=scheme.linear_solver,
     )
 
-    def step(old, dt, time=0.0):
+    def step(old, dt, time=0.0, *args):
         old_flat = old.ravel()
         solve = make_newton_solver(
             residual,
@@ -72,20 +75,20 @@ def make_eliminated_implicit_step(
             tolerance=scheme.newton_update_tolerance,
             residual_tolerance=scheme.newton_residual_tolerance,
             admissible=lambda flat: admissible(
-                full_state(flat, old_flat, time).ravel()
+                full_state(flat, old_flat, time, *args).ravel()
             ),
             backtracking=scheme.newton_backtracking,
             max_backtracks=scheme.max_backtracks,
         )
-        physical, outer = solve(old[1:-1].ravel(), old_flat, dt, time)
+        physical, outer = solve(old[1:-1].ravel(), old_flat, dt, time, *args)
         full, boundary = complete_boundaries(
-            old.at[1:-1].set(physical.reshape(ncells, nvar)), time
+            old.at[1:-1].set(physical.reshape(ncells, nvar)), time, *args
         )
         valid = admissible(full.ravel())
         norm = jax.lax.cond(
             valid,
             lambda: jnp.sqrt(
-                jnp.mean(coupled_residual(full.ravel(), old_flat, dt, time) ** 2)
+                jnp.mean(coupled_residual(full.ravel(), old_flat, dt, time, *args) ** 2)
             ),
             lambda: jnp.asarray(jnp.inf, old.dtype),
         )

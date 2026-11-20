@@ -28,11 +28,13 @@ def make_explicit_step(
     one evaluation so expensive model properties are reused by the assembler.
     Constrained models set recover_initial=True to recover the initial cell
     algebraic state from unchanged contents before any source or flux is read.
+    Optional trailing step arguments, such as model run-time parameters, are
+    passed unchanged to spatial, balance, evaluate_stage and complete_boundaries.
     """
     if method not in ("euler-explicit", "runge-kutta-3", "runge-kutta-4"):
         raise ValueError("Unsupported explicit integrator")
 
-    def step(old, dt, time=0.0):
+    def step(old, dt, time=0.0, *args):
         def normalize(info):
             return NewtonInfo(
                 jnp.asarray(info.iterations, jnp.int32),
@@ -54,7 +56,7 @@ def make_explicit_step(
             provisional = old.at[1:-1].set(cells)
 
             def initial_boundary(_):
-                full, info = complete_boundaries(provisional, start)
+                full, info = complete_boundaries(provisional, start, *args)
                 return full, normalize(info)
 
             skipped = recovery._replace(
@@ -76,7 +78,7 @@ def make_explicit_step(
                 jnp.where(~recovery.converged, recovery.status, bc.status),
             )
         else:
-            initial, initial_info = complete_boundaries(old, start)
+            initial, initial_info = complete_boundaries(old, start, *args)
             initial_info = normalize(initial_info)
         initial_ok = (
             initial_info.converged & initial_info.admissible & admissible(initial)
@@ -88,7 +90,7 @@ def make_explicit_step(
             provisional = seed.at[1:-1].set(physical)
 
             def boundary(_):
-                full, info = complete_boundaries(provisional, stage_time)
+                full, info = complete_boundaries(provisional, stage_time, *args)
                 info = normalize(info)
                 okay = info.converged & info.admissible & admissible(full)
                 return full, info._replace(converged=okay, admissible=admissible(full))
@@ -119,9 +121,9 @@ def make_explicit_step(
 
         def rates(full):
             return (
-                (spatial(full), balance(full))
+                (spatial(full, *args), balance(full, *args))
                 if evaluate_stage is None
-                else evaluate_stage(full)
+                else evaluate_stage(full, *args)
             )
 
         def body(_):

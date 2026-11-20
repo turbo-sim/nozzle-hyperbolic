@@ -260,6 +260,24 @@ class Operator:
         face_abstract = jax.ShapeDtypeStruct((n + 1, nvar), dtype)
         flux_abstract = jax.ShapeDtypeStruct((n + 1, ntransport), dtype)
 
+        # Optional run-time parameters have fixed names and shapes. Their values
+        # are inputs of every compiled kernel that evaluates sources, boundary
+        # rows or explicit source limits, so new values reuse the compilation.
+        defaults = getattr(model, "parameter_defaults", None)
+        values = {} if defaults is None else defaults()
+        if not isinstance(values, dict) or not all(isinstance(k, str) for k in values):
+            raise ValueError("parameter_defaults must return a dict keyed by name")
+        self.parameter_defaults = {
+            name: jnp.asarray(value, dtype=dtype) for name, value in values.items()
+        }
+        if not all(np.all(np.isfinite(np.asarray(v))) for v in self.parameter_defaults.values()):
+            raise ValueError("Run-time parameter defaults must be finite")
+        self.has_parameters = bool(self.parameter_defaults)
+        parameter_abstract = (
+            ({name: jax.ShapeDtypeStruct(v.shape, dtype) for name, v in self.parameter_defaults.items()},)
+            if self.has_parameters else ()
+        )
+
         def shape_of(name, *args):
             callback = getattr(model, name, None)
             if not callable(callback):
@@ -273,10 +291,11 @@ class Operator:
         for name, arg, expected in (
             ("cell_conserved", cell_abstract, (n, ntransport)),
             ("flux_to_conserved_frame", flux_abstract, (n + 1, ntransport)),
-            ("integrated_source", full_abstract, (n, ntransport)),
             ("wave_speed", cell_abstract, (n,)),
         ):
             require_shape(shape_of(name, arg), expected, name)
+        require_shape(shape_of("integrated_source", full_abstract, *parameter_abstract),
+                      (n, ntransport), "integrated_source")
         if nconstraints:
             require_shape(shape_of("cell_constraints", cell_abstract), (n, nconstraints), "cell_constraints")
         if nc_mode == "flux_difference":
@@ -330,7 +349,10 @@ class Operator:
                 require_bounds(shape_of("face_speed_bounds", face_abstract))
         require_shape(
             shape_of(
-                "boundary_residual", full_abstract, jax.ShapeDtypeStruct((), dtype)
+                "boundary_residual",
+                full_abstract,
+                jax.ShapeDtypeStruct((), dtype),
+                *parameter_abstract,
             ),
             (2, nvar),
             "boundary_residual",
@@ -356,7 +378,9 @@ class Operator:
         source_timestep = getattr(model, "explicit_timestep", None)
         if source_timestep is not None:
             require_shape(
-                shape_of("explicit_timestep", full_abstract), (), "explicit_timestep"
+                shape_of("explicit_timestep", full_abstract, *parameter_abstract),
+                (),
+                "explicit_timestep",
             )
         boundary_speed = getattr(model, "boundary_wave_speed", None)
         if boundary_speed is not None:
@@ -609,8 +633,13 @@ class Operator:
         def face_flux(full):
             return filtered_flux(full, unfiltered_flux(full))
 
-        def source(full):
-            return model.integrated_source(full)
+        # Trailing ``*params`` is empty for models without run-time parameters,
+        # so their callbacks and compiled graphs are unchanged.
+        def source(full, *params):
+            return model.integrated_source(full, *params)
+
+        def boundary(full, time, *params):
+            return model.boundary_residual(full, time, *params)
 
         local_storage = local_jvp(model.cell_conserved)
 
@@ -626,7 +655,7 @@ class Operator:
                 return model.integrated_nonconservative(full, raw_flux, faces=reconstruct(full))
             return model.integrated_nonconservative(full, raw_flux)
 
-        def contributions(full):
+        def contributions(full, *params):
             raw_flux = unfiltered_flux(full)
             weighted_raw = area[:, None] * raw_flux
             flux = filtered_flux(full, raw_flux)
@@ -634,24 +663,24 @@ class Operator:
                 conservative=weighted_raw[1:] - weighted_raw[:-1],
                 stabilization=(flux[1:] - flux[:-1]) - (weighted_raw[1:] - weighted_raw[:-1]),
                 nonconservative=nonconservative(full, raw_flux),
-                source=source(full),
+                source=source(full, *params),
             )
             original = parts["conservative"] + parts["stabilization"] + parts["nonconservative"] - parts["source"]
             parts["equation_policy"] = (jnp.zeros_like(original) if equation_policy is None
                                          else equation_policy(full, original, None) - original)
             return parts
 
-        def physical_spatial(full):
+        def physical_spatial(full, *params):
             raw_flux = unfiltered_flux(full)
             flux = filtered_flux(full, raw_flux)
-            result = flux[1:] - flux[:-1] - source(full)
+            result = flux[1:] - flux[:-1] - source(full, *params)
             # Keep the conservative arithmetic exactly as before.
             if nc_mode != "none":
                 result = result + nonconservative(full, raw_flux)
             return result
 
-        def spatial(full):
-            original = physical_spatial(full)
+        def spatial(full, *params):
+            original = physical_spatial(full, *params)
             return original if equation_policy is None else equation_policy(full, original, None)
 
         def constraints(cells):
@@ -667,31 +696,31 @@ class Operator:
         def pack(cells, boundary):
             return jnp.concatenate([boundary[:1], cells, boundary[1:]]).ravel()
 
-        def physical_residual(new, old, dt):
+        def physical_residual(new, old, dt, *params):
             # Uniform scaling prevents huge pseudo-time steps from amplifying
             # roundoff in the implicit residual; the zero set is unchanged.
             row_scale = jnp.maximum(1.0, dt / reference_time)
             if equation_policy is not None:
-                raw = storage(new[1:-1]) - storage(old[1:-1]) + dt * physical_spatial(new)
+                raw = storage(new[1:-1]) - storage(old[1:-1]) + dt * physical_spatial(new, *params)
                 transport = equation_policy(new, raw, dt) / row_scale / content_scale
                 return cell_rows(transport, new[1:-1])
             transport = (
                 (storage(new[1:-1]) - storage(old[1:-1])) / row_scale
-                + (dt / row_scale) * spatial(new)
+                + (dt / row_scale) * spatial(new, *params)
             ) / content_scale
             return cell_rows(transport, new[1:-1])
 
-        def residual(new_flat, old_flat, dt, time):
+        def residual(new_flat, old_flat, dt, time, *params):
             new, old = new_flat.reshape(self.shape), old_flat.reshape(self.shape)
             return pack(
-                physical_residual(new, old, dt), model.boundary_residual(new, time)
+                physical_residual(new, old, dt, *params), boundary(new, time, *params)
             )
 
-        def steady(full_flat, time=0.0):
+        def steady(full_flat, time=0.0, *params):
             full = full_flat.reshape(self.shape)
             return pack(
-                cell_rows(reference_time * spatial(full) / content_scale, full[1:-1]),
-                model.boundary_residual(full, time),
+                cell_rows(reference_time * spatial(full, *params) / content_scale, full[1:-1]),
+                boundary(full, time, *params),
             )
 
         def valid(flat):
@@ -743,15 +772,15 @@ class Operator:
             max_backtracks=scheme.max_backtracks,
         )
 
-        def implicit_step(full, dt, time=0.0):
-            result, info = newton(full.ravel(), full.ravel(), dt, time)
+        def implicit_step(full, dt, time=0.0, *params):
+            result, info = newton(full.ravel(), full.ravel(), dt, time, *params)
             return result.reshape(self.shape), info
 
         boundary_valid = getattr(
             model, "boundary_admissible", lambda full: valid(full.ravel())
         )
         complete = make_boundary_solver(
-            model.boundary_residual,
+            boundary,
             self.shape,
             model.variable_scales,
             admissible=boundary_valid,
@@ -760,12 +789,13 @@ class Operator:
             residual_tolerance=scheme.newton_residual_tolerance,
             max_backtracks=scheme.max_backtracks,
         )
+        reduced = None
         if (
             scheme.time_integrator == "euler-implicit"
             and self.effective_boundary_treatment == "segregated"
         ):
             reduced = make_eliminated_implicit_step(
-                boundary_residual=model.boundary_residual,
+                boundary_residual=boundary,
                 complete_boundaries=complete,
                 physical_residual=physical_residual,
                 coupled_residual=residual,
@@ -776,10 +806,6 @@ class Operator:
                 scheme=scheme,
             )
             implicit_step = reduced["step"]
-            self.reduced_residual = jax.jit(reduced["residual"])
-            self.reduced_jacobian = jax.jit(reduced["jacobian"])
-            self.reduced_dense_jacobian = jax.jit(reduced["dense_jacobian"])
-            self.reduced_direction = jax.jit(reduced["direction"])
 
         def recover_residual(flat, target):
             cells = flat.reshape(n, nvar)
@@ -820,17 +846,17 @@ class Operator:
             flat, info = recover_newton(guess.ravel(), target)
             return flat.reshape(n, nvar), info
 
-        def balance(full):
+        def balance(full, *params):
             flux = face_flux(full)
-            result = flux[0] - flux[-1] + jnp.sum(source(full), axis=0)
+            result = flux[0] - flux[-1] + jnp.sum(source(full, *params), axis=0)
             if nc_mode != "none":
                 result = result - jnp.sum(nonconservative(full, unfiltered_flux(full)), axis=0)
             return result
 
-        def stage_rates(full):
+        def stage_rates(full, *params):
             raw_flux = unfiltered_flux(full)
             flux = filtered_flux(full, raw_flux)
-            integrated = source(full)
+            integrated = source(full, *params)
             residual = flux[1:] - flux[:-1] - integrated
             transfer = flux[0] - flux[-1] + jnp.sum(
                 integrated, axis=0
@@ -844,9 +870,9 @@ class Operator:
         if scheme.time_integrator == "euler-implicit":
             step = implicit_step
 
-            def with_balance(full, dt, time=0.0):
-                new, info = step(full, dt, time)
-                return new, info, dt * balance(new)
+            def with_balance(full, dt, time=0.0, *params):
+                new, info = step(full, dt, time, *params)
+                return new, info, dt * balance(new, *params)
 
         else:
             with_balance = make_explicit_step(
@@ -861,32 +887,49 @@ class Operator:
                 recover_initial=nconstraints > 0,
             )
 
-            def step(full, dt, time=0.0):
-                new, info, _ = with_balance(full, dt, time)
+            def step(full, dt, time=0.0, *params):
+                new, info, _ = with_balance(full, dt, time, *params)
                 return new, info
+
+        def public(function, required, optional=()):
+            # Positional arguments as before; run-time parameters by keyword.
+            compiled = jax.jit(function)
+
+            def call(*args, params=None):
+                if not required <= len(args) <= required + len(optional):
+                    raise TypeError(f"Expected {required} to {required + len(optional)} positional arguments")
+                args = args + optional[len(args) - required:]
+                return compiled(*args, *self._parameter_args(params))
+
+            return call
 
         self.reconstruct = jax.jit(reconstruct)
         self.face_flux = jax.jit(face_flux)
-        self.source = jax.jit(source)
+        self.source = public(source, 1)
         self.storage = jax.jit(storage)
-        self.spatial_residual = jax.jit(spatial)
-        self.physical_spatial_residual = jax.jit(physical_spatial)
-        self.residual_contributions = jax.jit(contributions)
+        self.spatial_residual = public(spatial, 1)
+        self.physical_spatial_residual = public(physical_spatial, 1)
+        self.residual_contributions = public(contributions, 1)
         self.cell_constraints = jax.jit(constraints)
-        self.balance_rate = jax.jit(balance)
+        self.balance_rate = public(balance, 1)
         self.unfiltered_face_flux = jax.jit(unfiltered_flux)
-        self.residual = jax.jit(residual)
-        self.steady_residual = jax.jit(steady)
-        self.boundary_residual = jax.jit(model.boundary_residual)
+        self.residual = public(residual, 4)
+        self.steady_residual = public(steady, 1, (0.0,))
+        self.boundary_residual = public(boundary, 1, (0.0,))
         self.is_admissible = jax.jit(lambda full: valid(full.ravel()))
-        self.step = jax.jit(step)
-        self.step_with_balance = jax.jit(with_balance)
-        self.complete_boundaries = complete
+        self.step = public(step, 2, (0.0,))
+        self.step_with_balance = public(with_balance, 2, (0.0,))
+        self.complete_boundaries = public(complete, 1, (0.0,))
         self.recover_storage = jax.jit(recover)
+        if reduced is not None:
+            self.reduced_residual = public(reduced["residual"], 4)
+            self.reduced_jacobian = public(reduced["jacobian"], 4)
+            self.reduced_dense_jacobian = public(reduced["dense_jacobian"], 4)
+            self.reduced_direction = public(reduced["direction"], 4)
         if scheme.flux == "roe":
             self.roe_data = jax.jit(lambda full: roe_data(*reconstruct(full)))
 
-        def timestep(full, cfl, time=0.0):
+        def timestep(full, cfl, time=0.0, *params):
             completion_ok = jnp.asarray(True)
             explicit = scheme.time_integrator != "euler-implicit"
             if explicit:
@@ -896,7 +939,7 @@ class Operator:
                     # Failed recovery must not feed invalid trial properties
                     # into trace completion; the limit is still marked invalid.
                     full = full.at[1:-1].set(jnp.where(completion_ok, cells, full[1:-1]))
-                full, info = complete(full, time)
+                full, info = complete(full, time, *params)
                 completion_ok = completion_ok & info.converged & info.admissible
 
             def evaluate(_):
@@ -995,7 +1038,7 @@ class Operator:
                 source_limit = jnp.asarray(jnp.inf, full.dtype)
                 filter_limit = jnp.asarray(jnp.inf, full.dtype)
                 if explicit and source_timestep is not None:
-                    source_limit = source_timestep(full)
+                    source_limit = source_timestep(full, *params)
                     okay = okay & (~jnp.isnan(source_limit)) & (source_limit > 0)
                 if explicit and scheme.filter_strength > 0:
                     weights = model.filter_signal_speed(full)
@@ -1042,11 +1085,74 @@ class Operator:
 
             return jax.lax.cond(completion_ok, evaluate, failed, operand=None)
 
-        self.timestep = jax.jit(timestep)
-        self.compute_dt = jax.jit(
-            lambda full, cfl, time=0.0: timestep(full, cfl, time).dt
+        self.timestep = public(timestep, 2, (0.0,))
+        self.compute_dt = public(
+            lambda full, cfl, time=0.0, *params: timestep(full, cfl, time, *params).dt,
+            2,
+            (0.0,),
         )
-        self.direction = jax.jit(block["direction"])
-        self.jacobian = jax.jit(block["jacobian"])
-        self.dense_jacobian = jax.jit(block["dense_jacobian"])
-        self.jacobian_difference = jax.jit(block["jacobian_difference"])
+        self.direction = public(block["direction"], 4)
+        self.jacobian = public(block["jacobian"], 4)
+        self.dense_jacobian = public(block["dense_jacobian"], 4)
+        self.jacobian_difference = public(block["jacobian_difference"], 4)
+
+    def parameters(self, values=None):
+        """Return the complete run-time parameter mapping for this model.
+
+        Parameters
+        ----------
+        values : mapping or None, optional
+            Selected parameter arrays by declared name; missing names keep the
+            model defaults from ``parameter_defaults()``.
+
+        Returns
+        -------
+        dict
+            Every declared name with an array of its fixed declared shape.
+
+        Raises
+        ------
+        ValueError
+            For a model without run-time parameters, unknown names, changed
+            shapes, nonfinite concrete values, or values rejected by the
+            model's optional ``validate_parameters`` callback.
+
+        Notes
+        -----
+        Values keep their declared shapes, so new values reuse every compiled
+        kernel. Traced values (for derivatives with respect to parameters) are
+        checked for names and shapes only.
+        """
+        if not self.has_parameters:
+            if values:
+                raise ValueError("This model declares no run-time parameters")
+            return {}
+        merged = dict(self.parameter_defaults)
+        if values:
+            if not isinstance(values, dict):
+                raise ValueError("Run-time parameters must be a mapping by name")
+            unknown = set(values) - set(merged)
+            if unknown:
+                raise ValueError(
+                    f"Unknown run-time parameters {sorted(unknown)}; declared {sorted(merged)}"
+                )
+            for name, value in values.items():
+                array = jnp.asarray(value, dtype=merged[name].dtype)
+                if array.shape != merged[name].shape:
+                    raise ValueError(
+                        f"Run-time parameter {name!r} must have shape {merged[name].shape}"
+                    )
+                merged[name] = array
+        concrete = not any(isinstance(v, jax.core.Tracer) for v in merged.values())
+        if concrete and values:
+            if not all(bool(jnp.all(jnp.isfinite(v))) for v in merged.values()):
+                raise ValueError("Run-time parameters must be finite")
+            check = getattr(self.model, "validate_parameters", None)
+            if check is not None:
+                check({name: np.asarray(v) for name, v in merged.items()})
+        return merged
+
+    def _parameter_args(self, values):
+        """Return the trailing kernel arguments: none without parameters."""
+        merged = self.parameters(values)
+        return (merged,) if self.has_parameters else ()

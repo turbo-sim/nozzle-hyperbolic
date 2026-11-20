@@ -17,12 +17,14 @@ def make_boundary_solver(
     residual_tolerance=1e-12,
     max_backtracks=20
 ):
-    """Return solve(full_state, time) -> (completed_state, NewtonInfo).
+    """Return solve(full_state, time, *args) -> (completed_state, NewtonInfo).
 
     Physical cells remain fixed. The same boundary_residual callback can be
     appended to a global implicit system. Explicit RK stages call this solve
     separately for each stage; endpoint traces are never time-integrated.
     No physics, EOS, boundary regime or variable sign is assumed here.
+    Optional trailing arguments, such as model run-time parameters, are passed
+    unchanged to ``boundary_residual(full, time, *args)``.
     """
     npoints, nvar = shape
     if npoints < 4 or nvar < 1:
@@ -33,13 +35,15 @@ def make_boundary_solver(
         trace = flat.reshape(2, nvar)
         return full.at[0].set(trace[0]).at[-1].set(trace[1])
 
-    def residual(flat, full, time):
-        return boundary_residual(insert(flat, full), time).ravel()
+    def residual(flat, full, time, *args):
+        return boundary_residual(insert(flat, full), time, *args).ravel()
 
     jacobian = jax.jacfwd(residual, argnums=0)
 
-    def direction(flat, full, time):
-        return jnp.linalg.solve(jacobian(flat, full, time), -residual(flat, full, time))
+    def direction(flat, full, time, *args):
+        return jnp.linalg.solve(
+            jacobian(flat, full, time, *args), -residual(flat, full, time, *args)
+        )
 
     def valid(flat, full):
         return (
@@ -50,7 +54,7 @@ def make_boundary_solver(
 
     # The common Newton callback receives only the candidate. Bind the fixed
     # physical field lexically inside solve; tracing retains a pure JAX graph.
-    def solve(full, time=0.0):
+    def solve(full, time=0.0, *args):
         newton = make_newton_solver(
             residual,
             direction,
@@ -62,7 +66,9 @@ def make_boundary_solver(
             backtracking=True,
             max_backtracks=max_backtracks,
         )
-        result, info = newton(jnp.stack((full[0], full[-1])).ravel(), full, time)
+        result, info = newton(
+            jnp.stack((full[0], full[-1])).ravel(), full, time, *args
+        )
         return insert(result, full), info
 
     return jax.jit(solve)
@@ -71,13 +77,14 @@ def make_boundary_solver(
 def make_boundary_eliminator(boundary_residual, complete_boundaries):
     """Return differentiable nonlinear elimination of zero-storage traces.
 
-    ``eliminate(physical, seed_full, time)`` returns a full state whose physical
-    cells equal ``physical``. Endpoint roots are selected by the supplied seed
-    and solved with ``complete_boundaries``. A failed completion returns NaNs,
-    allowing the enclosing safeguarded Newton solve to reject the trial.
+    ``eliminate(physical, seed_full, time, *args)`` returns a full state whose
+    physical cells equal ``physical``. Endpoint roots are selected by the
+    supplied seed and solved with ``complete_boundaries``. A failed completion
+    returns NaNs, allowing the enclosing safeguarded Newton solve to reject the
+    trial. Optional trailing arguments are model run-time parameters.
 
     The custom JVP differentiates the converged boundary equations:
-    ``dtrace = -B_trace^-1 * (B_cells*dphysical + B_time*dtime)``.
+    ``dtrace = -B_trace^-1 * (B_cells*dphysical + B_time*dtime + B_args*dargs)``.
     It does not differentiate the Newton iteration history. On a fixed smooth
     root branch, the result is independent of the seed. This requires a locally
     nonsingular boundary Jacobian with respect to the two endpoint traces.
@@ -87,16 +94,16 @@ def make_boundary_eliminator(boundary_residual, complete_boundaries):
         return seed.at[1:-1].set(physical)
 
     @jax.custom_jvp
-    def eliminate(physical, seed_full, time):
-        full, info = complete_boundaries(insert(physical, seed_full), time)
+    def eliminate(physical, seed_full, time, *args):
+        full, info = complete_boundaries(insert(physical, seed_full), time, *args)
         okay = info.converged & info.admissible & jnp.all(jnp.isfinite(full))
         return jnp.where(okay, full, jnp.full_like(full, jnp.nan))
 
     @eliminate.defjvp
     def implicit_jvp(primals, tangents):
-        physical, seed_full, time = primals
-        dphysical, _, dtime = tangents
-        full = eliminate(physical, seed_full, time)
+        physical, seed_full, time, *args = primals
+        dphysical, _, dtime, *dargs = tangents
+        full = eliminate(physical, seed_full, time, *args)
         nvar = full.shape[-1]
 
         def linearized(_):
@@ -105,15 +112,15 @@ def make_boundary_eliminator(boundary_residual, complete_boundaries):
             def trace_rows(flat):
                 endpoints = flat.reshape(2, nvar)
                 candidate = full.at[0].set(endpoints[0]).at[-1].set(endpoints[1])
-                return boundary_residual(candidate, time).ravel()
+                return boundary_residual(candidate, time, *args).ravel()
 
             boundary_matrix = jax.jacfwd(trace_rows)(trace)
             _, forcing = jax.jvp(
-                lambda cells, instant: boundary_residual(
-                    insert(cells, full), instant
+                lambda cells, instant, *values: boundary_residual(
+                    insert(cells, full), instant, *values
                 ).ravel(),
-                (physical, time),
-                (dphysical, dtime),
+                (physical, time, *args),
+                (dphysical, dtime, *dargs),
             )
             dtrace = jnp.linalg.solve(boundary_matrix, -forcing).reshape(2, nvar)
             return jnp.concatenate((dtrace[:1], dphysical, dtrace[1:]), axis=0)

@@ -395,6 +395,40 @@ class ConstrainedCellModel(Protocol):
         ...
 
 
+class RuntimeParameterModel(Protocol):
+    """Named run-time inputs of sources, boundary rows and source limits.
+
+    A model declaring ``parameter_defaults`` receives one parameter mapping as
+    the last argument of ``integrated_source(full, params)``,
+    ``boundary_residual(full, time, params)`` and, when supplied,
+    ``explicit_timestep(full, params)``. Names and shapes are fixed at operator
+    binding; values are inputs of the compiled kernels, so new values reuse
+    them. The Newton Jacobian remains with respect to the state only. Models
+    without the declaration keep their original callback signatures.
+    """
+
+    def parameter_defaults(self):
+        """Return the declared run-time parameters and their default values.
+
+        Returns
+        -------
+        dict of str to array_like
+            Finite default values; each shape is fixed for the operator.
+        """
+        ...
+
+    def validate_parameters(self, values):
+        """Optionally reject physically invalid concrete parameter values.
+
+        Parameters
+        ----------
+        values : dict of str to numpy.ndarray
+            Complete mapping with defaults filled in. Raise ValueError to
+            reject it; traced values (derivatives) are not passed here.
+        """
+        ...
+
+
 class FluxDifferenceNonconservativeModel(Protocol):
     """Explicit compatibility discretization, not an inferred path scheme.
 
