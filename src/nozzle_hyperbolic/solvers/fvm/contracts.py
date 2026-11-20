@@ -405,7 +405,7 @@ class FluxDifferenceNonconservativeModel(Protocol):
     correction. Supported fluxes must be explicitly justified and declared.
     """
 
-    nonconservative_mode: str  # 'flux_difference'; conservative models: 'none'
+    nonconservative_mode: str  # 'flux_difference' ('path': PathNonconservativeModel); conservative models: 'none'
     supported_fluxes: Sequence[str]
     nonconservative_dependency_radius: int
 
@@ -425,6 +425,40 @@ class FluxDifferenceNonconservativeModel(Protocol):
         jax.Array, shape (N, T)
             Already integrated nonconservative rows added to the spatial
             residual. The model owns the entire geometry pairing.
+        """
+        ...
+
+
+class PathNonconservativeModel(Protocol):
+    """Path-integrated nonconservative products from reconstructed face states.
+
+    Selected by nonconservative_mode='path'. The operator passes the same
+    reconstructed left/right face states used by the face flux. Return already
+    integrated (N,T) contributions ADDED to the spatial residual. The model
+    owns the path, quadrature and geometry pairing.
+    """
+
+    nonconservative_mode: str  # 'path'
+    supported_fluxes: Sequence[str]
+    nonconservative_dependency_radius: int
+
+    def integrated_nonconservative(self, full, unfiltered_flux, faces=None):
+        """Evaluate the declared path nonconservative contribution.
+
+        Parameters
+        ----------
+        full : jax.Array, shape (N + 2, V)
+            Full iteration state including endpoint traces.
+        unfiltered_flux : jax.Array, shape (N + 1, T)
+            Unweighted numerical flux, as for the flux-difference mode.
+        faces : tuple of jax.Array, shape (N + 1, V) each
+            Reconstructed left and right face states in the iteration frame.
+
+        Returns
+        -------
+        jax.Array, shape (N, T)
+            Already integrated nonconservative rows added to the spatial
+            residual.
         """
         ...
 
