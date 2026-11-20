@@ -2,6 +2,8 @@
 
 The compatibility discretization is explicitly identified: frozen FVS followed
 by cell X K^-1 flux-difference correction, then independently selected filters.
+CompatibilityConfig(k_free=True) selects instead the K-free face flux and the
+path-integrated nonconservative term (operator mode 'path').
 This module contains no time integrator, Newton algorithm, or Jacobian cache.
 """
 
@@ -23,7 +25,12 @@ from .configuration import (
     PhasePinConfig,
 )
 from .matrices import phase_props, common_quantities, eigenstructure, flux_vector
-from .flux import fvs_interface_flux, nonconservative_correction
+from .flux import (
+    fvs_interface_flux,
+    nonconservative_correction,
+    k_free_interface_flux,
+    k_free_path_nonconservative,
+)
 from .sources import (
     two_fluid_closure,
     D_VE_algebric,
@@ -119,6 +126,13 @@ class TwoFluidModel:
         self.closures = closures
         self.compatibility = compatibility or CompatibilityConfig()
         self.stabilization = stabilization or StabilizationConfig()
+        # k_free replaces the flux-difference correction by path integrals of
+        # the reconstructed face states, supplied by the operator's 'path' mode.
+        self.nonconservative_mode = (
+            "path" if self.compatibility.k_free else "flux_difference"
+        )
+        if self.compatibility.k_free and self.stabilization.mass_upwind_cutoff is not None:
+            raise ValueError("k_free is not defined with mass_upwind_cutoff")
         self.pins = pins or PhasePinConfig()
         self.has_equation_pins = self.pins.saturation_energy or self.pins.momentum
         self.steady_only = self.has_equation_pins
@@ -397,6 +411,8 @@ class TwoFluidModel:
         -----
         Scalar lax.map preserves the safe equal-slip branch under AD. Each
         configured coefficient is passed explicitly to the low-level FVS kernel.
+        ``k_free`` selects :func:`k_free_interface_flux` instead of
+        :func:`fvs_interface_flux`; ``smooth`` is passed to either kernel.
         """
         if scheme.flux != "model_compatibility":
             raise ValueError(
@@ -406,18 +422,35 @@ class TwoFluidModel:
 
         def one(pair):
             ul, ur, dissipation = pair
-            value = fvs_interface_flux(
-                ul,
-                ur,
-                self.fluid_g,
-                self.fluid_l,
-                self.virtual_mass,
-                delta_factor=cfg.delta_factor,
-                lowmach_diss=dissipation,
-                du_blend_lo=cfg.du_blend_lo,
-                du_blend_hi=cfg.du_blend_hi,
-                single_branch=False,
-            )
+            if cfg.k_free:
+                value = k_free_interface_flux(
+                    ul,
+                    ur,
+                    self.fluid_g,
+                    self.fluid_l,
+                    self.virtual_mass,
+                    delta_factor=cfg.delta_factor,
+                    lowmach_diss=dissipation,
+                    du_blend_lo=cfg.du_blend_lo,
+                    du_blend_hi=cfg.du_blend_hi,
+                    smooth=cfg.smooth,
+                    smooth_width=cfg.smooth_width,
+                )
+            else:
+                value = fvs_interface_flux(
+                    ul,
+                    ur,
+                    self.fluid_g,
+                    self.fluid_l,
+                    self.virtual_mass,
+                    delta_factor=cfg.delta_factor,
+                    lowmach_diss=dissipation,
+                    du_blend_lo=cfg.du_blend_lo,
+                    du_blend_hi=cfg.du_blend_hi,
+                    single_branch=False,
+                    smooth=cfg.smooth,
+                    smooth_width=cfg.smooth_width,
+                )
             if self.stabilization.mass_upwind_cutoff is not None:
                 egL, elL = self._properties(ul)
                 egR, elR = self._properties(ur)
@@ -449,7 +482,7 @@ class TwoFluidModel:
             )
         return jax.lax.map(one, (primitives(left), primitives(right), dissipation))
 
-    def integrated_nonconservative(self, full, unfiltered_flux):
+    def integrated_nonconservative(self, full, unfiltered_flux, faces=None):
         """Assemble cell-local X K-inverse actions from selected flux differences.
 
         Parameters
@@ -458,6 +491,8 @@ class TwoFluidModel:
             Physical cells and endpoint traces.
         unfiltered_flux : jax.Array, shape (N+1, 6)
             Compatibility flux density, before optional filter flux.
+        faces : tuple of jax.Array, shape (N+1, 8) each, optional
+            Reconstructed left/right face states; required by ``k_free``.
 
         Returns
         -------
@@ -468,9 +503,36 @@ class TwoFluidModel:
         -----
         The selected nc_form controls geometry measures. The well-balanced
         'wb' choice subtracts the cell physical flux times exact area change.
+
+        With ``k_free`` (operator mode 'path') nc_form is not used: each face
+        jump path integral goes half to each neighbour, weighted by its face
+        area, plus the cell area times the within-cell path from the cell's
+        left-face to right-face state (zero length under constant
+        reconstruction). Uniform states give exactly zero; no K solve.
         """
-        U = primitives(full[1:-1])
         cfg = self.compatibility
+        if cfg.k_free:
+            if faces is None:
+                raise ValueError(
+                    "k_free requires the reconstructed faces of nonconservative_mode='path'"
+                )
+            left, right = primitives(faces[0]), primitives(faces[1])
+
+            def path(pair):
+                ua, ub = pair
+                return k_free_path_nonconservative(
+                    ua, ub, self.fluid_g, self.fluid_l, self.virtual_mass
+                )
+
+            jumps = jax.lax.map(path, (left, right))
+            inside = jax.lax.map(path, (right[:-1], left[1:]))
+            return (
+                0.5 * self._face_areas[1:, None] * jumps[1:]
+                + 0.5 * self._face_areas[:-1, None] * jumps[:-1]
+                + self._areas[:, None] * inside
+            )
+
+        U = primitives(full[1:-1])
         if cfg.nc_form == "cell":
             delta = self._areas[:, None] * (unfiltered_flux[1:] - unfiltered_flux[:-1])
         else:

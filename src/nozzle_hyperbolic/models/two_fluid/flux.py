@@ -17,6 +17,7 @@ from .matrices import (
     phase_props,
     CommonQty,
     common_quantities,
+    J_matrix,
     K_matrix,
     X_matrix,
     eigenstructure,
@@ -149,6 +150,8 @@ def fvs_interface_flux(
     du_blend_lo=1e-2,
     du_blend_hi=1e-1,
     single_branch=False,
+    smooth=False,
+    smooth_width=0.02,
 ):
     """Evaluate one compatibility FVS flux in conservative ordering.
 
@@ -169,6 +172,12 @@ def fvs_interface_flux(
     single_branch : bool, optional
         If true, evaluate both formulas eagerly and select their values. The
         model uses false and scalar ``lax.cond`` inside ``lax.map`` for safe AD.
+    smooth : bool, optional
+        Static switch. False: sonic-crossing entropy fix below. True:
+        continuous Harten weights ``s = lambda/H(lambda)`` on every wave and
+        on u1, with no crossing test (see :func:`k_free_interface_flux`).
+    smooth_width : float, optional
+        Acoustic-speed fraction of the Harten width used when ``smooth``.
 
     Returns
     -------
@@ -241,6 +250,18 @@ def fvs_interface_flux(
     # Signed upwind weight s ∈ [−1,1] = sign(λ)·(|λ|/|λ|_safe): ±1 (full upwind)
     # off-sonic, blends toward 0 (central, added dissipation) only at a crossing.
     s = eigvals / lam_safe
+
+    # ── Optional smooth entropy fix (static switch, default off) ──────────────
+    # Continuous Harten weights on all six waves, no crossing test; the width
+    # also replaces the floor used by s_12 below. The unused L/R eigenvalues
+    # above are removed by XLA dead-code elimination under jit.
+    if smooth:
+        delta_global = smooth_width * jnp.abs(a_mix)
+        s = eigvals / jnp.where(
+            jnp.abs(eigvals) >= delta_global,
+            jnp.abs(eigvals),
+            (eigvals**2 + delta_global**2) / (2.0 * delta_global),
+        )
 
     du = cq_b.du  # u_g - u_l
 
@@ -423,3 +444,211 @@ def nonconservative_correction(
     # Equilibrated (kappa(K)~1e13 is unit scaling; see _equil_solve note above).
     y = compatible_flux_solve(K_mat, dF, U_h_cell)
     return X_mat @ y
+
+
+# ---------------------------------------------------------------------------
+# K-free face flux and path-integrated nonconservative term
+# ---------------------------------------------------------------------------
+# Additive option, port of the 'inverse_old_sonic' arm of
+# development/two_fluid_test_v2/scripts/numerics.py. Neither kernel solves
+# with K: the face flux applies its viscosity to the primitive-state jump and
+# the nonconservative term integrates X dU directly along a straight path.
+# The native kernels above are unchanged.
+
+
+def k_free_interface_flux(
+    U_h_L,
+    U_h_R,
+    fluid_g,
+    fluid_l,
+    k,
+    delta_factor=0.1,
+    lowmach_diss=0.0,
+    du_blend_lo=1e-2,
+    du_blend_hi=1e-1,
+    smooth=False,
+    smooth_width=0.02,
+):
+    """Evaluate one K-free FVS flux in conservative ordering.
+
+    Parameters
+    ----------
+    U_h_L, U_h_R : jax.Array, shape (6,)
+        Left/right enthalpy primitives in SI units.
+    fluid_g, fluid_l : object
+        JAXProp-compatible gas and liquid fluids.
+    k : float
+        Nonnegative dimensionless virtual-mass coefficient.
+    delta_factor : float, optional
+        Acoustic-speed fraction setting the entropy-fix robustness floor.
+    lowmach_diss : float, optional
+        Lower bound of the acoustic dissipation factor, in [0, 1].
+    du_blend_lo, du_blend_hi : float, optional
+        Absolute-slip thresholds in m/s blending shared-velocity and full formulas.
+    smooth : bool, optional
+        Static switch. False: sonic-crossing entropy fix of
+        :func:`fvs_interface_flux`. True: continuous Harten magnitude on every
+        wave and on the mixture speed u1.
+    smooth_width : float, optional
+        Acoustic-speed fraction of the Harten width used when ``smooth``.
+
+    Returns
+    -------
+    jax.Array, shape (6,)
+        Phase mass, momentum and total-energy flux density.
+
+    Notes
+    -----
+    ``F = (F_L+F_R)/2 - J(U_bar) sum_k z_k m_k r_k (l_k . dU) / (2 D_k)``
+    with ``dU = U_R - U_L``. By default the magnitudes ``m_k = lambda_k s_k``
+    use the signed weights of :func:`fvs_interface_flux` (same sonic-crossing
+    Harten fix and robustness floor). With ``smooth`` they are
+    ``m_k = H(lambda_k)``, ``H = |lambda|`` for ``|lambda| >= delta`` and
+    ``(lambda**2+delta**2)/(2 delta)`` inside, ``delta = smooth_width*a_mix``,
+    with no crossing test; H(0) = delta/2 adds dissipation at rest.
+    Both use the same low-Mach factor on the acoustic
+    pair. Below ``du_blend_lo`` both void waves move with the mixture speed
+    u1 (grouped viscosity, a bounded approximation at the material Jordan
+    block); above ``du_blend_hi`` the full decomposition is used, with the
+    same C1 cosine blend in between.
+    """
+    # ── Average state at the face ────────────────────────────────────────────
+    U_h_bar = 0.5 * (U_h_L + U_h_R)
+    p_b, u_g_b, u_l_b, ag_b, h_g_b, h_l_b = U_h_bar
+    dU = U_h_R - U_h_L
+
+    eos_g_b = phase_props(fluid_g, p_b, h_g_b)
+    eos_l_b = phase_props(fluid_l, p_b, h_l_b)
+    cq_b = common_quantities(U_h_bar, eos_g_b, eos_l_b, k)
+    eigvals, R_h, L_h, D = eigenstructure(U_h_bar, eos_g_b, eos_l_b, cq_b)
+
+    # ── Physical fluxes at actual L/R states ─────────────────────────────────
+    eos_g_L = phase_props(fluid_g, U_h_L[0], U_h_L[4])
+    eos_l_L = phase_props(fluid_l, U_h_L[0], U_h_L[5])
+    F_L = flux_vector(U_h_L, eos_g_L, eos_l_L)
+
+    eos_g_R = phase_props(fluid_g, U_h_R[0], U_h_R[4])
+    eos_l_R = phase_props(fluid_l, U_h_R[0], U_h_R[5])
+    F_R = flux_vector(U_h_R, eos_g_R, eos_l_R)
+
+    a_mix = 0.5 * (eigvals[2] - eigvals[3])
+
+    # ── Signed upwind weights, as in fvs_interface_flux ─────────────────────
+    if not smooth:
+        eigvals_L = eigenstructure(
+            U_h_L, eos_g_L, eos_l_L, common_quantities(U_h_L, eos_g_L, eos_l_L, k)
+        )[0]
+        eigvals_R = eigenstructure(
+            U_h_R, eos_g_R, eos_l_R, common_quantities(U_h_R, eos_g_R, eos_l_R, k)
+        )[0]
+
+        delta_global = delta_factor * jnp.abs(a_mix)
+
+        sonic = (eigvals_L < 0.0) & (eigvals_R > 0.0)
+        delta_k = jnp.where(sonic, eigvals_R - eigvals_L, delta_global)
+        lam_safe = jnp.where(
+            sonic,
+            (eigvals**2 + delta_k**2) / (2.0 * jnp.maximum(delta_k, 1e-300)),
+            jnp.maximum(jnp.abs(eigvals), delta_global),
+        )
+        s = eigvals / lam_safe
+
+    # ── Low-Mach dissipation factor, as in fvs_interface_flux ───────────────
+    rg = eos_g_b.rho
+    rl = eos_l_b.rho
+    al_b = 1.0 - ag_b
+    cq = cq_b
+    du = cq.du
+    k_rho_mix = cq.rg_hat - rg
+    rho_hat_s = cq.rho_s + k_rho_mix
+    a_tilde_sq = (rho_hat_s / cq.rho_s) * (rg * rl / cq.rh2) * cq.a0sq
+    delta_a_sq = ag_b * al_b * rg * rl * cq.rg_hat * cq.rl_hat / cq.rh2**2 * du**2
+    a = jnp.sqrt(a_tilde_sq - delta_a_sq)
+    hat_ag = ag_b * rg * cq.rl_hat / cq.rh2
+    hat_al = al_b * rl * cq.rg_hat / cq.rh2
+    u_mix = hat_ag * u_g_b + hat_al * u_l_b
+    z_ac = jnp.clip(jnp.abs(u_mix) / jnp.abs(a), lowmach_diss, 1.0)
+    z_vec = jnp.ones(6).at[2].set(z_ac).at[3].set(z_ac)
+
+    # ── Viscosity magnitudes ─────────────────────────────────────────────────
+    if smooth:
+        # Continuous Harten |lambda| on all waves, no sonic-crossing test
+        delta_s = smooth_width * a_mix
+        magnitude = z_vec * jnp.where(
+            jnp.abs(eigvals) >= delta_s,
+            jnp.abs(eigvals),
+            (eigvals**2 + delta_s**2) / (2.0 * delta_s),
+        )
+        material = jnp.where(
+            jnp.abs(cq.u1) >= delta_s,
+            jnp.abs(cq.u1),
+            (cq.u1**2 + delta_s**2) / (2.0 * delta_s),
+        )
+    else:
+        magnitude = eigvals * s * z_vec
+        material = cq.u1 * smoothed_sign(cq.u1, delta_global)
+
+    # ── Zero-slip branch: both void waves move with u1 ──────────────────────
+    def _zero_slip(_):
+        action = material * dU
+        for ki in [2, 3, 4, 5]:
+            ell_k = jnp.dot(L_h[ki], dU) / D[ki]
+            action = action + (magnitude[ki] - material) * R_h[:, ki] * ell_k
+        return action
+
+    # ── Full branch: six-wave decomposition of the primitive jump ───────────
+    def _full_slip(_):
+        return R_h @ (magnitude * (L_h @ dU) / D)
+
+    # ── Smooth blend between the zero-slip and full branches ──────────────────
+    def _blend(_):
+        t = jnp.clip(
+            (jnp.abs(du) - du_blend_lo) / (du_blend_hi - du_blend_lo), 0.0, 1.0
+        )
+        w = 0.5 * (1.0 + jnp.cos(jnp.pi * t))
+        return w * _zero_slip(None) + (1.0 - w) * _full_slip(None)
+
+    action = jax.lax.cond(
+        jnp.abs(du) < du_blend_lo,
+        _zero_slip,
+        lambda _: jax.lax.cond(jnp.abs(du) >= du_blend_hi, _full_slip, _blend, None),
+        None,
+    )
+    return 0.5 * (F_L + F_R) - 0.5 * (J_matrix(U_h_bar, eos_g_b, eos_l_b) @ action)
+
+
+def k_free_path_nonconservative(U_h_a, U_h_b, fluid_g, fluid_l, k):
+    """Integrate ``X(U) dU`` along the straight primitive path from a to b.
+
+    Parameters
+    ----------
+    U_h_a, U_h_b : jax.Array, shape (6,)
+        Path end states, enthalpy primitives in SI units.
+    fluid_g, fluid_l : object
+        JAXProp-compatible gas and liquid fluids.
+    k : float
+        Nonnegative dimensionless virtual-mass coefficient.
+
+    Returns
+    -------
+    jax.Array, shape (6,)
+        Path integral per unit area, in conservative ordering.
+
+    Notes
+    -----
+    Two-point Gauss-Legendre quadrature on ``U(t) = U_a + t (U_b - U_a)``.
+    No K solve: the integral stays bounded where det K = 0. The model applies
+    the geometry measures (half face jumps and the within-cell path).
+    """
+    dU = U_h_b - U_h_a
+
+    def _one(t):
+        u = U_h_a + t * dU
+        eos_g = phase_props(fluid_g, u[0], u[4])
+        eos_l = phase_props(fluid_l, u[0], u[5])
+        cq = common_quantities(u, eos_g, eos_l, k)
+        return X_matrix(u, eos_g, eos_l, cq) @ dU
+
+    offset = 0.5 / jnp.sqrt(3.0)
+    nodes = jnp.array((0.5 - offset, 0.5 + offset))
+    return 0.5 * jnp.sum(jax.lax.map(_one, nodes), axis=0)

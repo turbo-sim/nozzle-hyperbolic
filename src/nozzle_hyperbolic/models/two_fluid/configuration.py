@@ -198,6 +198,15 @@ class CompatibilityConfig:
         Upper absolute-slip blend threshold in m/s.
     delta_factor : float, optional
         Positive acoustic fraction for the entropy-fix robustness floor.
+    k_free : bool, optional
+        False: X K^-1 flux-difference discretization. True: K-free face flux
+        (primitive-jump viscosity) and straight-path nonconservative integral;
+        nc_form is then not used.
+    smooth : bool, optional
+        False: sonic-crossing entropy fix. True: continuous Harten magnitude
+        on every wave, for either flux.
+    smooth_width : float, optional
+        Positive acoustic fraction of the Harten width used when smooth.
     """
 
     nc_form: str = "cell"
@@ -206,11 +215,18 @@ class CompatibilityConfig:
     du_blend_lo: float = 5.0
     du_blend_hi: float = 20.0
     delta_factor: float = 1e-6
+    k_free: bool = False
+    smooth: bool = False
+    smooth_width: float = 0.02
 
     def __post_init__(self):
         _finite_fields(self)
         if self.nc_form not in ("cell", "wb", "staedtke"):
             raise ValueError("nc_form must be cell, wb, or staedtke")
+        if not isinstance(self.k_free, bool) or not isinstance(self.smooth, bool):
+            raise ValueError("k_free and smooth must be booleans")
+        if not self.smooth_width > 0:
+            raise ValueError("smooth_width must be positive")
         if not (
             0 <= self.lowmach_diss <= 1
             and 0 < self.du_blend_lo < self.du_blend_hi
