@@ -17,7 +17,7 @@ def make_boundary_solver(
     residual_tolerance=1e-12,
     max_backtracks=20
 ):
-    """Return solve(full_state, time, *args) -> (completed_state, NewtonInfo).
+    """Return ``solve(full_state, time, *args) -> (completed_state, NewtonInfo)``.
 
     Physical cells remain fixed. The same boundary_residual callback can be
     appended to a global implicit system. Explicit RK stages call this solve
