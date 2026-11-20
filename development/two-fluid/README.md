@@ -264,6 +264,43 @@ K-inverse (400 cells) restarted from the converged K-free 400 solution:
 - For shock and adapted it cannot hold a steady state: the residual grows by two orders
   of magnitude while the state drifts ~0.3 % of range.
 
+## Port of the alberto_branch source-term capabilities (TODO 7, 2026-11-20)
+
+- **A. Closure options** (`src/.../two_fluid/closures`, `sources.py`, `configuration.py`):
+  `nu_l_int`, `drag_scale_bubbly`/`drag_scale_droplet`, liquid-HTC `sum` (+ `jakob_growth_nusselt`),
+  correction factors `beta_cd`, `beta_htc_g`, `beta_htc_l`; `ai_scale` renamed `beta_ai`.
+  [check_closures_vs_alberto.py](check_closures_vs_alberto.py) loads alberto_branch's own
+  `two_fluid_closure`: 17 option sets x 12 states, max difference 7e-16.
+- **B. Engine run-time parameters** (`solvers/fvm`): models may declare `parameter_defaults()`;
+  values are inputs of the compiled kernels (`params=`, `solve_single_grid(parameters=...)`).
+  `tests/solvers/test_runtime_parameters.py`; full suite 767 passed.
+- **C. Two-fluid run-time inputs** (opt-in `TwoFluidModel(..., runtime_inputs=True)`): per-cell
+  `beta_ai`, `beta_cd`, `beta_htc_g`, `beta_htc_l` (x the `ClosureConfig` factors) and scalar
+  `back_pressure`. With default values they equal the configured model to roundoff (1.8e-16: the
+  factors are kernel inputs instead of constants), hence opt-in.
+- **D. Tests and docs**: `tests/models/two_fluid/test_closure_corrections.py` (20 tests), `sum` in the
+  closure-selector test; `physical_closures.md`, `model_interface.md` (run-time parameters),
+  `two_fluid_migration.md`. Full suite 788 passed, 2 skipped; the one failure
+  (`test_compilation.py`, cache-load time measured as 0) passes 3/3 on rerun.
+- **Bit-identity with the last commit** (`a0303d6`), [check_defaults_vs_head.py](check_defaults_vs_head.py)
+  against a clean checkout: spatial residual, every residual contribution and one implicit step on
+  nitrogen-water shocked (K-inverse, k_free) and Super Moby Dick subsonic (mass transfer, ghost pin):
+  all 21 arrays IDENTICAL. Existing runs are unchanged by A-D.
+
+Comparison with alberto_branch ([alberto_comparison/](alberto_comparison/), alberto_branch unmodified):
+
+| Check | Result |
+|---|---|
+| Interior residual with four per-cell fields, two-component and flashing NICFD states ([fields_residual_old.py](alberto_comparison/fields_residual_old.py) / [fields_residual_new.py](alberto_comparison/fields_residual_new.py)) | main = alberto_branch to <= 3.5e-10 of the flux term (same as without fields); the fields change the residual by 15-60 % |
+| End to end, two-component subsonic, Van Leer, 200 points: alberto_branch's own driver ([old_driver_fields.py](alberto_comparison/old_driver_fields.py), patched copy passing `p_out` and the fields to its `step`) vs main ([new_solver_fields.py](alberto_comparison/new_solver_fields.py)) | both apply the run-time 15 bar outlet (last cell 14.987 / 14.983 bar); baseline (16 bar) solutions differ <= 0.15 %; varied (15 bar + fields) <= 0.76 % in p at the throat, 0.45 K in T_g, 0.023 K in T_l; the responses to the inputs (16-40 % of the field ranges) agree within 1-3 % (p, u, alpha), 8 % (h_l) |
+| main's interior equations at alberto_branch's converged states ([residual_at_old_solution.py](alberto_comparison/residual_at_old_solution.py)) | 1.4e-7 (varied) / 3.5e-7 (baseline) of the flux term, as small as at main's own solutions (0.5-1.3e-6); only the 3 cells next to each boundary differ (0.16-0.35) |
+
+Conclusion: with the same fields and outlet pressure both codes solve the same interior equations;
+the remaining solution difference comes only from the boundary closure (alberto_branch ghost-cell
+updates vs main trace equations) and grows near choking (the varied case has a lower throat pressure,
+7.7 vs 9.9 bar). alberto_branch's runs were converged to its own tolerance (SSR 1e-10, 20000-step
+limit; the 8000-step runs had not converged but gave the same profiles to 3e-7).
+
 ## Energy conservation issue (found 2026-11-19, model-level, not from k_free)
 
 Gas/liquid temperatures at the outlet exceed the 295.15 K inlet (subsonic T_g 300 K,

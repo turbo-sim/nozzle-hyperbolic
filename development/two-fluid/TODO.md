@@ -75,6 +75,40 @@ Record of what was done: [README.md](README.md).
     development scripts. Package design change, to be scoped separately.
 - [ ] **6. Commit** (only when asked): on a branch, production changes (`src`, tests,
       docs) separate from this study folder.
-- [ ] **7. Port the alberto_branch source-term capabilities to main.** Bring all the
-      source-term / closure capabilities of `nozzle-hyperbolic_alberto_branch` into main
-      `src`. To be scoped and verified later.
+- [ ] **7. Port the alberto_branch source-term capabilities to main.** Plan agreed
+      2026-11-20. Always compare with alberto_branch: same results where it applies.
+  - [x] **A. Closure options.** Done 2026-11-20 (uncommitted): `nu_l_int`,
+        `drag_scale_bubbly` / `drag_scale_droplet`, liquid-HTC `sum` option (with
+        `jakob_growth_nusselt`), correction factors `beta_cd`, `beta_htc_g`, `beta_htc_l` in
+        `two_fluid_closure`/`ClosureConfig`, rename `ai_scale` -> `beta_ai` (no alias).
+        Inventory: these were the only source/closure differences from alberto_branch
+        (besides main's deliberate port changes: no table clipping, analytic zero-slip drag).
+        `check_closures_vs_alberto.py`: 17 option sets x 12 states, max difference 7e-16;
+        two-fluid + regression tests 80/80.
+  - [x] **B. Run-time parameters in the engine (B2a).** Done 2026-11-20 (uncommitted):
+        operator `parameter_defaults()` / `params=` / `Operator.parameters()`, optional model
+        `validate_parameters`; boundary solver, eliminator (JVP with parameter tangents),
+        segregated and explicit steps pass them through; `solve_single_grid` /
+        `solve_transient` `parameters=`, `Solution.parameters`; drivers pass `params` only to
+        parameterized models (old call signatures unchanged). `tests/solvers/test_runtime_parameters.py`
+        (10 tests); full suite 767 passed, 2 skipped. Original description: A model declares named run-time
+        parameters (fixed names/shapes); the operator passes them as inputs to every
+        compiled function that evaluates sources or boundaries (residual, Jacobian,
+        Newton, boundary completion, segregated step, timestep, monitoring). Explicit
+        `parameters=` argument in the drivers/workspace; recorded with the result. New
+        values reuse the compiled code; the Jacobian stays with respect to the state only.
+        Toy-model tests: dependence, colored = dense Jacobian, derivative vs finite
+        differences.
+  - [x] **C. Two-fluid run-time inputs.** Done 2026-11-20 (uncommitted), comparison with
+        alberto_branch in the README (`alberto_comparison/`): same interior equations with fields
+        and run-time outlet pressure; solution differences only from the boundary closure.
+        Original description: Per-cell fields `beta_ai`, `beta_cd`,
+        `beta_htc_g`, `beta_htc_l` (effective factor = `ClosureConfig` scalar x field,
+        default 1) and scalar `back_pressure` (overrides `BoundaryConfig.back_pressure`).
+        Check against alberto_branch (`step(..., p_out, ai_scale)` with column fields);
+        no second compilation when only values change. First version refuses fields in
+        grid sequencing.
+  - [x] **D. Tests and docs** in the existing style (two-fluid tests, model interface,
+        closure guide, migration note). Done 2026-11-20 (uncommitted): run-time inputs made
+        opt-in (`runtime_inputs=True`); full suite 788 passed; defaults bit-identical to commit
+        `a0303d6` (README).
