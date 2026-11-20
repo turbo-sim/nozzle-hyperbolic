@@ -202,6 +202,11 @@ remain in both PH table domains, have positive density, temperature, sound
 speed and transport data, and remain in the tabulated saturation-pressure
 interval when the selected physics reads saturation. This prevents JAXProp's
 endpoint saturation interpolation from silently supplying out-of-range physics.
+The interval is required only below the highest active cutoff (`p_mt_max` for
+phase change, `PhasePinConfig.pressure_cutoff` for the energy pin), for example in
+compressed liquid above the critical pressure. At and above it, no mass transfer
+occurs and the clamped saturation lookup only supplies the pinned ghost-vapor
+enthalpy, as in the upstream solver; saturation values must still be finite.
 
 `PhasePinConfig` selects independent, off-by-default equation changes: the
 binary vapor saturation-energy pin and the finite-time vapor momentum pin.

@@ -457,6 +457,62 @@ def test_binary_saturation_pin_does_not_replace_mass_equations():
     )
 
 
+@pytest.mark.parametrize(
+    "pins, closures, accepted",
+    [
+        (PhasePinConfig(saturation_energy=True, pressure_cutoff=1.4e5), None, True),
+        (PhasePinConfig(saturation_energy=True), None, False),
+        (
+            PhasePinConfig(saturation_energy=True, pressure_cutoff=1.4e5),
+            ClosureConfig(mass_transfer=True, area_law="original", p_mt_max=1.4e5),
+            True,
+        ),
+        (
+            PhasePinConfig(saturation_energy=True),
+            ClosureConfig(mass_transfer=True, area_law="original", p_mt_max=1.4e5),
+            False,
+        ),
+    ],
+)
+def test_saturation_range_required_only_below_active_cutoffs(pins, closures, accepted):
+    class Phase:
+        """Perfect gas with a clamped saturation table from 1.0 to 1.5 bar."""
+
+        logP_sat_vals = jnp.log(jnp.array((1.0e5, 1.25e5, 1.5e5)))
+
+        def __init__(self, enthalpy, finite=True):
+            self.fluid = jxp.FluidPerfectGas(name="Air")
+            self.enthalpy = enthalpy if finite else jnp.nan
+
+        def get_state(self, *args):
+            return self.fluid.get_state(*args)
+
+        def get_state_saturation(self, pressure):
+            return {
+                "enthalpy": jnp.zeros_like(pressure) + self.enthalpy,
+                "temperature": jnp.zeros_like(pressure) + 260.0,
+            }
+
+    def build(fg, fl):
+        return TwoFluidModel(
+            ConstantAreaGeometry().build_mesh(3),
+            fg,
+            fl,
+            initial_primitives=(2e5, 20.0, 20.0, 1e-4, 3e5, 2.4e5),
+            pins=pins,
+            closures=closures,
+        )
+
+    # Every cell is at 2 bar, above the saturation table.
+    if accepted:
+        build(Phase(5e5), Phase(2.5e5))
+    else:
+        with pytest.raises(ValueError, match="Initial state violates"):
+            build(Phase(5e5), Phase(2.5e5))
+    with pytest.raises(ValueError, match="Initial state violates"):
+        build(Phase(5e5, finite=False), Phase(2.5e5))
+
+
 def test_two_fluid_nonuniform_reconstructed_colored_jacobian_matches_dense():
     from nozzle_hyperbolic.solvers.fvm import Operator, Scheme
 

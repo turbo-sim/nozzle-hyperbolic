@@ -264,6 +264,29 @@ class TwoFluidModel:
             )
         )
 
+    @property
+    def _saturation_pressure_limit(self):
+        """Return the pressure in Pa at and above which no gate reads saturation data.
+
+        Mass transfer is gated off at and above ``ClosureConfig.p_mt_max`` and the
+        energy-pin gate at and above ``PhasePinConfig.pressure_cutoff``. Above the
+        highest active cutoff, the clamped saturation lookup only supplies the
+        pinned ghost enthalpy, as in the upstream solver. A user without a cutoff
+        returns infinity, so saturation data is required at every pressure.
+        """
+        c = self.closures
+        limits = []
+        if c is not None and (
+            c.mass_transfer
+            or c.htc_liquid_bubbly != "ranz_marshall"
+            or c.htc_liquid_droplet != "internal"
+        ):
+            limits.append(np.inf if c.p_mt_max is None else c.p_mt_max)
+        if self.pins.saturation_energy:
+            cutoff = self.pins.pressure_cutoff
+            limits.append(np.inf if cutoff is None else cutoff)
+        return max(limits, default=np.inf)
+
     def validate_scheme(self, scheme):
         """Validate the flux selection and implicit-only equation-pin contract."""
         if scheme.flux not in self.supported_fluxes:

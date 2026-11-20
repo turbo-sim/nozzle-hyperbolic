@@ -83,6 +83,8 @@ def cell_admissible(model, W):
     -----
     The phase-fraction threshold rejects states; it never clips them.
     Transport and saturation checks apply only when the selected physics needs them.
+    The saturation-table pressure range is required below the highest active
+    phase-change or pin cutoff; saturation values must be finite everywhere.
     """
     U = primitives(W)
     valid = (
@@ -135,8 +137,12 @@ def cell_admissible(model, W):
         if model._needs_saturation:
             sat_grid = getattr(fluid, "logP_sat_vals", None)
             if sat_grid is not None:
+                # At and above every active pressure cutoff no gate reads
+                # saturation data; there the clamped lookup only feeds the
+                # ghost energy pin. Finiteness is still checked below.
+                in_table = (p >= jnp.exp(sat_grid[0])) & (p <= jnp.exp(sat_grid[-1]))
                 valid = valid & jnp.all(
-                    (p >= jnp.exp(sat_grid[0])) & (p <= jnp.exp(sat_grid[-1]))
+                    in_table | (p >= model._saturation_pressure_limit)
                 )
             sat = fluid.get_state_saturation(p)
             valid = valid & jnp.all(
