@@ -19,8 +19,12 @@ existing validation evidence.
 
 The relevant implementation is split between the native package and the
 [v2 development study](../../development/two_fluid_test_v2/README.md). This note
-explains the prototype; its numerical changes have not been promoted into
-`src/`.
+explains the prototype. Its arms are now available in `src/` as default-off
+options: `CompatibilityConfig(k_free=True)` corresponds to the inverse-free arm
+with the old sonic law, and `CompatibilityConfig(k_free=True, smooth=True)` to
+the combined arm. The defaults retain the native operator. See the
+[two-fluid guide](two_fluid_migration.md) and the
+[K-free port study](../../development/two-fluid/README.md).
 
 ## 1. What conservative Euler discretization gives us
 
@@ -878,6 +882,8 @@ the mixture sum. External geometry and closure sources retain their own
 physical contributions. The phase-energy NC rows do not generally sum to
 zero at finite slip; they must be checked as part of the complete retained
 energy balance, not discarded to manufacture a different conservation law.
+The measured size of that energy imbalance on the nitrogen-water cases is
+recorded in the [two-fluid guide](two_fluid_migration.md).
 
 The [v2 results](../../development/two_fluid_test_v2/RESULTS.md) and
 [standalone report](../../development/two_fluid_test_v2/REPORT_two_fluid_inverse_free.html)
@@ -921,6 +927,7 @@ validated cases, with separate finite-grid accuracy and shock-path limitations.
 - [Native inverse action](../../src/nozzle_hyperbolic/models/two_fluid/flux.py): `compatible_flux_solve` and `nonconservative_correction`.
 - [Native cell assembly](../../src/nozzle_hyperbolic/models/two_fluid/model.py): `integrated_nonconservative`.
 - [Prototype quadrature and assembly](../../development/two_fluid_test_v2/scripts/numerics.py): `path_nc` and `AblationModel.integrated_nonconservative`.
+- [Packaged K-free kernels](../../src/nozzle_hyperbolic/models/two_fluid/flux.py): `k_free_interface_flux` and `k_free_path_nonconservative`; the model selects them with `CompatibilityConfig(k_free=True)` and the operator's `nonconservative_mode="path"`.
 - Earlier local formulation, `development/two_fluid_test_v1/formulation.md`: sonic regularization, small-slip grouping and additional validation qualifications. This local study record is not included in this documentation commit; the versioned [v2 study guide](../../development/two_fluid_test_v2/README.md) documents the retained formulation and qualifications.
 - Dal Maso, LeFloch and Murat (1995), [*Definition and weak stability of nonconservative products*](https://iris.sissa.it/handle/20.500.11767/16373), J. Math. Pures Appl. 74, 483–548. Foundational reference for path-defined products.
 - Parés (2006), [*Numerical methods for nonconservative hyperbolic systems: a theoretical framework*](https://epubs.siam.org/doi/10.1137/050628052), SIAM J. Numer. Anal. 44, 300–321.

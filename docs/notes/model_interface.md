@@ -257,6 +257,15 @@ contract; it does not implement a general path-conservative jump condition.
 The declared radius covers the full-state reach with constant reconstruction;
 the engine adds one state block for MUSCL to cover raw-flux dependencies.
 
+For `nonconservative_mode="path"`, provide
+`integrated_nonconservative(full, unfiltered_flux, faces=None)` with the same
+radius and `supported_fluxes` declarations. The engine passes
+`faces=(left, right)`: the reconstructed face states used by the face flux, in
+the iteration frame. The model owns the path, quadrature and geometry pairing,
+and returns integrated $(N,T)$ terms added to the spatial residual. The same
+MUSCL radius extension applies. The two-fluid model selects this mode with
+`CompatibilityConfig(k_free=True)`.
+
 `flux="model_compatibility"` requires the face-local callback
 `numerical_face_flux(left,right,scheme)`. This enables a documented historical
 flux whose physical decomposition does not fit the generic flux families.

@@ -135,6 +135,49 @@ defaults differ and remain unchanged; direct kernel callers must choose their
 parameters deliberately. Sonic expansion crossings activate face-dependent
 smoothing, with a small robustness band elsewhere.
 
+`CompatibilityConfig` also provides two default-off numerical options, added
+after this cleanup. With the defaults the operator above is unchanged bit for bit.
+
+| Option | Default | Effect |
+|---|---|---|
+| `k_free` | `False` | K-free face flux and straight-path NC integral; `nc_form` is not used |
+| `smooth` | `False` | Continuous Harten magnitude on every wave and on $u_1$, without the sonic-crossing test; applies to either flux |
+| `smooth_width` | `0.02` | Harten width $\delta$ as a fraction of $a_{mix}$ |
+
+With `k_free=True` neither kernel solves with $K$. `k_free_interface_flux`
+keeps the signed weights, low-Mach factor and slip blend of the native flux, but
+applies its viscosity to the primitive jump,
+
+$$
+\widehat F=\tfrac12(F_L+F_R)
+-\tfrac12 J(\overline U_h)\sum_k z_k m_k r_k\,
+\frac{l_k\cdot(U_{h,R}-U_{h,L})}{D_k},
+$$
+
+with $m_k=\lambda_k s_k$, or the Harten magnitude $m_k=H_\delta(\lambda_k)$ with
+`smooth`. The model then selects the operator's `nonconservative_mode="path"`.
+`k_free_path_nonconservative` integrates $X\,dU_h$ along straight primitive
+paths with two Gauss points, and the cell assembly is
+
+$$
+N_i=\tfrac12A_{i+1/2}\mathcal P_{i+1/2}+\tfrac12A_{i-1/2}\mathcal P_{i-1/2}
++A_i\mathcal P_i ,
+$$
+
+where $\mathcal P_{i\pm1/2}$ are the face-jump paths and $\mathcal P_i$ is the
+within-cell path, zero for constant reconstruction. A uniform state gives exactly
+zero, so no `wb` subtraction is needed. `k_free` is refused together with
+`mass_upwind_cutoff`. The four switch combinations reproduce the four arms of the
+[v2 study](../../development/two_fluid_test_v2/README.md) to roundoff; the
+derivation is in [nonconservative terms](nonconservative_terms.md) and the port
+evidence in the [K-free port study](../../development/two-fluid/README.md).
+On the NICFD nitrogen-water cases, K-free converged on every tested grid
+(100-800 cells), whereas the native operator stagnated at 200 cells for the
+shocked and adapted flows. The native operator also keeps a grid-independent
+void-fraction bump at the $\det K=0$ point; near that point the two operators
+converge to different limits. These are tested-case observations, not a
+general convergence result.
+
 Interphase source densities are multiplied by cell volume and `source_scale`.
 The separate `D_VE_area` receives the exact face-area difference $A_R-A_L$ and
 already returns an integrated source. It must not receive a second cell-volume
@@ -235,6 +278,7 @@ The maintained [two-fluid tests](../../tests/models/two_fluid) cover matrix and
 source identities, intrinsic-density constraints, area balance, phase-rest and
 reverse-flow AD, closure selectors, table rejection, phase pins, characteristic
 boundaries, Jacobian assembly and coupled/segregated implicit consistency.
+`test_k_free.py` covers the default-off `k_free` and `smooth` options.
 The pinned [upstream fixture](../../tests/regression/test_upstream_compatibility.py)
 and [saved-solution regression](../../tests/regression/test_saved_solutions.py)
 provide independent compatibility checks. Snapshot arrays, source archives and
@@ -289,5 +333,19 @@ poetry run python -B -m pytest tests -q --cov=nozzle_hyperbolic
 
 Matching historical results does not validate every empirical correlation.
 Alberto's physical review remains useful, especially for source/energy balances,
-closure calibration and the limits of phase pins. Numerical-policy changes should
+closure calibration and the limits of phase pins.
+
+The model equations do not conserve mixture total energy. The phase-energy NC
+rows do not cancel between the phases, and the source vector carries
+interface-related inviscid terms in addition to the closures. The current
+explanation is that the interfacial forces are written so that they do not
+increase phase entropy; the imbalance is then energy exchanged with the
+interface. It belongs to the formulation, not to a discretization: the native
+and K-free operators give the same budget. On the NICFD nitrogen-water cases at
+400 cells the mixture total enthalpy per unit mass rises from inlet to outlet by
+3.6% (subsonic), 6.8% (shocked) and 9.8% (adapted), and the outlet gas
+temperature exceeds the 295.15 K inlet temperature (300 K subsonic, 304 K
+shocked). Acknowledge this property when reporting results. The budget is in
+the [K-free port study](../../development/two-fluid/README.md); the per-phase
+entropy verification of the explanation is still open. Numerical-policy changes should
 be reviewed separately from this relocation so their effects remain attributable.
