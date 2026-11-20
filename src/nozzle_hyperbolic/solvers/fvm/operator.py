@@ -142,7 +142,7 @@ class Operator:
         # Old external conservative models retain their square contract. Every
         # packaged model explicitly declares its nonconservative capability.
         nc_mode = getattr(model, "nonconservative_mode", "none")
-        if nc_mode not in ("none", "flux_difference"):
+        if nc_mode not in ("none", "flux_difference", "path"):
             raise ValueError("Unsupported nonconservative_mode")
         if nc_mode != "none" and not hasattr(model, "supported_fluxes"):
             raise ValueError("Nonconservative models must explicitly declare supported_fluxes")
@@ -279,8 +279,14 @@ class Operator:
             require_shape(shape_of(name, arg), expected, name)
         if nconstraints:
             require_shape(shape_of("cell_constraints", cell_abstract), (n, nconstraints), "cell_constraints")
-        if nc_mode != "none":
+        if nc_mode == "flux_difference":
             require_shape(shape_of("integrated_nonconservative", full_abstract, flux_abstract),
+                          (n, ntransport), "integrated_nonconservative")
+        elif nc_mode == "path":
+            if not callable(getattr(model, "integrated_nonconservative", None)):
+                raise ValueError("Model must supply callable integrated_nonconservative")
+            require_shape(jax.eval_shape(lambda f, q, l, r: model.integrated_nonconservative(f, q, faces=(l, r)),
+                                         full_abstract, flux_abstract, face_abstract, face_abstract),
                           (n, ntransport), "integrated_nonconservative")
         if callable(getattr(model, "stabilization_flux", None)):
             require_shape(shape_of("stabilization_flux", full_abstract, flux_abstract),
@@ -614,6 +620,10 @@ class Operator:
         def nonconservative(full, raw_flux):
             if nc_mode == "none":
                 return jnp.zeros((n, ntransport), dtype=full.dtype)
+            if nc_mode == "path":
+                # Path integrals need the reconstructed face states; the
+                # repeated reconstruction is common-subexpression under jit.
+                return model.integrated_nonconservative(full, raw_flux, faces=reconstruct(full))
             return model.integrated_nonconservative(full, raw_flux)
 
         def contributions(full):
