@@ -174,3 +174,41 @@ def test_neighbor_flux_nonconservative_callback_includes_muscl_stencil_extension
     np.testing.assert_allclose(operator.jacobian(*args), dense, rtol=2e-14, atol=2e-14)
     # Physical row one genuinely reaches full-state block four after MUSCL.
     assert dense[2, 8] != 0
+
+
+@pytest.mark.parametrize("reconstruction", ["constant", "muscl_van_albada"])
+def test_path_nonconservative_mode_receives_reconstructed_faces(reconstruction):
+    class PathNonconservative(_MappedBurgers):
+        nonconservative_mode = "path"
+        nonconservative_dependency_radius = 1
+        supported_fluxes = ("rusanov",)
+
+        def integrated_nonconservative(self, full, raw, faces=None):
+            left, right = faces
+            jumps = right[:, :1] - left[:, :1]
+            inside = left[1:, :1] - right[:-1, :1]
+            return full[1:-1, :1] * (0.5 * jumps[1:] + 0.5 * jumps[:-1] + inside)
+
+    model = PathNonconservative()
+    operator = Operator(model, Scheme(flux="rusanov", reconstruction=reconstruction))
+    assert operator.radius == (1 if reconstruction == "constant" else 2)
+    full = model.initial_state()
+    faces = operator.reconstruct(full)
+    expected = model.integrated_nonconservative(full, None, faces=faces)
+    assert float(jnp.max(jnp.abs(expected))) > 0
+    np.testing.assert_allclose(
+        operator.residual_contributions(full)["nonconservative"], expected, atol=1e-15
+    )
+    args = (full.ravel(), full.ravel(), 0.02, 0.0)
+    np.testing.assert_allclose(
+        operator.jacobian(*args), operator.dense_jacobian(*args), rtol=2e-14, atol=2e-14
+    )
+
+
+def test_unknown_nonconservative_mode_rejected():
+    class Unknown(_MappedBurgers):
+        nonconservative_mode = "flux_path"
+        supported_fluxes = ("rusanov",)
+
+    with pytest.raises(ValueError, match="Unsupported nonconservative_mode"):
+        Operator(Unknown(), Scheme(flux="rusanov"))
