@@ -55,6 +55,8 @@ def calculate_drag_force_one_component(
     blend="linear",
     drag_bubbly="schiller_naumann",
     drag_droplet="schiller_naumann",
+    drag_scale_bubbly=1.0,
+    drag_scale_droplet=1.0,
 ):
     """Evaluate signed interphase resistance across bubbly and droplet regimes.
 
@@ -76,6 +78,8 @@ def calculate_drag_force_one_component(
         Linear interpolation of endpoint forces, or smoothstep of current-state laws.
     drag_bubbly, drag_droplet : {'schiller_naumann', 'ishii_zuber'}, optional
         Drag law for each regime; Ishii-Zuber includes its viscous regime only.
+    drag_scale_bubbly, drag_scale_droplet : float, optional
+        Positive constant factors on the drag coefficient of each regime.
 
     Returns
     -------
@@ -88,7 +92,8 @@ def calculate_drag_force_one_component(
     The Stokes singularity is canceled analytically, preserving a finite
     value and derivative at zero slip without a velocity floor. The linear
     transition freezes bubbly/droplet laws at their respective thresholds;
-    smoothstep evaluates both laws at the actual volume fraction.
+    smoothstep evaluates both laws at the actual volume fraction. The force is
+    linear in the drag coefficient, so each scale multiplies its regime force.
     """
     if drag_bubbly not in DRAG_LAWS or drag_droplet not in DRAG_LAWS:
         raise ValueError(
@@ -97,7 +102,7 @@ def calculate_drag_force_one_component(
     u_rel = u1 - u2
     u_rel_abs = jnp.abs(u_rel)
 
-    def force(law, rho_c, mu_c, mu_d, alpha_disp):
+    def force(law, rho_c, mu_c, mu_d, alpha_disp, scale):
         # Cancel |du| against Cd's 1/Re analytically before evaluation.
         # The remaining odd power has value/derivative zero at rest. Its
         # inactive branch uses 1 only to avoid 0**fractional AD; this is not
@@ -112,7 +117,8 @@ def calculate_drag_force_one_component(
         safe_abs = jnp.where(u_rel == 0.0, 1.0, u_rel_abs)
         odd_power = jnp.where(u_rel == 0.0, 0.0, u_rel * safe_abs**exponent)
         return (
-            18.0
+            scale
+            * 18.0
             * viscosity
             * alpha_disp
             / d**2
@@ -120,14 +126,14 @@ def calculate_drag_force_one_component(
         )
 
     def bubbly(_):
-        return force(drag_bubbly, rho2, mu2, mu1, alpha1)
+        return force(drag_bubbly, rho2, mu2, mu1, alpha1, drag_scale_bubbly)
 
     def droplet(_):
-        return force(drag_droplet, rho1, mu1, mu2, alpha2)
+        return force(drag_droplet, rho1, mu1, mu2, alpha2, drag_scale_droplet)
 
     def transition(_):
-        F_b = force(drag_bubbly, rho2, mu2, mu1, alpha_b)
-        F_d = force(drag_droplet, rho1, mu1, mu2, 1.0 - alpha_d)
+        F_b = force(drag_bubbly, rho2, mu2, mu1, alpha_b, drag_scale_bubbly)
+        F_d = force(drag_droplet, rho1, mu1, mu2, 1.0 - alpha_d, drag_scale_droplet)
         w = (alpha1 - alpha_b) / (alpha_d - alpha_b)
         return F_b + (F_d - F_b) * w
 

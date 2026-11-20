@@ -207,7 +207,7 @@ Important conventions retained for review:
   Without mass transfer, phase HTCs act in series with equal/opposite heat sources.
 - Area laws retain their different calibrations. Polynomial defaults fit
   historical segment points, not the current segment defaults. The original
-  number-density law scales diameter inversely with `ai_scale`, including its
+  number-density law scales diameter inversely with `beta_ai`, including its
   original floor values; the other area laws reapply their diameter floor.
 - `D_s_primitive` and `D_VE_conservative` remain independent source-identity
   verification routes. Production uses the algebraic source functions. General

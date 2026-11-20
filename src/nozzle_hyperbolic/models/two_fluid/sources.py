@@ -26,6 +26,7 @@ from .closures import (
     calculate_heat_transfer_one_component,
     calculate_mass_transfer_lv,
     get_interfacial_area,
+    jakob_growth_nusselt,
     jakob_nusselt,
     liao_nusselt,
     ranz_marshall_htc_two_fluid,
@@ -188,17 +189,24 @@ def two_fluid_closure(
     area_law="polynomial",  # interfacial area law: original | polynomial | parabola
     # (closures.INTERFACIAL_AREA_LAWS, including segments)
     area_params=None,  # dict of keyword overrides for that law, e.g. {"d_min": 6.5e-5}
-    ai_scale=1.0,  # correction of the law in this cell (field inversion, beta):
-    # ai -> ai_scale * ai, and d follows from the scaled ai
+    beta_ai=1.0,  # correction factor of the area law in this cell:
+    # ai -> beta_ai * ai, and d follows from the scaled ai
     smooth_slip=False,  # True → Ranz-Marshall Re from the smooth effective slip
     # sqrt(du² + smooth_slip_u0²); False → |du| (cusp at du = 0).
     smooth_slip_u0=2.0,  # [m/s] optional effective-slip scale
     nu_g_int=None,  # internal Nusselt number of the vapour (bubbles, htc_g = k_g Nu / d);
     # None → 120 with mass transfer, 12 without (the earlier constants)
-    htc_liquid_bubbly="ranz_marshall",  # liquid-side HTC, bubbly regime: ranz_marshall | jakob | max | liao
-    htc_liquid_droplet="internal",  # liquid-side HTC, droplet regime: internal | jakob | max
+    nu_l_int=None,  # internal Nusselt number of the liquid (droplets, regime_htc only);
+    # None → 12 with mass transfer, 2 pi^2/3 without (the earlier constants)
+    htc_liquid_bubbly="ranz_marshall",  # liquid-side HTC, bubbly regime: ranz_marshall | jakob | max | liao | sum
+    htc_liquid_droplet="internal",  # liquid-side HTC, droplet regime: internal | jakob | max | sum
     drag_bubbly="schiller_naumann",  # drag coefficient, bubbly regime: schiller_naumann | ishii_zuber
     drag_droplet="schiller_naumann",  # drag coefficient, droplet regime: schiller_naumann | ishii_zuber
+    drag_scale_bubbly=1.0,  # constant factor on C_d, bubbly regime
+    drag_scale_droplet=1.0,  # constant factor on C_d, droplet regime
+    beta_cd=1.0,  # correction factor on the final drag force in this cell
+    beta_htc_g=1.0,  # correction factor on the final gas-side HTC in this cell
+    beta_htc_l=1.0,  # correction factor on the final liquid-side HTC in this cell
 ) -> TwoFluidClosure:
     """Assemble interphase exchange using Alberto's phase and sign conventions.
 
@@ -238,7 +246,7 @@ def two_fluid_closure(
         Registered interfacial-area correlation.
     area_params : dict or None, optional
         Correlation overrides; explicit law parameters take precedence over defaults.
-    ai_scale : scalar, optional
+    beta_ai : scalar, optional
         Area multiplier, applied before deriving the dispersed diameter.
     smooth_slip : bool, optional
         Enable the smooth effective slip in Ranz-Marshall HTCs.
@@ -246,10 +254,18 @@ def two_fluid_closure(
         Effective-slip scale in m/s.
     nu_g_int : float or None, optional
         Internal gas Nusselt number; None retains 120 with phase change, 12 without.
+    nu_l_int : float or None, optional
+        Internal liquid-droplet Nusselt number used with ``regime_htc``; None
+        retains 12 with phase change and ``2*pi**2/3`` without.
     htc_liquid_bubbly, htc_liquid_droplet : str, optional
-        Liquid HTC selections; Jakob/Liao options require mass transfer.
+        Liquid HTC selections; Jakob/Liao/sum options require mass transfer.
     drag_bubbly, drag_droplet : str, optional
         Drag laws for bubbly and droplet regimes.
+    drag_scale_bubbly, drag_scale_droplet : float, optional
+        Positive constant factors on the drag coefficient of each regime.
+    beta_cd, beta_htc_g, beta_htc_l : scalar, optional
+        Positive correction factors on the final drag force and on the final
+        gas/liquid HTCs, after the regime blend and the liquid-HTC selection.
 
     Returns
     -------
@@ -272,6 +288,11 @@ def two_fluid_closure(
     F_g/F_l/Q_g/Q_l are retained for the verification transformation only.
     The active algebraic source and ClosureConfig do not expose general
     external force or wall-heat support; no wall-friction law is supplied.
+
+    The correction factors act after every closure choice: ``beta_cd`` scales
+    the drag of both regimes (finite at zero slip), and ``beta_htc_g`` /
+    ``beta_htc_l`` scale the HTCs used by heat and mass transfer. A unit value
+    leaves the closure unchanged.
     """
     p, u_g, u_l, ag, h_g, h_l = U_h
     al = 1.0 - ag
@@ -343,7 +364,7 @@ def two_fluid_closure(
                     Nb=Nb,
                     Nd=Nd,
                     d_min_b=5e-6,
-                    ai_scale=ai_scale,
+                    beta_ai=beta_ai,
                 )
                 | (area_params or {})
             ),
@@ -368,11 +389,14 @@ def two_fluid_closure(
             blend=regime_blend,
             drag_bubbly=drag_bubbly,
             drag_droplet=drag_droplet,
+            drag_scale_bubbly=drag_scale_bubbly,
+            drag_scale_droplet=drag_scale_droplet,
         )
 
         # ── Heat transfer coefficients (Ranz-Marshall, continuous phase) ─────────
         du_abs = jnp.abs(u_g - u_l)
-        Nu_g, Nu_l = (120.0 if nu_g_int is None else float(nu_g_int)), 12.0
+        Nu_g = 120.0 if nu_g_int is None else float(nu_g_int)
+        Nu_l = 12.0 if nu_l_int is None else float(nu_l_int)
         ja_l = (
             rl * stl_ex["cp"][0] * (T_l - T_sat) / (rg * (h_sat_g - h_sat_l))
         )  # liquid Jakob number
@@ -438,7 +462,11 @@ def two_fluid_closure(
                 htc_l,
                 stl_ex["k"][0] * jakob_nusselt(ja_l) / d,
                 stl_ex["k"][0] * liao_nusselt(ja_l, pe_l) / d,
+                stl_ex["k"][0] * jakob_growth_nusselt(ja_l) / d,
             )
+
+        # Correction factors act on the final drag force and HTCs.
+        Fv_g, htc_g, htc_l = beta_cd * Fv_g, beta_htc_g * htc_g, beta_htc_l * htc_l
 
         # Assemble interface heat first, then obtain mass exchange from
         # the same balance. Apply one common gate to all three sources.
@@ -484,7 +512,7 @@ def two_fluid_closure(
                     Nb=Nb,
                     Nd=Nd,
                     d_min_b=5e-6,
-                    ai_scale=ai_scale,
+                    beta_ai=beta_ai,
                 )
                 | (area_params or {})
             ),
@@ -509,11 +537,14 @@ def two_fluid_closure(
             blend=regime_blend,
             drag_bubbly=drag_bubbly,
             drag_droplet=drag_droplet,
+            drag_scale_bubbly=drag_scale_bubbly,
+            drag_scale_droplet=drag_scale_droplet,
         )
 
         # ── Heat transfer coefficients (Ranz-Marshall, continuous phase) ─────────
         du_abs = jnp.abs(u_g - u_l)
         Nu_g = 12 if nu_g_int is None else float(nu_g_int)
+        Nu_l = 2.0 * jnp.pi**2 / 3.0 if nu_l_int is None else float(nu_l_int)
 
         if regime_htc:
             # Regime-dependent HTC: bubbly (α ≤ alpha_b) identical to the NICFD
@@ -537,6 +568,7 @@ def two_fluid_closure(
                 u_l,
                 d,
                 Nu1_int=Nu_g,
+                Nu2_int=Nu_l,
                 alpha_b=alpha_b,
                 alpha_d=alpha_d,
                 blend=regime_blend,
@@ -565,6 +597,9 @@ def two_fluid_closure(
                 d,
                 slip_u0,
             )
+
+        # Correction factors act on the final drag force and HTCs.
+        Fv_g, htc_g, htc_l = beta_cd * Fv_g, beta_htc_g * htc_g, beta_htc_l * htc_l
 
         htc = 1 / (1 / htc_g + 1 / htc_l)
 

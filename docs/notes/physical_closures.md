@@ -158,8 +158,8 @@ two-fluid wall-friction law was available.
 |---|---|---|
 | `area_law` | `original`, `polynomial`, `parabola`, `segments` | Interfacial area in m$^{-1}$ and diameter in m; `original` uses bubble/droplet counts per m$^3$. Other laws prescribe area from void fraction. |
 | `drag_bubbly`, `drag_droplet` | `schiller_naumann`, `ishii_zuber` | Independent selectors; Ishii–Zuber includes its viscous regime only, not distorted/Newton regimes. |
-| `htc_liquid_bubbly` | `ranz_marshall`, `jakob`, `max`, `liao` | Jakob/Liao choices require the mass-transfer/saturation formulation. |
-| `htc_liquid_droplet` | `internal`, `jakob`, `max` | Used when `regime_htc=True`; internal Nu is the declared upstream approximation. |
+| `htc_liquid_bubbly` | `ranz_marshall`, `jakob`, `max`, `liao`, `sum` | Jakob/Liao/sum choices require the mass-transfer/saturation formulation. `sum` adds the bubble-growth term $12\max(Ja,0)/\pi$ to the regime closure, without a second conduction limit. |
+| `htc_liquid_droplet` | `internal`, `jakob`, `max`, `sum` | Used when `regime_htc=True`; internal Nu is the declared upstream approximation. |
 | `regime_blend` | `linear`, `smoothstep` | Linear uses frozen end-regime drag values across the transition; smoothstep blends actual-state correlations with a $C^1$ weight. |
 | `mass_transfer` | true/false | One-component heat/mass exchange or two-component heat/drag. Positive mass source means liquid-to-gas evaporation. |
 

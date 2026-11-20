@@ -47,7 +47,7 @@ class ClosureConfig:
         'original', 'polynomial', 'parabola' or 'segments'.
     area_params : dict | None, optional
         Optional keyword overrides for the selected area law.
-    ai_scale : float, optional
+    beta_ai : float, optional
         Positive multiplier applied before diameter recovery.
     smooth_slip : bool, optional
         Use smooth effective slip in Ranz-Marshall HTCs.
@@ -55,14 +55,23 @@ class ClosureConfig:
         Effective-slip scale in m/s when smooth_slip is enabled.
     nu_g_int : float | None, optional
         Internal gas Nu; None retains 120 with phase change, 12 without.
+    nu_l_int : float | None, optional
+        Internal liquid-droplet Nu with regime_htc; None retains 12 with phase
+        change, 2*pi**2/3 without.
     htc_liquid_bubbly : str, optional
-        'ranz_marshall', 'jakob', 'max' or 'liao'.
+        'ranz_marshall', 'jakob', 'max', 'liao' or 'sum'.
     htc_liquid_droplet : str, optional
-        'internal', 'jakob' or 'max'.
+        'internal', 'jakob', 'max' or 'sum'.
     drag_bubbly : str, optional
         'schiller_naumann' or viscous-regime 'ishii_zuber'.
     drag_droplet : str, optional
         Drag selection for droplets; same options as drag_bubbly.
+    drag_scale_bubbly, drag_scale_droplet : float, optional
+        Positive constant factors on the drag coefficient of each regime.
+    beta_cd : float, optional
+        Positive correction factor on the final drag force.
+    beta_htc_g, beta_htc_l : float, optional
+        Positive correction factors on the final gas/liquid HTCs.
     """
 
     Nb: float = 1e10
@@ -77,14 +86,20 @@ class ClosureConfig:
     p_mt_max: float | None = None
     area_law: str = "polynomial"
     area_params: dict | None = None
-    ai_scale: float = 1.0
+    beta_ai: float = 1.0
     smooth_slip: bool = False
     smooth_slip_u0: float = 2.0
     nu_g_int: float | None = None
+    nu_l_int: float | None = None
     htc_liquid_bubbly: str = "ranz_marshall"
     htc_liquid_droplet: str = "internal"
     drag_bubbly: str = "schiller_naumann"
     drag_droplet: str = "schiller_naumann"
+    drag_scale_bubbly: float = 1.0
+    drag_scale_droplet: float = 1.0
+    beta_cd: float = 1.0
+    beta_htc_g: float = 1.0
+    beta_htc_l: float = 1.0
 
     def __post_init__(self):
         _finite_fields(self)
@@ -98,21 +113,33 @@ class ClosureConfig:
 
         if not (0 < self.alpha_b < self.alpha_d < 1):
             raise ValueError("Require 0 < alpha_b < alpha_d < 1")
-        if min(self.Nb, self.Nd, self.ai_scale, self.gate_dT, self.gate_dh) <= 0:
+        if min(self.Nb, self.Nd, self.beta_ai, self.gate_dT, self.gate_dh) <= 0:
             raise ValueError(
                 "Closure number densities, area scale and gate widths must be positive"
             )
+        if (
+            min(
+                self.drag_scale_bubbly,
+                self.drag_scale_droplet,
+                self.beta_cd,
+                self.beta_htc_g,
+                self.beta_htc_l,
+            )
+            <= 0
+        ):
+            raise ValueError("Drag scales and correction factors must be positive")
         if not self.mass_transfer and (
             self.htc_liquid_bubbly,
             self.htc_liquid_droplet,
         ) != ("ranz_marshall", "internal"):
             raise ValueError(
-                "Jakob/Liao liquid HTCs require mass_transfer=True in the frozen model"
+                "Jakob/Liao/sum liquid HTCs require mass_transfer=True in the frozen model"
             )
         if (
             self.smooth_slip_u0 < 0
             or (self.smooth_slip and self.smooth_slip_u0 == 0)
             or (self.nu_g_int is not None and self.nu_g_int <= 0)
+            or (self.nu_l_int is not None and self.nu_l_int <= 0)
         ):
             raise ValueError("Invalid slip regularization or internal Nusselt number")
         if self.p_mt_max is not None and self.p_mt_max <= 0:

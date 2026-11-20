@@ -20,7 +20,7 @@ def interfacial_area_original(
     d_min_b=1e-5,
     d_min_d=1e-5,
     d_min=1e-5,
-    ai_scale=1.0,
+    beta_ai=1.0,
 ):
     """TA-BD interfacial area density with nucleation and breakup floors.
 
@@ -42,7 +42,7 @@ def interfacial_area_original(
         Minimum droplet diameter in m; used by the original law.
     d_min : float, optional
         Unused common-protocol keyword; this law uses d_min_b and d_min_d.
-    ai_scale : float, optional
+    beta_ai : float, optional
         Positive area multiplier, applied before recovering diameter.
 
     Returns
@@ -63,7 +63,7 @@ def interfacial_area_original(
       4. 0.7 <= alpha < alpha_d_star   : droplet regime
       5. alpha >= alpha_d_star         : breakup floor (constant ai, d = d_min_d)
 
-    The final correction is ai -> ai_scale*ai and d -> d/ai_scale. The
+    The final correction is ai -> beta_ai*ai and d -> d/beta_ai. The
     unscaled bubble/droplet floors therefore scale with the diameter too;
     unlike the other area laws, no diameter floor is reapplied afterwards.
     This retains Alberto's correlation exactly. Unused protocol keywords
@@ -134,7 +134,7 @@ def interfacial_area_original(
         None,
     )
 
-    return ai_scale * ai, d / ai_scale
+    return beta_ai * ai, d / beta_ai
 
 
 def dispersed_fraction(alpha, eps=0.1):
@@ -188,7 +188,7 @@ def interfacial_area_poly(
     Nd=1e10,
     d_min_b=1e-5,
     d_min_d=1e-5,
-    ai_scale=1.0,
+    beta_ai=1.0,
 ):
     """Evaluate Alberto's Bernstein-polynomial interfacial area and diameter.
 
@@ -214,7 +214,7 @@ def interfacial_area_poly(
         Minimum bubble diameter in m; used by the original law.
     d_min_d : float, optional
         Minimum droplet diameter in m; used by the original law.
-    ai_scale : float, optional
+    beta_ai : float, optional
         Positive area multiplier, applied before recovering diameter.
 
     Returns
@@ -234,19 +234,19 @@ def interfacial_area_poly(
         ai_unscaled = sum_k ai_ctrl[k] * C(N, k) * alpha^k * (1-alpha)^(N-k)
 
     Its endpoints are the first/last controls and its value lies between
-    the minimum/maximum controls. The actual area is ai_scale*ai_unscaled.
+    the minimum/maximum controls. The actual area is beta_ai*ai_unscaled.
     Diameter follows d=6*alpha_disp/ai with d>=d_min, as in the parabola
     and segment laws.
 
     The default Bernstein controls retain Alberto's historical fit; they are
     not a fit to the current segment-law defaults.
 
-    ai_scale multiplies ai (field-inversion correction); d follows from the scaled ai.
+    beta_ai multiplies ai (correction factor); d follows from the scaled ai.
 
     Unused protocol keywords retain Alberto's common area-law signature.
     """
     N = len(ai_ctrl) - 1
-    ai = ai_scale * sum(
+    ai = beta_ai * sum(
         c * math.comb(N, k) * alpha**k * (1.0 - alpha) ** (N - k)
         for k, c in enumerate(ai_ctrl)
     )
@@ -266,7 +266,7 @@ def interfacial_area_para(
     Nb=10e12,
     Nd=10e10,
     d_min_b=5e-6,
-    ai_scale=1.0,
+    beta_ai=1.0,
 ):
     """Interfacial area density for data assimilation: inverted parabola in alpha.
 
@@ -292,7 +292,7 @@ def interfacial_area_para(
         Droplet number density in 1/m**3; used by the original law.
     d_min_b : float, optional
         Minimum bubble diameter in m; used by the original law.
-    ai_scale : float, optional
+    beta_ai : float, optional
         Positive area multiplier, applied before recovering diameter.
 
     Returns
@@ -306,7 +306,7 @@ def interfacial_area_para(
     -----
     Interfacial area density for data assimilation: inverted parabola in alpha.
 
-    Before ai_scale is applied, ai(0)=ai(1)=a_min and ai(0.5)=a_max.
+    Before beta_ai is applied, ai(0)=ai(1)=a_min and ai(0.5)=a_max.
 
     The diameter follows from the monodisperse-sphere relation ai = 6 alpha_disp / d,
     where alpha_disp is the volume fraction of the dispersed phase, a smooth version of
@@ -317,15 +317,15 @@ def interfacial_area_para(
         alpha > 0.5 : misty  (liquid dispersed), alpha_disp ~ 1-alpha
 
     Nucleation / breakup floor (as in interfacial_area): the diameter never drops below
-    d_min, so d(0)=d(1)=d_min and ai(0)=ai(1)=ai_scale*a_min remain finite.
+    d_min, so d(0)=d(1)=d_min and ai(0)=ai(1)=beta_ai*a_min remain finite.
     The floor is active for alpha_disp < ai*d_min/6, where ai=6*alpha_disp/d no
     longer holds (minimum-size bubbles/droplets, as in the prior's floor regions).
 
-    ai_scale multiplies ai (field-inversion correction); d follows from the scaled ai.
+    beta_ai multiplies ai (correction factor); d follows from the scaled ai.
 
     Unused protocol keywords retain Alberto's common area-law signature.
     """
-    ai = ai_scale * (a_min + (a_max - a_min) * 4.0 * alpha * (1.0 - alpha))
+    ai = beta_ai * (a_min + (a_max - a_min) * 4.0 * alpha * (1.0 - alpha))
     alpha_disp = dispersed_fraction(alpha, eps)
     d = jnp.maximum(6.0 * alpha_disp / ai, d_min)
     return ai, d
@@ -343,7 +343,7 @@ def interfacial_area_segments(
     Nb=10e12,
     Nd=10e10,
     d_min_b=5e-6,
-    ai_scale=1.0,
+    beta_ai=1.0,
 ):
     """Interfacial area density for data assimilation: piecewise linear in alpha.
 
@@ -371,7 +371,7 @@ def interfacial_area_segments(
         Droplet number density in 1/m**3; used by the original law.
     d_min_b : float, optional
         Minimum bubble diameter in m; used by the original law.
-    ai_scale : float, optional
+    beta_ai : float, optional
         Positive area multiplier, applied before recovering diameter.
 
     Returns
@@ -397,7 +397,7 @@ def interfacial_area_segments(
     The retained default points peak at 24000 1/m for alpha=0.7.
     They are correlation parameters, not a guarantee of solver convergence.
 
-    ai_scale multiplies ai (field-inversion correction); d follows from the scaled ai.
+    beta_ai multiplies ai (correction factor); d follows from the scaled ai.
 
     Unused protocol keywords retain Alberto's common area-law signature.
     """
@@ -423,7 +423,7 @@ def interfacial_area_segments(
         ai = jnp.maximum(ai, min(ys))
     else:
         ai = jnp.interp(alpha, jnp.asarray(xs), jnp.asarray(ys))
-    ai = ai_scale * ai
+    ai = beta_ai * ai
     alpha_disp = dispersed_fraction(alpha, eps)
     d = jnp.maximum(6.0 * alpha_disp / ai, d_min)
     return ai, d

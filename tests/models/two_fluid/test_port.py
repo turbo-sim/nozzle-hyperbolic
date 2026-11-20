@@ -289,11 +289,11 @@ def test_coupled_and_segregated_implicit_steps_solve_same_two_fluid_traces():
     + [{"regime_blend": name, "regime_htc": True} for name in ("linear", "smoothstep")]
     + [
         {"htc_liquid_bubbly": name}
-        for name in ("ranz_marshall", "jakob", "max", "liao")
+        for name in ("ranz_marshall", "jakob", "max", "liao", "sum")
     ]
     + [
         {"htc_liquid_droplet": name, "regime_htc": True}
-        for name in ("internal", "jakob", "max")
+        for name in ("internal", "jakob", "max", "sum")
     ],
 )
 def test_every_closure_selector_has_finite_values_and_ad(options):

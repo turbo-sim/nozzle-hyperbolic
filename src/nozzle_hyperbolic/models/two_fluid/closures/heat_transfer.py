@@ -10,10 +10,10 @@ import jax.numpy as jnp
 from .regimes import regime_weight
 
 
-LIQUID_HTC_BUBBLY = ("ranz_marshall", "jakob", "max", "liao")
+LIQUID_HTC_BUBBLY = ("ranz_marshall", "jakob", "max", "liao", "sum")
 
 
-LIQUID_HTC_DROPLET = ("internal", "jakob", "max")
+LIQUID_HTC_DROPLET = ("internal", "jakob", "max", "sum")
 
 
 def jakob_nusselt(ja):
@@ -34,6 +34,28 @@ def jakob_nusselt(ja):
     This closure is independent of slip (Plesset-Zwick bubble-growth scaling).
     """
     return jnp.maximum(2.0, 12.0 / jnp.pi * ja)
+
+
+def jakob_growth_nusselt(ja):
+    """Evaluate the bubble-growth part of the Jakob Nusselt number.
+
+    Parameters
+    ----------
+    ja : scalar
+        Liquid Jakob number ``rho_l*cp_l*(T_l-T_sat)/(rho_g*h_fg)``.
+
+    Returns
+    -------
+    scalar
+        ``12*max(Ja, 0)/pi``, without the conduction lower bound.
+
+    Notes
+    -----
+    The 'sum' liquid-HTC option adds this term to a regime closure that already
+    contains conduction (Ranz-Marshall or the internal droplet value), so the
+    conduction limit is not counted twice.
+    """
+    return 12.0 / jnp.pi * jnp.maximum(ja, 0.0)
 
 
 def liao_nusselt(ja, pe):
@@ -59,22 +81,25 @@ def liao_nusselt(ja, pe):
     return jnp.sqrt(jnp.maximum(12.0 / jnp.pi**2 * ja**2 + pe / (3.0 * jnp.pi), 1e-12))
 
 
-def select_liquid_htc(option, htc_default, htc_jakob, htc_liao=None):
+def select_liquid_htc(option, htc_default, htc_jakob, htc_liao=None, htc_growth=None):
     """Select the liquid-side HTC for one regime.
 
     Parameters
     ----------
     option : str
-        Validated regime law: default, 'jakob', 'max', or 'liao'.
+        Validated regime law: default, 'jakob', 'max', 'liao', or 'sum'.
     htc_default, htc_jakob : scalar
         Regime-default and thermal-diffusion HTCs in W/(m**2 K).
     htc_liao : scalar or None, optional
         Convection/superheat HTC required when selecting 'liao'.
+    htc_growth : scalar or None, optional
+        Bubble-growth HTC from :func:`jakob_growth_nusselt`, required by 'sum'.
 
     Returns
     -------
     scalar
-        Selected HTC in W/(m**2 K); 'max' compares default and Jakob values.
+        Selected HTC in W/(m**2 K); 'max' compares default and Jakob values,
+        'sum' adds the growth term to the regime default.
 
     Notes
     -----
@@ -86,6 +111,8 @@ def select_liquid_htc(option, htc_default, htc_jakob, htc_liao=None):
         return jnp.maximum(htc_default, htc_jakob)
     if option == "liao":
         return htc_liao
+    if option == "sum":
+        return htc_default + htc_growth
     return htc_default
 
 
@@ -180,9 +207,9 @@ def calculate_heat_transfer_one_component(
         Ranz-Marshall slip regularization in m/s; zero retains absolute slip.
     ja : scalar, optional
         Liquid Jakob number used by thermal-diffusion alternatives.
-    liquid_bubbly : {'ranz_marshall', 'jakob', 'max', 'liao'}, optional
+    liquid_bubbly : {'ranz_marshall', 'jakob', 'max', 'liao', 'sum'}, optional
         Liquid-side law in the bubbly regime.
-    liquid_droplet : {'internal', 'jakob', 'max'}, optional
+    liquid_droplet : {'internal', 'jakob', 'max', 'sum'}, optional
         Liquid-side law in the droplet regime.
 
     Returns
@@ -195,7 +222,7 @@ def calculate_heat_transfer_one_component(
     Bubbly: internal gas HTC and continuous-liquid Ranz-Marshall HTC.
     Droplet: continuous-gas Ranz-Marshall HTC and internal liquid HTC.
     The transition blends these laws at the current diameter and slip.
-    Jakob/Liao alternatives change the liquid side only.
+    Jakob/Liao/sum alternatives change the liquid side only.
     """
     if (
         liquid_bubbly not in LIQUID_HTC_BUBBLY
@@ -207,6 +234,7 @@ def calculate_heat_transfer_one_component(
         )
     u_rel_abs = jnp.abs(u1 - u2)
     htc2_jakob = state2["k"] * jakob_nusselt(ja) / d
+    htc2_growth = state2["k"] * jakob_growth_nusselt(ja) / d
     u_pe = jnp.sqrt(u_rel_abs**2 + slip_u0**2) if slip_u0 > 0.0 else u_rel_abs
     pe = u_pe * d * state2["rho"] * state2["cp"] / state2["k"]
     htc2_liao = state2["k"] * liao_nusselt(ja, pe) / d
@@ -219,13 +247,19 @@ def calculate_heat_transfer_one_component(
             ranz_marshall_htc_two_fluid(state2, u_rel_abs, d, slip_u0),
             htc2_jakob,
             htc2_liao,
+            htc2_growth,
         )
         return htc1, htc2
 
     def droplet(_):
         # Liquid dispersed in vapor: vapor continuous, internal Nu on the liquid side
         htc1 = ranz_marshall_htc_two_fluid(state1, u_rel_abs, d, slip_u0)
-        htc2 = select_liquid_htc(liquid_droplet, state2["k"] * Nu2_int / d, htc2_jakob)
+        htc2 = select_liquid_htc(
+            liquid_droplet,
+            state2["k"] * Nu2_int / d,
+            htc2_jakob,
+            htc_growth=htc2_growth,
+        )
         return htc1, htc2
 
     def transition(_):
