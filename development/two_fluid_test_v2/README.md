@@ -150,3 +150,8 @@ helpers. Independent checks, saved-data reporting and browser QA are separate.
 The [HTML report](REPORT.html) is standalone and contains embedded data and
 libraries; [RESULTS.md](RESULTS.md) and exported PNG/PDF figures are generated
 from the same saved records.
+
+The arms are now available in `src/` as default-off `CompatibilityConfig`
+options: `smooth=True` (`sonic_only`), `k_free=True` (`inverse_old_sonic`) and
+both (`both`). The port and its checks are recorded in the
+[K-free port study](../two-fluid/README.md).
