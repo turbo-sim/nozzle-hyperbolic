@@ -213,6 +213,9 @@ def make_two_fluid_step(
     recon   : 'muscl_van_leer' | 'muscl_van_albada' (smooth C¹, no slope flicker
               on ghost-scale noise — use for ghost-limit cases) | 'muscl_minmod'
               | 'mc' | 'constant'
+              | 'muscl_van_leer_main' | 'muscl_van_albada_main' (the limiters of
+              nozzle-hyperbolic main ae8ed81: van Leer with a safe inactive branch,
+              van Albada sign-gated without eps; same table-bound face fallback)
     sources_fn : optional callable with signature
                    (u_h, eos_g, eos_l, cq, dlnA, sat_g, sat_l) → D_VE (6,)
                  or, when step() is given ai_scale, with the cell's ai_scale as an
@@ -1115,6 +1118,26 @@ def make_two_fluid_step(
         if recon == 'muscl_van_leer':
             lim = lambda a, b: jnp.where(
                 a * b > 0, 2.0 * a * b / (a + b + 1e-300), 0.0)
+        elif recon == 'muscl_van_leer_main':
+            # nozzle-hyperbolic main (ae8ed81) numerics/reconstruction.py
+            # _van_leer_jax_safe: the same van Leer slope, with a safe denominator on
+            # the inactive branch (a*b <= 0) so AD never sees an overflowing quotient.
+            def lim(a, b):
+                active = a * b > 0.0
+                den = jnp.where(active, a + b + 1e-300, jnp.ones_like(a + b))
+                return jnp.where(active, 2.0 * a * b / den, 0.0)
+        elif recon == 'muscl_van_albada_main':
+            # nozzle-hyperbolic main (ae8ed81) numerics/reconstruction.py van_albada:
+            # sigma = ab(a+b)/(a^2+b^2) for strictly same-sign a, b, else 0; no eps.
+            # Differences normalised by max(|a|,|b|) before squaring (no under/overflow).
+            def lim(a, b):
+                active = ((a > 0) & (b > 0)) | ((a < 0) & (b < 0))
+                scale = jnp.maximum(jnp.abs(a), jnp.abs(b))
+                safe = jnp.where(active, scale, 1.0)
+                an = jnp.where(active, a, 0.0) / safe
+                bn = jnp.where(active, b, 0.0) / safe
+                den = jnp.where(active, an * an + bn * bn, 1.0)
+                return safe * an * bn * (an + bn) / den
         elif recon == 'muscl_minmod':
             lim = lambda a, b: jnp.where(
                 a * b > 0, jnp.sign(a) * jnp.minimum(jnp.abs(a), jnp.abs(b)), 0.0)
