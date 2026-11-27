@@ -67,7 +67,7 @@ def calculate_drag_force_one_component(
     alpha1, alpha2, rho1, rho2, mu1, mu2, u1, u2, d,
     alpha_b=0.3, alpha_d=0.7, blend="linear",
     drag_bubbly="schiller_naumann", drag_droplet="schiller_naumann",
-    drag_scale_bubbly=1.0, drag_scale_droplet=1.0,
+    drag_scale_bubbly=1.0, drag_scale_droplet=1.0, slip_u0=0.0,
 ):
     """
     Regime-dependent drag force per unit volume for the one-component case.
@@ -98,11 +98,13 @@ def calculate_drag_force_one_component(
     drag_bubbly, drag_droplet : drag coefficient law of each regime (DRAG_LAWS)
     drag_scale_bubbly, drag_scale_droplet : constant factor on C_d of each regime (default 1;
                      ad hoc, e.g. a weaker drag for a synthetic truth)
+    slip_u0        : [m/s] > 0: smooth effective slip sqrt(du^2 + u0^2) in Re and in the |du| of the force
+                     (F = 3/4 C_d(Re_eff) alpha rho_c u_eff du / d); 0 (default): |du|, the original law
     """
     if drag_bubbly not in DRAG_LAWS or drag_droplet not in DRAG_LAWS:
         raise ValueError(f"drag laws {DRAG_LAWS}; got {drag_bubbly!r}, {drag_droplet!r}")
     u_rel = u1 - u2
-    u_rel_abs = jnp.abs(u_rel)
+    u_rel_abs = jnp.sqrt(u_rel**2 + slip_u0**2) if slip_u0 > 0.0 else jnp.abs(u_rel)
 
     def _Cd(law, rho_c, mu_c, mu_d, alpha_disp, scale):
         if law == "ishii_zuber":
@@ -143,7 +145,15 @@ def calculate_drag_force_one_component(
     )
 
 
-LIQUID_HTC_BUBBLY = ("ranz_marshall", "jakob", "max", "liao", "sum")
+LIQUID_HTC_BUBBLY = ("ranz_marshall", "jakob", "max", "liao", "sum", "aleksandrov", "wolfert", "labuntzov",
+                     "aleksandrov_labuntzov", "rm_labuntzov_smax", "rm_jakob_smax", "labuntzov_rm")
+# conduction + convection correlations of the flashing literature, as reviewed by Liao & Lucas (2018),
+# Fluids 3, 38 (Eqs. 22, 25, 26): see literature_nusselt
+LIQUID_HTC_LITERATURE = ("aleksandrov", "wolfert", "labuntzov", "aleksandrov_labuntzov")
+# Ranz-Marshall combined with a bubble-growth term, heat added where Ranz-Marshall falls (zero slip):
+# see rm_growth_nusselt
+LIQUID_HTC_RM_GROWTH = ("rm_labuntzov_smax", "rm_jakob_smax", "labuntzov_rm")
+SMAX_N = 4.0       # exponent of the smooth maximum of rm_labuntzov_smax / rm_jakob_smax
 LIQUID_HTC_DROPLET = ("internal", "jakob", "max", "sum")
 
 
@@ -178,11 +188,78 @@ def liao_nusselt(ja, pe):
     return jnp.sqrt(jnp.maximum(12.0 / jnp.pi**2 * ja**2 + pe / (3.0 * jnp.pi), 1e-12))
 
 
-def select_liquid_htc(option, htc_default, htc_jakob, htc_liao=None, htc_growth=None):
+def literature_nusselt(option, ja, pe):
+    """
+    Liquid-side Nusselt number of a growing, translating bubble in superheated liquid, as given in the
+    review of Liao & Lucas (2018), Fluids 3, 38 (Ja = rho_l cp_l (T_l - T_sat)/(rho_g h_fg), Pe = |du| d / D_l
+    = Re Pr):
+      'aleksandrov' (Eq. 25; Aleksandrov et al., modified by Saha et al. 1984 for flashing nozzle flows):
+            Nu = sqrt((12/pi)^2 Ja^2 + (4/pi) Pe) = sqrt(Nu_PZ^2 + Nu_pot^2)
+      'wolfert'     (Eq. 26; Wolfert 1976, blowdown of high-pressure pipes):
+            Nu = (12/pi) Ja + (2/sqrt(pi)) Pe^1/2 = Nu_PZ + Nu_pot
+      'labuntzov'   (Eq. 22; Labuntzov et al. 1964, widely used for flashing):
+            Nu = 2 + (6 Ja/pi)^1/3 + (12/pi) Ja       (slip-independent)
+      'aleksandrov_labuntzov' (Eq. 25 with the Labuntzov conduction term, Eq. 22, in place of Plesset-Zwick):
+            Nu = sqrt(Nu_Lab^2 + (4/pi) Pe),  Nu_Lab = 2 + (6 Ja/pi)^1/3 + (12/pi) Ja
+            the Churchill-Usagi blend with n = 2 of Aleksandrov / Saha; Nu = 2 at Ja = 0 and zero slip
+            without a floor switch
+    with Nu_PZ = (12/pi) Ja (Plesset & Zwick, thermal-diffusion growth) and Nu_pot = (2/sqrt(pi)) Pe^1/2
+    (potential flow, Ruckenstein). Here Ja is taken as max(Ja, 0) (no growth term in subcooled liquid) and
+    'aleksandrov' / 'wolfert' are floored at the conduction limit Nu = 2 (not in the paper: it only acts
+    where the liquid is not superheated and the slip is ~0, e.g. at the flashing onset). The roots are
+    evaluated on arguments floored at 1e-12 so that their gradients stay finite at Ja = 0 / Pe = 0.
+    'liao' (liao_nusselt) is Eq. 25 with both terms 12x too small; kept unchanged for older runs.
+    """
+    jp = jnp.maximum(ja, 0.0)
+    if option == "aleksandrov":
+        return jnp.maximum(2.0, jnp.sqrt(jnp.maximum((12.0 / jnp.pi) ** 2 * jp**2 + 4.0 / jnp.pi * pe, 1e-12)))
+    if option == "wolfert":
+        return jnp.maximum(2.0, 12.0 / jnp.pi * jp + 2.0 / jnp.sqrt(jnp.pi) * jnp.sqrt(jnp.maximum(pe, 1e-12)))
+    if option == "labuntzov":
+        return 2.0 + jnp.maximum(6.0 * jp / jnp.pi, 1e-12) ** (1.0 / 3.0) + 12.0 / jnp.pi * jp
+    if option == "aleksandrov_labuntzov":
+        nu_lab = 2.0 + jnp.maximum(6.0 * jp / jnp.pi, 1e-12) ** (1.0 / 3.0) + 12.0 / jnp.pi * jp
+        return jnp.sqrt(nu_lab**2 + 4.0 / jnp.pi * jnp.maximum(pe, 0.0))
+    raise ValueError(f"literature_nusselt: option {option!r} not in {LIQUID_HTC_LITERATURE}")
+
+
+def rm_growth_nusselt(option, nu_rm, ja):
+    """
+    Ranz-Marshall Nusselt number nu_rm (= 2 + Nu_RMc, Nu_RMc = 0.6 Re^1/2 Pr^1/3, with any Re smoothing of
+    ranz_marshall_htc_two_fluid) combined with a bubble-growth term, so that heat is added where Ranz-Marshall
+    falls to its conduction limit 2 (zero slip) while the liquid is superheated:
+      'rm_labuntzov_smax': Nu = (nu_rm^n + Nu_Lab^n)^(1/n), n = SMAX_N = 4, Nu_Lab = 2 + (6 Ja/pi)^1/3 + (12/pi) Ja
+                           smooth maximum: Ranz-Marshall where it dominates, Labuntzov where it falls (no switch)
+      'rm_jakob_smax':     the same with Nu_Jak = max(2, (12/pi) Ja) (jakob_nusselt) in place of Nu_Lab
+                           (the smooth form of 'max')
+      'labuntzov_rm':      Nu = sqrt(Nu_Lab^2 + Nu_RMc^2), Nu_RMc = nu_rm - 2: Labuntzov + the Ranz-Marshall
+                           (rigid sphere) convection, Churchill-Usagi n = 2 (aleksandrov_labuntzov with the
+                           Ranz-Marshall convection term in place of the potential-flow one)
+    Ja is taken as max(Ja, 0) in Nu_Lab (as literature_nusselt). At zero slip and Ja = 0 the smooth maxima give
+    2^(1 + 1/n) = 2.38 (conduction counted in both terms), 'labuntzov_rm' gives 2.
+    """
+    if option == "rm_labuntzov_smax":
+        return (nu_rm**SMAX_N + literature_nusselt("labuntzov", ja, 0.0)**SMAX_N) ** (1.0 / SMAX_N)
+    if option == "rm_jakob_smax":
+        return (nu_rm**SMAX_N + jakob_nusselt(ja)**SMAX_N) ** (1.0 / SMAX_N)
+    if option == "labuntzov_rm":
+        return jnp.sqrt(literature_nusselt("labuntzov", ja, 0.0)**2 + jnp.maximum(nu_rm - 2.0, 0.0)**2)
+    raise ValueError(f"rm_growth_nusselt: option {option!r} not in {LIQUID_HTC_RM_GROWTH}")
+
+
+def select_liquid_htc(option, htc_default, htc_jakob, htc_liao=None, htc_growth=None, htc_lit=None,
+                      k_over_d=None, ja=None):
     """
     option: the regime's own closure ('ranz_marshall' / 'internal') | 'jakob' | 'max' | 'liao' |
-    'sum' (the regime's own closure + the Jakob growth term htc_growth, jakob_growth_nusselt).
+    'sum' (the regime's own closure + the Jakob growth term htc_growth, jakob_growth_nusselt) |
+    'aleksandrov' / 'wolfert' / 'labuntzov' (htc_lit, from literature_nusselt) |
+    'rm_labuntzov_smax' / 'rm_jakob_smax' / 'labuntzov_rm' (rm_growth_nusselt of the Nusselt number of
+    htc_default; these need k_over_d = k_l / d and the Jakob number ja).
     """
+    if option in LIQUID_HTC_RM_GROWTH:
+        return k_over_d * rm_growth_nusselt(option, htc_default / k_over_d, ja)
+    if option in LIQUID_HTC_LITERATURE:
+        return htc_lit
     if option == "jakob":
         return htc_jakob
     if option == "max":
@@ -199,6 +276,7 @@ def calculate_heat_transfer_one_component(
     Nu1_int=120.0, Nu2_int=2.0 * jnp.pi**2 / 3.0,
     alpha_b=0.3, alpha_d=0.7, blend="linear", slip_u0=0.0,
     ja=0.0, liquid_bubbly="ranz_marshall", liquid_droplet="internal",
+    rm_smoothing=None, rm_smoothing_re=100.0, u_turb2=None,
 ):
     """
     Regime-dependent interfacial heat transfer coefficients for the
@@ -238,11 +316,19 @@ def calculate_heat_transfer_one_component(
     liquid_bubbly  : liquid-side HTC of the bubbly regime: 'ranz_marshall' (default) |
                      'jakob' (jakob_nusselt) | 'max' (larger of the two) |
                      'liao' (liao_nusselt, Jakob + Peclet; Pe slip as in Ranz-Marshall) |
-                     'sum' (Ranz-Marshall + (12/pi) max(Ja, 0), jakob_growth_nusselt)
+                     'sum' (Ranz-Marshall + (12/pi) max(Ja, 0), jakob_growth_nusselt) |
+                     'aleksandrov' / 'wolfert' / 'labuntzov' (literature_nusselt; Pe slip as in Ranz-Marshall) |
+                     'rm_labuntzov_smax' / 'rm_jakob_smax' / 'labuntzov_rm' (rm_growth_nusselt)
     liquid_droplet : liquid-side HTC of the droplet regime: 'internal' (Nu2_int, default) |
                      'jakob' | 'max' | 'sum' (Nu2_int + (12/pi) max(Ja, 0)).
                      The vapor side keeps Ranz-Marshall in the droplet
                      regime and Nu1_int in the bubbly regime
+    rm_smoothing, rm_smoothing_re : smoothing of Re^1/2 in every Ranz-Marshall use (liquid side
+                     of the bubbly regime, incl. 'max' / 'sum'; vapor side of the droplet regime),
+                     see ranz_marshall_htc_two_fluid. None (default): original
+    u_turb2        : None (default) or the square of a turbulent velocity scale [m^2/s^2] (traced value
+                     allowed), added in quadrature to the slip in every Ranz-Marshall use and in the
+                     Peclet number of the literature options (ranz_marshall_htc_two_fluid). None: unchanged
 
     Returns
     -------
@@ -254,20 +340,27 @@ def calculate_heat_transfer_one_component(
     u_rel_abs = jnp.abs(u1 - u2)
     htc2_jakob = state2["k"] * jakob_nusselt(ja) / d
     htc2_growth = state2["k"] * jakob_growth_nusselt(ja) / d
-    u_pe = jnp.sqrt(u_rel_abs**2 + slip_u0**2) if slip_u0 > 0.0 else u_rel_abs
+    if u_turb2 is not None:
+        u_pe = jnp.sqrt(u_rel_abs**2 + (slip_u0**2 if slip_u0 > 0.0 else 0.0) + u_turb2)
+    else:
+        u_pe = jnp.sqrt(u_rel_abs**2 + slip_u0**2) if slip_u0 > 0.0 else u_rel_abs
     pe = u_pe * d * state2["rho"] * state2["cp"] / state2["k"]
     htc2_liao = state2["k"] * liao_nusselt(ja, pe) / d
+    htc2_lit = (state2["k"] * literature_nusselt(liquid_bubbly, ja, pe) / d
+                if liquid_bubbly in LIQUID_HTC_LITERATURE else None)
+
+    rm_kw = dict(rm_smoothing=rm_smoothing, rm_smoothing_re=rm_smoothing_re, u_turb2=u_turb2)
 
     def bubbly(_):
         # Vapor dispersed in liquid: internal Nu on the vapor side, liquid continuous
         htc1 = state1["k"] * Nu1_int / d
-        htc2 = select_liquid_htc(liquid_bubbly, ranz_marshall_htc_two_fluid(state2, u_rel_abs, d, slip_u0),
-                                 htc2_jakob, htc2_liao, htc2_growth)
+        htc2 = select_liquid_htc(liquid_bubbly, ranz_marshall_htc_two_fluid(state2, u_rel_abs, d, slip_u0, **rm_kw),
+                                 htc2_jakob, htc2_liao, htc2_growth, htc2_lit, k_over_d=state2["k"] / d, ja=ja)
         return htc1, htc2
 
     def droplet(_):
         # Liquid dispersed in vapor: vapor continuous, internal Nu on the liquid side
-        htc1 = ranz_marshall_htc_two_fluid(state1, u_rel_abs, d, slip_u0)
+        htc1 = ranz_marshall_htc_two_fluid(state1, u_rel_abs, d, slip_u0, **rm_kw)
         htc2 = select_liquid_htc(liquid_droplet, state2["k"] * Nu2_int / d, htc2_jakob, htc_growth=htc2_growth)
         return htc1, htc2
 
@@ -452,11 +545,17 @@ def interfacial_area_poly(alpha,
     d = jnp.maximum(6.0 * alpha_disp / ai, d_min)
     return ai, d
 
+RM_SMOOTHING = (None, "eps", "re_eff")
+
+
 def ranz_marshall_htc_two_fluid(
         state_continuous,
         relative_velocity,
         d_dispersed,
         slip_u0=0.0,
+        rm_smoothing=None,
+        rm_smoothing_re=100.0,
+        u_turb2=None,
 ):
     """
     Continuous-phase HTC for dispersed particles (Ranz-Marshall 1952).
@@ -484,21 +583,55 @@ def ranz_marshall_htc_two_fluid(
         [m/s] > 0: Re from the smooth effective slip sqrt(du^2 + slip_u0^2) instead
         of |du|, so Nu has no cusp (infinite slope) where the slip changes sign.
         0 (default): |du|, the original closure.
+    rm_smoothing : None | 'eps' | 're_eff'
+        Smoothing of the Re^1/2 term in Reynolds-number space (Re^2 is computed from the
+        squared slip, so both forms are smooth at zero slip), with the scale rm_smoothing_re:
+        None (default): Nu = 2 + 0.6 Re^1/2 Pr^1/3, the original closure.
+        'eps':    Nu = 2 + 0.6 Pr^1/3 Re^2 / (Re^2 + eps^2)^(3/4), eps = rm_smoothing_re:
+                  Nu -> 2 with zero slope at zero slip (Re^2 / eps^1.5); the convective term is
+                  0.74 % below Ranz-Marshall at Re = 10 eps.
+        're_eff': Nu = 2 + 0.6 Pr^1/3 (Re^2 + Re0^2)^(1/4), Re0 = rm_smoothing_re: the smooth
+                  effective slip of slip_u0 applied to Re instead of the velocity (Nu at zero
+                  slip 2 + 0.6 Pr^1/3 Re0^1/2).
+    rm_smoothing_re : float
+        Reynolds-number scale (eps or Re0) of rm_smoothing.
+    u_turb2 : None (default) or [m^2/s^2] (traced value allowed)
+        Square of a turbulent velocity scale added in quadrature to the slip in Re:
+        u_eff = sqrt(du^2 + slip_u0^2 + u_turb2) (turbulent fluctuations give the particle a relative
+        velocity even at zero mean slip). None: not used, the closure above unchanged.
     """
     # --- Continuous-phase properties ---
     rho_c = state_continuous["rho"]
     mu_c  = state_continuous["mu"]
     k_c   = state_continuous["k"]
     cp_c  = state_continuous["cp"]
+    Pr = cp_c * mu_c / k_c
+
+    if rm_smoothing not in RM_SMOOTHING:
+        raise ValueError(f"rm_smoothing in {RM_SMOOTHING}; got {rm_smoothing!r}")
+    if rm_smoothing is not None:
+        # Re^2 from the squared slip (no |du| to differentiate at zero slip)
+        u2 = relative_velocity**2 + (slip_u0**2 if slip_u0 > 0.0 else 0.0)
+        if u_turb2 is not None:
+            u2 = u2 + u_turb2
+        re2 = (rho_c * d_dispersed / mu_c)**2 * u2
+        s2 = float(rm_smoothing_re)**2
+        if rm_smoothing == "eps":
+            conv = re2 / (re2 + s2)**0.75
+        else:   # 're_eff'
+            conv = (re2 + s2)**0.25
+        Nu = 2.0 + 0.6 * conv * Pr**(1.0 / 3.0)
+        return k_c * Nu / d_dispersed
 
     # --- Re and Pr use continuous-phase properties ---
-    if slip_u0 > 0.0:
+    if u_turb2 is not None:     # turbulent velocity scale in quadrature with the slip
+        u_rel = jnp.sqrt(relative_velocity**2 + (slip_u0**2 if slip_u0 > 0.0 else 0.0) + u_turb2)
+    elif slip_u0 > 0.0:
         u_rel = jnp.sqrt(relative_velocity**2 + slip_u0**2)
     else:
         u_rel = jnp.abs(relative_velocity)
     Re = rho_c * u_rel * d_dispersed / mu_c
     Re_safe = jnp.maximum(Re, 1e-12)   # avoid 0**0.5 → ∞ gradient under jacfwd
-    Pr = cp_c * mu_c / k_c
 
     Nu = 2.0 + 0.6 * Re_safe**0.5 * Pr**(1.0 / 3.0)
 

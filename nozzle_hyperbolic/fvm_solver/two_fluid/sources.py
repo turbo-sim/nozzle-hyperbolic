@@ -35,6 +35,8 @@ from source_two_fluid import (
     jakob_growth_nusselt,
     jakob_nusselt,
     liao_nusselt,
+    literature_nusselt,
+    LIQUID_HTC_LITERATURE,
     ranz_marshall_htc_two_fluid,
     select_liquid_htc,
 )
@@ -172,11 +174,22 @@ def two_fluid_closure(
                            # without moving ṁ (THROAT_BUMP_HISTORY.md)
     smooth_slip_u0=2.0,    # [m/s] slip scale of the smooth effective slip (2: smallest
                            # tested that removes the case-4 throat bump, THROAT_BUMP_HISTORY.md)
-    nu_g_int=None,         # internal Nusselt number of the vapour (bubbles, htc_g = k_g Nu / d);
+    smooth_slip_drag=False,  # True → the drag law uses the same smooth effective slip
+                           # sqrt(du² + smooth_slip_u0²) (Re and |du| of the force); False → |du|
+    rm_smoothing=None,     # smoothing of Re^1/2 in every Ranz-Marshall use, in Re space (Re² from the
+                           # squared slip): None (original) | 'eps': 2 + 0.6 Pr^1/3 Re²/(Re²+eps²)^3/4 |
+                           # 're_eff': 2 + 0.6 Pr^1/3 (Re² + Re0²)^1/4 (source_two_fluid.ranz_marshall_htc_two_fluid)
+    rm_smoothing_re=100.0, # Reynolds-number scale of rm_smoothing (eps or Re0)
+    turb_intensity=None,   # None (off) or I: turbulent velocity u_t = I |u_m| (u_m mass-weighted mixture
+                           # velocity) added in quadrature to the slip, sqrt(du² + u_t²), in every
+                           # Ranz-Marshall use and the Peclet number of the literature liquid HTCs; drag unchanged
+    nu_g_int=None,        # internal Nusselt number of the vapour (bubbles, htc_g = k_g Nu / d);
                            # None → 120 with mass transfer, 12 without (the earlier constants)
     nu_l_int=None,         # internal Nusselt number of the liquid (droplets, htc_l = k_l Nu / d, regime_htc
                            # only); None → 12 with mass transfer, 2 pi^2/3 without (the earlier constants)
-    htc_liquid_bubbly="ranz_marshall",  # liquid-side HTC, bubbly regime: ranz_marshall | jakob | max | liao | sum
+    htc_liquid_bubbly="ranz_marshall",  # liquid-side HTC, bubbly regime: ranz_marshall | jakob | max | liao | sum |
+                                        # aleksandrov | wolfert | labuntzov | aleksandrov_labuntzov |
+                                        # rm_labuntzov_smax | rm_jakob_smax | labuntzov_rm (LIQUID_HTC_BUBBLY)
     htc_liquid_droplet="internal",      # liquid-side HTC, droplet regime: internal | jakob | max | sum
     drag_bubbly="schiller_naumann",     # drag coefficient, bubbly regime: schiller_naumann | ishii_zuber
     drag_droplet="schiller_naumann",    # drag coefficient, droplet regime: schiller_naumann | ishii_zuber
@@ -242,7 +255,10 @@ def two_fluid_closure(
                  (source_two_fluid.liao_nusselt); its Pe uses the slip as Ranz-Marshall does
                  (smooth_slip).  'sum' = the regime's own closure + (12/π) max(Ja, 0), Jakob's
                  growth term without its conduction floor (source_two_fluid.jakob_growth_nusselt;
-                 the regime's closure already holds conduction).  Defaults = the closure used so far.  Jakob needs mass_transfer=True; without regime_htc
+                 the regime's closure already holds conduction).  'aleksandrov' / 'wolfert' / 'labuntzov'
+                 (bubbly only): conduction + convection correlations of the flashing literature
+                 (Liao & Lucas 2018, Eqs. 25, 26, 22; source_two_fluid.literature_nusselt); 'aleksandrov'
+                 is the corrected 'liao'.  Defaults = the closure used so far.  Jakob needs mass_transfer=True; without regime_htc
                  only the bubbly option applies.
     drag_bubbly, drag_droplet : drag coefficient of each regime.  'ishii_zuber' = viscous
                  regime of Ishii & Zuber (1979), C_d = 24/Re_m (1 + 0.1 Re_m^0.75) with the
@@ -261,6 +277,7 @@ def two_fluid_closure(
     p, u_g, u_l, ag, h_g, h_l = U_h
     al = 1.0 - ag
     slip_u0 = float(smooth_slip_u0) if smooth_slip else 0.0
+    drag_u0 = float(smooth_slip_u0) if smooth_slip_drag else 0.0
     if htc_liquid_bubbly not in LIQUID_HTC_BUBBLY or htc_liquid_droplet not in LIQUID_HTC_DROPLET:
         raise ValueError(f"htc_liquid_bubbly in {LIQUID_HTC_BUBBLY}, htc_liquid_droplet in "
                          f"{LIQUID_HTC_DROPLET}; got {htc_liquid_bubbly!r}, {htc_liquid_droplet!r}")
@@ -271,6 +288,15 @@ def two_fluid_closure(
 
     rg = eos_g.rho;  T_g = eos_g.T
     rl = eos_l.rho;  T_l = eos_l.T
+
+    # --- Turbulent velocity scale of the HTCs (turb_intensity; None = not used) -----------------
+    # u_t = I |u_m| with the mass-weighted mixture velocity u_m, added in quadrature to the slip in every
+    # Ranz-Marshall use (and the Peclet number of the literature liquid HTCs); the drag is unchanged.
+    if turb_intensity is not None:
+        u_m = (ag * rg * u_g + al * rl * u_l) / (ag * rg + al * rl)
+        u_turb2 = (float(turb_intensity) * u_m) ** 2
+    else:
+        u_turb2 = None
 
     # --- Two-phase gate (SYMMETRIC, enthalpy AND temperature) ----------------
     # Mass transfer activates only when a phase is away from saturation in the
@@ -353,6 +379,7 @@ def two_fluid_closure(
             alpha_b=alpha_b, alpha_d=alpha_d, blend=regime_blend,
             drag_bubbly=drag_bubbly, drag_droplet=drag_droplet,
             drag_scale_bubbly=drag_scale_bubbly, drag_scale_droplet=drag_scale_droplet,
+            slip_u0=drag_u0,
         )
 
         # ── Heat transfer coefficients (Ranz-Marshall, continuous phase) ─────────
@@ -374,6 +401,7 @@ def two_fluid_closure(
                 u_g, u_l, d, Nu1_int=Nu_g, Nu2_int=Nu_l,
                 alpha_b=alpha_b, alpha_d=alpha_d, blend=regime_blend, slip_u0=slip_u0,
                 ja=ja_l, liquid_bubbly=htc_liquid_bubbly, liquid_droplet=htc_liquid_droplet,
+                rm_smoothing=rm_smoothing, rm_smoothing_re=rm_smoothing_re, u_turb2=u_turb2,
             )
         else:
             # NICFD closure: bubbly-regime HTC at every α.
@@ -394,13 +422,19 @@ def two_fluid_closure(
                     "k":   stl_ex["k"][0],               # FluidState alias → conductivity
                     "cp":  stl_ex["cp"][0],              # FluidState alias → isobaric_heat_capacity
                 },
-                du_abs, d, slip_u0,
+                du_abs, d, slip_u0, rm_smoothing=rm_smoothing, rm_smoothing_re=rm_smoothing_re, u_turb2=u_turb2,
             )
-            u_pe = jnp.sqrt(du_abs**2 + slip_u0**2) if slip_u0 > 0.0 else du_abs
+            if u_turb2 is not None:
+                u_pe = jnp.sqrt(du_abs**2 + (slip_u0**2 if slip_u0 > 0.0 else 0.0) + u_turb2)
+            else:
+                u_pe = jnp.sqrt(du_abs**2 + slip_u0**2) if slip_u0 > 0.0 else du_abs
             pe_l = u_pe * d * stl_ex["rho"][0] * stl_ex["cp"][0] / stl_ex["k"][0]
             htc_l = select_liquid_htc(htc_liquid_bubbly, htc_l, stl_ex["k"][0] * jakob_nusselt(ja_l) / d,
                                       stl_ex["k"][0] * liao_nusselt(ja_l, pe_l) / d,
-                                      stl_ex["k"][0] * jakob_growth_nusselt(ja_l) / d)
+                                      stl_ex["k"][0] * jakob_growth_nusselt(ja_l) / d,
+                                      (stl_ex["k"][0] * literature_nusselt(htc_liquid_bubbly, ja_l, pe_l) / d
+                                       if htc_liquid_bubbly in LIQUID_HTC_LITERATURE else None),
+                                      k_over_d=stl_ex["k"][0] / d, ja=ja_l)
 
         # ── Correction fields (field inversion; 1 = none) ──────────────────────
         Fv_g, htc_g, htc_l = beta_cd * Fv_g, beta_htc_g * htc_g, beta_htc_l * htc_l
@@ -479,6 +513,7 @@ def two_fluid_closure(
             alpha_b=alpha_b, alpha_d=alpha_d, blend=regime_blend,
             drag_bubbly=drag_bubbly, drag_droplet=drag_droplet,
             drag_scale_bubbly=drag_scale_bubbly, drag_scale_droplet=drag_scale_droplet,
+            slip_u0=drag_u0,
         )
 
         # ── Heat transfer coefficients (Ranz-Marshall, continuous phase) ─────────
@@ -498,6 +533,7 @@ def two_fluid_closure(
                 u_g, u_l, d,
                 Nu1_int=Nu_g, alpha_b=alpha_b, alpha_d=alpha_d, blend=regime_blend,
                 slip_u0=slip_u0, **({} if nu_l_int is None else {"Nu2_int": float(nu_l_int)}),
+                rm_smoothing=rm_smoothing, rm_smoothing_re=rm_smoothing_re, u_turb2=u_turb2,
             )
         else:
             # NICFD closure: bubbly-regime HTC at every α.
@@ -518,7 +554,7 @@ def two_fluid_closure(
                     "k":   stl_ex["k"][0],               # FluidState alias → conductivity
                     "cp":  stl_ex["cp"][0],              # FluidState alias → isobaric_heat_capacity
                 },
-                du_abs, d, slip_u0,
+                du_abs, d, slip_u0, rm_smoothing=rm_smoothing, rm_smoothing_re=rm_smoothing_re, u_turb2=u_turb2,
             )
 
         # ── Correction fields (field inversion; 1 = none) ──────────────────────
